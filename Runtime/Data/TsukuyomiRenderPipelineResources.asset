@@ -30,7 +30,7 @@ MonoBehaviour:
   volumetricFogBlurComputeShader: {fileID: 7200000, guid: 438193fc3e24c1f4da7e99525c007eee, type: 3}
   volumetricFogUpsampleComputeShader: {fileID: 7200000, guid: 7f09899e19697cf4fb572d64e783bf8d, type: 3}
   fsr3Settings:
-    Enabled: 0
+    Enabled: 1
     QualityMode: 2
     PerformSharpenPass: 1
     Sharpness: 0.8
@@ -48,8 +48,7 @@ MonoBehaviour:
     sharpenPass: {fileID: 7200000, guid: 7aaf5cfff022de2499e9b0412f947f6c, type: 3}
     autoGenReactivePass: {fileID: 7200000, guid: 5716b91fdaa4e9e439df6b96a796fe6e, type: 3}
     tcrAutoGenPass: {fileID: 7200000, guid: 75cdc6ef23f08ed498d4da511923fcea, type: 3}
-    debugViewPass: {fileID: 7200000, guid: cb24a71d54164c54eb5e86839acd48c5, type: 3}  defaultWhiteTexture: {fileID: 0}
+    debugViewPass: {fileID: 7200000, guid: cb24a71d54164c54eb5e86839acd48c5, type: 3}
+  defaultWhiteTexture: {fileID: 0}
   defaultBlackTexture: {fileID: 0}
   defaultNormalTexture: {fileID: 0}
-
-

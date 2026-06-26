@@ -1,4 +1,5 @@
-﻿using UnityEngine.Rendering.Universal;
+﻿using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering;
 
 using System.Collections.Generic;
@@ -41,6 +42,8 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiPcssRestoreShadowKeywordsPass _pcssRestorePass;
         private TsukuyomiVolumetricFogPass _volumeLightPass;
         private TsukuyomiFsr3Pass _fsr3Pass;
+        private readonly HashSet<ulong> _fsr3TaaConflictCameras = new();
+        private readonly HashSet<ulong> _fsr3CameraStackCameras = new();
 
         private void OnEnable()
         {
@@ -222,14 +225,30 @@ namespace Tsukuyomi.Rendering
 
         private void EnqueueFsr3Pass(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            if (TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources) &&
-                _fsr3Pass != null && _fsr3Pass.Configure(resources))
+            if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources) ||
+                _fsr3Pass == null || !_fsr3Pass.Configure(resources))
             {
-                _fsr3Pass.PrepareCameraJitter(ref renderingData);
-                _fsr3BridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_fsr3BridgePass);
+                return;
             }
+
+            if (!TsukuyomiFsr3Validation.TryValidateForEnqueue(
+                    ref renderingData,
+                    _fsr3TaaConflictCameras,
+                    _fsr3CameraStackCameras,
+                    out Camera camera,
+                    out ulong cameraId))
+            {
+                return;
+            }
+
+            Vector2 jitterOffset = TsukuyomiFsr3Jitter.TryApply(ref renderingData, resources.Fsr3Settings, camera, out Vector2 fsr3JitterOffset)
+                ? fsr3JitterOffset
+                : Vector2.zero;
+            _fsr3Pass.SetJitter(cameraId, jitterOffset, Time.frameCount);
+            _fsr3BridgePass.ConfigureInputFromTextureSlots();
+            renderer.EnqueuePass(_fsr3BridgePass);
         }
+
         private RenderPassEvent MapInjectionPointToEvent(InjectionPoint point)
         {
             return point switch
@@ -280,10 +299,16 @@ namespace Tsukuyomi.Rendering
             _fsr3Pass?.Dispose();
             _fsr3Pass = null;
             _fsr3BridgePass = null;
+            _fsr3TaaConflictCameras.Clear();
+            _fsr3CameraStackCameras.Clear();
             base.Dispose(disposing);
         }
     }
 }
+
+
+
+
 
 
 

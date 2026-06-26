@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Generic;
+using System.Reflection;
 using Tsukuyomi.Rendering.FSR3;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -20,29 +21,17 @@ namespace Tsukuyomi.Rendering
         [Read(BuiltinTexture.MotionVectorColor)]
         public TextureSlot motionVectors = TextureSlot.Read("MotionVectors", BuiltinTexture.MotionVectorColor);
 
-        private static readonly MethodInfo SetViewProjectionAndJitterMatrixMethod = typeof(CameraData).GetMethod("SetViewProjectionAndJitterMatrix", BindingFlags.Instance | BindingFlags.NonPublic);
-        private static readonly MethodInfo GetProjectionMatrixNoJitterMethod = typeof(CameraData).GetMethod("GetProjectionMatrixNoJitter", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly PropertyInfo ResetHistoryProperty = typeof(UniversalCameraData).GetProperty("resetHistory", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly int ScreenParamsId = Shader.PropertyToID("_ScreenParams");
 
         private readonly Fsr3Upscaler.DispatchDescription _dispatchDescription = new();
-        private Fsr3UpscalerContext _context;
-        private Vector2Int _contextDisplaySize;
-        private Vector2Int _contextMaxRenderSize;
-        private bool _contextAutoExposure;
-        private bool _contextHdr;
-        private Fsr3Upscaler.QualityMode _contextQualityMode;
+
+        // TODO: Move FSR3 persistent data into a Tsukuyomi camera history system if the pipeline grows more camera-history users.
+        private readonly Dictionary<ulong, CameraContext> _cameraContexts = new();
+
         private TsukuyomiFsr3Settings _settings;
         private TsukuyomiFsr3Shaders _shaders;
         private bool _missingResourcesLogged;
-        private Vector2 _preparedJitterOffset;
-        private int _preparedJitterFrame = -1;
-        private CameraData _jitteredCameraData;
-        private Camera _jitteredCamera;
-        private Matrix4x4 _originalViewMatrix;
-        private Matrix4x4 _originalProjectionMatrix;
-        private Matrix4x4 _originalCameraProjectionMatrix;
-        private Matrix4x4 _originalNonJitteredProjectionMatrix;
-        private bool _originalUseJitteredProjectionForTransparentRendering;
-        private bool _cameraJitterApplied;
 
         public override string Name => "FSR3 Upscaler";
 
@@ -73,91 +62,45 @@ namespace Tsukuyomi.Rendering
             return base.IsActive(frame) && _settings != null && _settings.Enabled && _shaders != null && _shaders.IsValid;
         }
 
-        public void PrepareCameraJitter(ref RenderingData renderingData)
+        public void SetJitter(ulong cameraId, Vector2 jitterOffset, int jitterFrame)
         {
-            RestoreCameraJitter();
-
-            if (_settings == null || !_settings.Enabled || _shaders == null || !_shaders.IsValid)
-                return;
-
-            if (renderingData.cameraData.isPreviewCamera || renderingData.cameraData.xr.enabled)
-                return;
-
-            Camera camera = renderingData.cameraData.camera;
-            if (camera == null)
-                return;
-
-            RenderTextureDescriptor cameraDescriptor = renderingData.cameraData.cameraTargetDescriptor;
-            int renderWidth = Mathf.Max(1, cameraDescriptor.width);
-            int renderHeight = Mathf.Max(1, cameraDescriptor.height);
-            int targetWidth = renderingData.cameraData.targetTexture != null ? renderingData.cameraData.targetTexture.width : camera.pixelWidth;
-            int displayWidth = Mathf.Max(renderWidth, targetWidth);
-
-            int jitterPhaseCount = Fsr3Upscaler.GetJitterPhaseCount(renderWidth, displayWidth);
-            Fsr3Upscaler.GetJitterOffset(out float jitterX, out float jitterY, Time.frameCount, jitterPhaseCount);
-            _preparedJitterOffset = new Vector2(jitterX, jitterY);
-            _preparedJitterFrame = Time.frameCount;
-
-            CameraData cameraData = renderingData.cameraData;
-            _jitteredCameraData = cameraData;
-            _jitteredCamera = camera;
-            _originalViewMatrix = cameraData.GetViewMatrix();
-            _originalProjectionMatrix = GetProjectionMatrixNoJitter(cameraData, camera.projectionMatrix);
-            _originalCameraProjectionMatrix = camera.projectionMatrix;
-            _originalNonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
-            _originalUseJitteredProjectionForTransparentRendering = camera.useJitteredProjectionMatrixForTransparentRendering;
-            _cameraJitterApplied = true;
-
-            float projectionJitterX = 2.0f * jitterX / renderWidth;
-            float projectionJitterY = 2.0f * jitterY / renderHeight;
-            Matrix4x4 jitterTranslationMatrix = Matrix4x4.Translate(new Vector3(projectionJitterX, projectionJitterY, 0.0f));
-            SetViewProjectionAndJitterMatrix(cameraData, _originalViewMatrix, _originalProjectionMatrix, jitterTranslationMatrix);
-
-            camera.nonJitteredProjectionMatrix = _originalProjectionMatrix;
-            camera.projectionMatrix = jitterTranslationMatrix * _originalProjectionMatrix;
-            camera.useJitteredProjectionMatrixForTransparentRendering = true;
+            CameraContext cameraContext = GetCameraContext(cameraId);
+            cameraContext.JitterOffset = jitterOffset;
+            cameraContext.JitterFrame = jitterFrame;
         }
 
         public void Dispose()
         {
-            RestoreCameraJitter();
-            DestroyContext();
+            DestroyAllContexts();
         }
 
         public override void Record(in UnsafePassContext context)
         {
             if (_settings == null || !_settings.Enabled || _shaders == null || !_shaders.IsValid)
-            {
-                RestoreCameraJitter();
                 return;
-            }
 
-            if (context.CameraData.isPreviewCamera || context.CameraData.xr.enabled)
-            {
-                RestoreCameraJitter();
+            if (!TsukuyomiFsr3Validation.IsSupportedCamera(context.CameraData))
                 return;
-            }
 
             TextureHandle cameraColor = context.GetTexture(color);
             TextureHandle cameraDepth = context.GetTexture(depth);
             TextureHandle motionVectorColor = context.GetTexture(motionVectors);
             if (!cameraColor.IsValid() || !cameraDepth.IsValid() || !motionVectorColor.IsValid())
-            {
-                RestoreCameraJitter();
                 return;
-            }
 
-            RenderTextureDescriptor cameraDescriptor = context.CameraData.cameraTargetDescriptor;
             Camera camera = context.CameraData.camera;
+            ulong cameraId = EntityId.ToULong(camera.GetEntityId());
+            RenderTextureDescriptor cameraDescriptor = context.CameraData.cameraTargetDescriptor;
             int renderWidth = Mathf.Max(1, cameraDescriptor.width);
             int renderHeight = Mathf.Max(1, cameraDescriptor.height);
-            int targetWidth = context.CameraData.targetTexture != null ? context.CameraData.targetTexture.width : camera != null ? camera.pixelWidth : renderWidth;
-            int targetHeight = context.CameraData.targetTexture != null ? context.CameraData.targetTexture.height : camera != null ? camera.pixelHeight : renderHeight;
+            int targetWidth = context.CameraData.targetTexture != null ? context.CameraData.targetTexture.width : camera.pixelWidth;
+            int targetHeight = context.CameraData.targetTexture != null ? context.CameraData.targetTexture.height : camera.pixelHeight;
             int displayWidth = Mathf.Max(renderWidth, targetWidth);
             int displayHeight = Mathf.Max(renderHeight, targetHeight);
             Vector2Int renderSize = new(renderWidth, renderHeight);
             Vector2Int displaySize = new(displayWidth, displayHeight);
-            Vector2 jitterOffset = _preparedJitterFrame == Time.frameCount ? _preparedJitterOffset : Vector2.zero;
+
+            Vector2 jitterOffset = GetJitter(cameraId);
 
             Fsr3Upscaler.GetRenderResolutionFromQualityMode(
                 out int qualityWidth,
@@ -178,21 +121,22 @@ namespace Tsukuyomi.Rendering
             TsukuyomiFsr3Settings settings = _settings;
             TsukuyomiFsr3Shaders shaders = _shaders;
             bool isHdr = GraphicsFormatUtility.IsHDRFormat(cameraDescriptor.graphicsFormat);
-            float fieldOfView = camera != null ? camera.fieldOfView : 60.0f;
-            float nearClip = camera != null ? camera.nearClipPlane : 0.1f;
-            float farClip = camera != null ? camera.farClipPlane : 1000.0f;
+            float fieldOfView = camera.fieldOfView;
+            float nearClip = camera.nearClipPlane;
+            float farClip = camera.farClipPlane;
             float deltaTime = Time.unscaledDeltaTime;
+            int frameCount = Time.frameCount;
 
-            EnsureContext(displaySize, maxRenderSize, isHdr, settings.EnableAutoExposure, settings.QualityMode, shaders);
-            Fsr3UpscalerContext fsrContext = _context;
+            CameraContext cameraContext = GetCameraContext(cameraId);
+            bool contextRecreated = EnsureContext(cameraContext, displaySize, maxRenderSize, isHdr, settings.EnableAutoExposure, settings.QualityMode, shaders);
+            bool resetAccumulation = contextRecreated || ShouldReset(cameraContext, context.CameraData, frameCount);
+            cameraContext.LastFrame = frameCount;
+            Fsr3UpscalerContext fsrContext = cameraContext.Context;
 
             context.SetRenderFunc((data, graphContext) =>
             {
                 if (fsrContext == null)
-                {
-                    RestoreCameraJitter();
                     return;
-                }
 
                 _dispatchDescription.Color = new ResourceView(cameraColor, RenderTextureSubElement.Color);
                 _dispatchDescription.Depth = new ResourceView(cameraDepth, RenderTextureSubElement.Depth);
@@ -209,7 +153,7 @@ namespace Tsukuyomi.Rendering
                 _dispatchDescription.Sharpness = settings.Sharpness;
                 _dispatchDescription.FrameTimeDelta = deltaTime;
                 _dispatchDescription.PreExposure = 1.0f;
-                _dispatchDescription.Reset = false;
+                _dispatchDescription.Reset = resetAccumulation;
                 _dispatchDescription.CameraNear = nearClip;
                 _dispatchDescription.CameraFar = farClip;
                 _dispatchDescription.CameraFovAngleVertical = fieldOfView * Mathf.Deg2Rad;
@@ -221,20 +165,40 @@ namespace Tsukuyomi.Rendering
                 if (SystemInfo.usesReversedZBuffer)
                     (_dispatchDescription.CameraNear, _dispatchDescription.CameraFar) = (_dispatchDescription.CameraFar, _dispatchDescription.CameraNear);
 
-                try
-                {
-                    fsrContext.Dispatch(_dispatchDescription, CommandBufferHelpers.GetNativeCommandBuffer(graphContext.cmd));
-                }
-                finally
-                {
-                    RestoreCameraJitter();
-                }
+                fsrContext.Dispatch(_dispatchDescription, CommandBufferHelpers.GetNativeCommandBuffer(graphContext.cmd));
+                graphContext.cmd.SetGlobalVector(
+                    ScreenParamsId,
+                    new Vector4(
+                        displaySize.x,
+                        displaySize.y,
+                        1.0f / displaySize.x,
+                        1.0f / displaySize.y));
             });
 
             PassRecorder.SwapActiveColor(context.Resources, output);
+            UpdateCameraResolution(context.CameraData, displaySize);
         }
 
-        private void EnsureContext(
+        private Vector2 GetJitter(ulong cameraId)
+        {
+            if (_cameraContexts.TryGetValue(cameraId, out CameraContext cameraContext) && cameraContext.JitterFrame == Time.frameCount)
+                return cameraContext.JitterOffset;
+
+            return Vector2.zero;
+        }
+
+        private CameraContext GetCameraContext(ulong cameraId)
+        {
+            if (_cameraContexts.TryGetValue(cameraId, out CameraContext cameraContext))
+                return cameraContext;
+
+            cameraContext = new CameraContext();
+            _cameraContexts.Add(cameraId, cameraContext);
+            return cameraContext;
+        }
+
+        private bool EnsureContext(
+            CameraContext cameraContext,
             Vector2Int displaySize,
             Vector2Int maxRenderSize,
             bool isHdr,
@@ -242,17 +206,17 @@ namespace Tsukuyomi.Rendering
             Fsr3Upscaler.QualityMode qualityMode,
             TsukuyomiFsr3Shaders shaders)
         {
-            if (_context != null &&
-                _contextDisplaySize == displaySize &&
-                _contextMaxRenderSize == maxRenderSize &&
-                _contextHdr == isHdr &&
-                _contextAutoExposure == autoExposure &&
-                _contextQualityMode == qualityMode)
+            if (cameraContext.Context != null &&
+                cameraContext.DisplaySize == displaySize &&
+                cameraContext.MaxRenderSize == maxRenderSize &&
+                cameraContext.Hdr == isHdr &&
+                cameraContext.AutoExposure == autoExposure &&
+                cameraContext.QualityMode == qualityMode)
             {
-                return;
+                return false;
             }
 
-            DestroyContext();
+            DestroyContext(cameraContext);
 
             Fsr3Upscaler.InitializationFlags flags = 0;
             if (isHdr)
@@ -260,59 +224,50 @@ namespace Tsukuyomi.Rendering
             if (autoExposure)
                 flags |= Fsr3Upscaler.InitializationFlags.EnableAutoExposure;
 
-            _context = Fsr3Upscaler.CreateContext(displaySize, maxRenderSize, shaders.ToFsr3Shaders(), flags);
-            _contextDisplaySize = displaySize;
-            _contextMaxRenderSize = maxRenderSize;
-            _contextHdr = isHdr;
-            _contextAutoExposure = autoExposure;
-            _contextQualityMode = qualityMode;
+            cameraContext.Context = Fsr3Upscaler.CreateContext(displaySize, maxRenderSize, shaders.ToFsr3Shaders(), flags);
+            cameraContext.DisplaySize = displaySize;
+            cameraContext.MaxRenderSize = maxRenderSize;
+            cameraContext.Hdr = isHdr;
+            cameraContext.AutoExposure = autoExposure;
+            cameraContext.QualityMode = qualityMode;
+            cameraContext.LastFrame = -1;
+            return true;
         }
 
-        private static Matrix4x4 GetProjectionMatrixNoJitter(CameraData cameraData, Matrix4x4 fallbackProjectionMatrix)
+        private static bool ShouldReset(CameraContext cameraContext, UniversalCameraData cameraData, int frameCount)
         {
-            if (GetProjectionMatrixNoJitterMethod == null)
-                return fallbackProjectionMatrix;
+            if (cameraContext.LastFrame < 0)
+                return true;
 
-            object boxedCameraData = cameraData;
-            return (Matrix4x4)GetProjectionMatrixNoJitterMethod.Invoke(boxedCameraData, new object[] { 0 });
+            if (cameraContext.LastFrame != frameCount - 1)
+                return true;
+
+            return IsHistoryResetRequested(cameraData);
         }
 
-        private static void SetViewProjectionAndJitterMatrix(CameraData cameraData, Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix, Matrix4x4 jitterMatrix)
+        private static bool IsHistoryResetRequested(UniversalCameraData cameraData)
         {
-            if (SetViewProjectionAndJitterMatrixMethod == null)
+            if (ResetHistoryProperty == null)
+                return false;
+
+            return (bool)ResetHistoryProperty.GetValue(cameraData);
+        }
+
+        private static void DestroyContext(CameraContext cameraContext)
+        {
+            if (cameraContext.Context == null)
                 return;
 
-            object boxedCameraData = cameraData;
-            SetViewProjectionAndJitterMatrixMethod.Invoke(boxedCameraData, new object[] { viewMatrix, projectionMatrix, jitterMatrix });
+            cameraContext.Context.Destroy();
+            cameraContext.Context = null;
         }
 
-        private void RestoreCameraJitter()
+        private void DestroyAllContexts()
         {
-            if (!_cameraJitterApplied)
-                return;
-            SetViewProjectionAndJitterMatrix(_jitteredCameraData, _originalViewMatrix, _originalProjectionMatrix, Matrix4x4.identity);
+            foreach (CameraContext cameraContext in _cameraContexts.Values)
+                DestroyContext(cameraContext);
 
-            if (_jitteredCamera != null)
-            {
-                _jitteredCamera.projectionMatrix = _originalCameraProjectionMatrix;
-                _jitteredCamera.nonJitteredProjectionMatrix = _originalNonJitteredProjectionMatrix;
-                _jitteredCamera.useJitteredProjectionMatrixForTransparentRendering = _originalUseJitteredProjectionForTransparentRendering;
-            }
-
-            _cameraJitterApplied = false;
-            _jitteredCameraData = default;
-            _jitteredCamera = null;
-            _preparedJitterOffset = Vector2.zero;
-            _preparedJitterFrame = -1;
-        }
-
-        private void DestroyContext()
-        {
-            if (_context == null)
-                return;
-
-            _context.Destroy();
-            _context = null;
+            _cameraContexts.Clear();
         }
 
         private static TextureDesc CreateOutputDesc(RenderTextureDescriptor cameraDescriptor, Vector2Int displaySize)
@@ -332,10 +287,27 @@ namespace Tsukuyomi.Rendering
                 filterMode = FilterMode.Bilinear
             };
         }
+
+        private static void UpdateCameraResolution(UniversalCameraData cameraData, Vector2Int displaySize)
+        {
+            // TODO: If FSR3 moves to URP IUpscaler, use URP's native upscaler resolution update path instead.
+            cameraData.cameraTargetDescriptor.width = displaySize.x;
+            cameraData.cameraTargetDescriptor.height = displaySize.y;
+        }
+
+        private sealed class CameraContext
+        {
+            public Fsr3UpscalerContext Context;
+            public Vector2Int DisplaySize;
+            public Vector2Int MaxRenderSize;
+            public bool AutoExposure;
+            public bool Hdr;
+            public Fsr3Upscaler.QualityMode QualityMode;
+            public Vector2 JitterOffset;
+            public int JitterFrame = -1;
+            public int LastFrame = -1;
+        }
     }
 }
-
-
-
 
 

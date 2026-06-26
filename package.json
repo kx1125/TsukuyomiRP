@@ -1,0 +1,11 @@
+{
+  "name": "tsukuyomi.render-pipelines.universal",
+  "displayName": "TsukuyomiRP",
+  "version": "0.1.0",
+  "unity": "6000.5",
+  "unityRelease": "0b7",
+  "description": "Custom RenderPipeline",
+  "author": {
+    "name": "Tsukuyomi"
+  }
+}

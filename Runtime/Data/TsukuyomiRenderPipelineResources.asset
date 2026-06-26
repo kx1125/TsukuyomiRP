@@ -1,0 +1,55 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4e3e7c0b3bdf45f2aa9d61ddfdc26801, type: 3}
+  m_Name: TsukuyomiRenderPipelineResources
+  m_EditorClassIdentifier: 
+  screenSpacePcssShadowsShader: {fileID: 4800000, guid: 1acb1e57c8dd4559b4910e5fcb8a37d5, type: 3}
+  screenSpacePcssShadowsMaterial: {fileID: 2100000, guid: 7c0e12d7d1b54893a9cab4f3236b00c5, type: 2}
+  screenSpaceShadowsShader: {fileID: 4800000, guid: 0f854b35a0cf61a429bd5dcfea30eddd, type: 3}
+  screenSpaceShadowsMaterial: {fileID: 0}
+  contactShadowsComputeShader: {fileID: 7200000, guid: de2f6c7050c37604d9f114c249b1150e, type: 3}
+  contactShadowDenoiserComputeShader: {fileID: 7200000, guid: 2a45a5b2492d6494b8c00f33b540af92, type: 3}
+  depthPyramidComputeShader: {fileID: 7200000, guid: 239e3a98a11852643a94d0307d99e96f, type: 3}
+  gtaoTraceComputeShader: {fileID: 7200000, guid: 2de05ff8e81300f409e2a581928dc28f, type: 3}
+  gtaoSpatialDenoiseComputeShader: {fileID: 7200000, guid: 3da0bf2562a102b41b5ad0b92ff60912, type: 3}
+  gtaoBlurAndUpsampleComputeShader: {fileID: 7200000, guid: c2b24b2455fb1b1449068881db13bf9c, type: 3}
+  volumetricFogShader: {fileID: 4800000, guid: 136e3fcb6a401f1418ca18a6c16e2af4, type: 3}
+  volumetricFogMaterial: {fileID: 2100000, guid: f5e7b774f9b94e14a8f7c3dc208e4bd8, type: 2}
+  downsampleDepthShader: {fileID: 4800000, guid: 79732377618306e4c9d240230536cbac, type: 3}
+  downsampleDepthMaterial: {fileID: 2100000, guid: 96c66f9e5e2043f9b3ff0435cdfbe3d0, type: 2}
+  volumetricFogRaymarchComputeShader: {fileID: 7200000, guid: 8e4b7a6d46cc5cd41924a54c8b59cbfa, type: 3}
+  volumetricFogBlurComputeShader: {fileID: 7200000, guid: 438193fc3e24c1f4da7e99525c007eee, type: 3}
+  volumetricFogUpsampleComputeShader: {fileID: 7200000, guid: 7f09899e19697cf4fb572d64e783bf8d, type: 3}
+  fsr3Settings:
+    Enabled: 0
+    QualityMode: 2
+    PerformSharpenPass: 1
+    Sharpness: 0.8
+    VelocityFactor: 1
+    EnableAutoExposure: 1
+    EnableDebugView: 0
+  fsr3Shaders:
+    prepareInputsPass: {fileID: 7200000, guid: 4f59e5b9179d74844ae06a30ae1e0629, type: 3}
+    lumaPyramidPass: {fileID: 7200000, guid: d253be05abcdc80428503d3e4cce3a36, type: 3}
+    shadingChangePyramidPass: {fileID: 7200000, guid: 251e663738905fa4d8817001682d802f, type: 3}
+    shadingChangePass: {fileID: 7200000, guid: 9a2bff2f97619ed4989d9b0577ba0641, type: 3}
+    prepareReactivityPass: {fileID: 7200000, guid: 20e44016ed34b0d4b8de499d1b566c69, type: 3}
+    lumaInstabilityPass: {fileID: 7200000, guid: a135306e6d1857e43a86ef20db2a47fe, type: 3}
+    accumulatePass: {fileID: 7200000, guid: c9b45f0ae7673694ba57a4aadfe212e9, type: 3}
+    sharpenPass: {fileID: 7200000, guid: 7aaf5cfff022de2499e9b0412f947f6c, type: 3}
+    autoGenReactivePass: {fileID: 7200000, guid: 5716b91fdaa4e9e439df6b96a796fe6e, type: 3}
+    tcrAutoGenPass: {fileID: 7200000, guid: 75cdc6ef23f08ed498d4da511923fcea, type: 3}
+    debugViewPass: {fileID: 7200000, guid: cb24a71d54164c54eb5e86839acd48c5, type: 3}  defaultWhiteTexture: {fileID: 0}
+  defaultBlackTexture: {fileID: 0}
+  defaultNormalTexture: {fileID: 0}
+
+

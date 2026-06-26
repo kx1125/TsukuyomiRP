@@ -1,0 +1,86 @@
+#pragma only_renderers d3d11 xboxseries ps5 vulkan metal
+
+#pragma kernel BilateralFilterHSingleDirectional BILATERAL_FILTER=BilateralFilterHSingleDirectional SINGLE_CHANNEL DIRECTIONAL_LIGHT
+#pragma kernel BilateralFilterVSingleDirectional BILATERAL_FILTER=BilateralFilterVSingleDirectional FINAL_PASS SINGLE_CHANNEL DIRECTIONAL_LIGHT
+
+#pragma multi_compile _ DISTANCE_BASED_DENOISER
+#pragma multi_compile _ _GBUFFER_NORMALS_OCT
+
+#include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Contact Shadow/BilateralFilter.hlsl"
+
+#define SHADOW_DENOISER_TILE_SIZE 8
+
+TEXTURE2D_X(_DenoiseInputTexture);
+TEXTURE2D_X(_DistanceTexture);
+
+int _DenoiserFilterRadius;
+float _CameraFOV;
+
+#if SINGLE_CHANNEL
+    RW_TEXTURE2D(float, _DenoiseOutputTextureRW);
+#else
+    RW_TEXTURE2D(float4, _DenoiseOutputTextureRW);
+#endif
+
+float _RaytracingLightAngle;
+
+[numthreads(SHADOW_DENOISER_TILE_SIZE, SHADOW_DENOISER_TILE_SIZE, 1)]
+void BILATERAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
+{
+    int2 centerCoord = groupId * SHADOW_DENOISER_TILE_SIZE + groupThreadId;
+    const BilateralData center = TapBilateralData(centerCoord);
+
+#if defined(DISTANCE_BASED_DENOISER)
+    float lightSolidAngle = _RaytracingLightAngle;
+    const float distanceCameraToPlane = length(GetWorldSpaceViewDir(center.position));
+    const float distancePlaneToObject = LOAD_TEXTURE2D_X(_DistanceTexture, centerCoord).x;
+    const float brdfConeRadius = tan(lightSolidAngle * 0.5) * distancePlaneToObject * 2.0f;
+    const float viewConeRadius = brdfConeRadius * distanceCameraToPlane / (distancePlaneToObject + distanceCameraToPlane);
+    const float viewConeHalfAngle = FastATanPos(viewConeRadius / distanceCameraToPlane);
+    const float pixelDistance = viewConeHalfAngle / _CameraFOV * _ScreenSize.x;
+    const float radius = clamp(pixelDistance, 1, _DenoiserFilterRadius);
+    const float sigma = 0.5 * radius;
+#else
+    const float sigma = 0.5 * _DenoiserFilterRadius;
+    const int radius = min(sigma * 2.0, _DenoiserFilterRadius);
+#endif
+
+#if SINGLE_CHANNEL
+    float colorSum = 0.0;
+#else
+    float3 colorSum = float3(0.0, 0.0, 0.0);
+#endif
+    float wSum = 0.0;
+
+#if FINAL_PASS
+    const int2 passIncr = int2(1, 0);
+#else
+    const int2 passIncr = int2(0, 1);
+#endif
+
+    int2 tapCoord = centerCoord - radius * passIncr;
+    for (int r = -radius; r <= radius; ++r, tapCoord += passIncr)
+    {
+        if (tapCoord.x >= _ScreenSize.x || tapCoord.y >= _ScreenSize.y || tapCoord.x < 0 || tapCoord.y < 0)
+            continue;
+
+        const BilateralData tapData = TapBilateralData(tapCoord);
+        float w = r ? gaussian(r, sigma) * ComputeBilateralWeight(center, tapData) : 1.0;
+
+#if SINGLE_CHANNEL
+        colorSum += LOAD_TEXTURE2D_X(_DenoiseInputTexture, tapCoord).x * w;
+#else
+        colorSum += LOAD_TEXTURE2D_X(_DenoiseInputTexture, tapCoord).xyz * w;
+#endif
+
+        wSum += w;
+    }
+
+#if SINGLE_CHANNEL
+    float finalColor = wSum != 0.0 ? colorSum / wSum : 0.0;
+    _DenoiseOutputTextureRW[centerCoord] = finalColor;
+#else
+    float3 finalColor = wSum != 0.0 ? colorSum / wSum : 0.0;
+    _DenoiseOutputTextureRW[centerCoord] = float4(finalColor, 1.0);
+#endif
+}

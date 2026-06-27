@@ -1,10 +1,9 @@
-﻿using UnityEngine;
-using UnityEngine.Rendering.Universal;
-using UnityEngine.Rendering;
-
-using System.Collections.Generic;
 using System;
+using System.Collections.Generic;
 using System.Reflection;
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace Tsukuyomi.Rendering
 {
@@ -21,9 +20,9 @@ namespace Tsukuyomi.Rendering
         private PassRegistry _pcssRegistry;
         private PassRegistry _pcssRestoreRegistry;
         private PassRegistry _volumeLightRegistry;
-        private PassRegistry _fsr3Registry;
+        private PassRegistry _sssSkinRegistry;
         private ResourceHub _resourceHub;
-        private List<TsukuyomiBridgePass> _bridgePasses = new();
+        private readonly List<TsukuyomiBridgePass> _bridgePasses = new();
         private TsukuyomiBridgePass _contactShadowBridgePass;
         private TsukuyomiBridgePass _contactShadowDenoiseBridgePass;
         private TsukuyomiBridgePass _depthPyramidBridgePass;
@@ -32,7 +31,7 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiBridgePass _pcssBridgePass;
         private TsukuyomiBridgePass _pcssRestoreBridgePass;
         private TsukuyomiBridgePass _volumeLightBridgePass;
-        private TsukuyomiBridgePass _fsr3BridgePass;
+        private TsukuyomiBridgePass _sssSkinBridgePass;
         private TsukuyomiContactShadowPass _contactShadowPass;
         private TsukuyomiContactShadowDenoisePass _contactShadowDenoisePass;
         private TsukuyomiDepthPyramidPass _depthPyramidPass;
@@ -41,9 +40,7 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiPcssScreenSpaceShadowPass _pcssPass;
         private TsukuyomiPcssRestoreShadowKeywordsPass _pcssRestorePass;
         private TsukuyomiVolumetricFogPass _volumeLightPass;
-        private TsukuyomiFsr3Pass _fsr3Pass;
-        private readonly HashSet<ulong> _fsr3TaaConflictCameras = new();
-        private readonly HashSet<ulong> _fsr3CameraStackCameras = new();
+        private TsukuyomiSssSkinPass _sssSkinPass;
 
         private void OnEnable()
         {
@@ -64,10 +61,11 @@ namespace Tsukuyomi.Rendering
             _pcssRegistry = new PassRegistry();
             _pcssRestoreRegistry = new PassRegistry();
             _volumeLightRegistry = new PassRegistry();
-            _fsr3Registry = new PassRegistry();
+            _sssSkinRegistry = new PassRegistry();
             _resourceHub?.Dispose();
             _resourceHub = new ResourceHub();
             _bridgePasses.Clear();
+
             _contactShadowPass ??= new TsukuyomiContactShadowPass();
             _contactShadowDenoisePass ??= new TsukuyomiContactShadowDenoisePass();
             _depthPyramidPass ??= new TsukuyomiDepthPyramidPass();
@@ -76,7 +74,8 @@ namespace Tsukuyomi.Rendering
             _pcssPass ??= new TsukuyomiPcssScreenSpaceShadowPass();
             _pcssRestorePass ??= new TsukuyomiPcssRestoreShadowKeywordsPass();
             _volumeLightPass ??= new TsukuyomiVolumetricFogPass();
-            _fsr3Pass ??= new TsukuyomiFsr3Pass();
+            _sssSkinPass ??= new TsukuyomiSssSkinPass();
+
             _contactShadowPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _contactShadowDenoisePass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _depthPyramidPass.InjectionPoint = InjectionPoint.BeforeOpaque;
@@ -85,7 +84,8 @@ namespace Tsukuyomi.Rendering
             _pcssPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _pcssRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
             _volumeLightPass.InjectionPoint = InjectionPoint.BeforePostProcess;
-            _fsr3Pass.InjectionPoint = InjectionPoint.AfterPostProcess;
+            _sssSkinPass.InjectionPoint = InjectionPoint.BeforeOpaque;
+
             _contactShadowRegistry.AddPass(_contactShadowPass);
             _contactShadowDenoiseRegistry.AddPass(_contactShadowDenoisePass);
             _depthPyramidRegistry.AddPass(_depthPyramidPass);
@@ -94,7 +94,8 @@ namespace Tsukuyomi.Rendering
             _pcssRegistry.AddPass(_pcssPass);
             _pcssRestoreRegistry.AddPass(_pcssRestorePass);
             _volumeLightRegistry.AddPass(_volumeLightPass);
-            _fsr3Registry.AddPass(_fsr3Pass);
+            _sssSkinRegistry.AddPass(_sssSkinPass);
+
             _contactShadowBridgePass = new TsukuyomiBridgePass(_contactShadowRegistry, _contactShadowPass.InjectionPoint, _resourceHub)
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 1
@@ -124,21 +125,17 @@ namespace Tsukuyomi.Rendering
             {
                 renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 3
             };
-            _fsr3BridgePass = new TsukuyomiBridgePass(_fsr3Registry, _fsr3Pass.InjectionPoint, _resourceHub)
+            _sssSkinBridgePass = new TsukuyomiBridgePass(_sssSkinRegistry, _sssSkinPass.InjectionPoint, _resourceHub)
             {
-                renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing - 1
+                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 5
             };
 
-            // Register passes from the baked Profile
             if (Profile != null && Profile.Passes != null)
             {
-                foreach (var pass in Profile.Passes)
-                {
+                foreach (RenderPassBase pass in Profile.Passes)
                     _registry.AddPass(pass);
-                }
             }
 
-            // Create a bridge pass for each injection point
             foreach (InjectionPoint point in Enum.GetValues(typeof(InjectionPoint)))
             {
                 var bridge = new TsukuyomiBridgePass(_registry, point, _resourceHub)
@@ -152,16 +149,14 @@ namespace Tsukuyomi.Rendering
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
             if (Profile == null)
-            {
-                EnqueueFsr3Pass(renderer, ref renderingData);
                 return;
-            }
 
             VolumeStack volumeStack = VolumeManager.instance.stack;
             TsukuyomiPcssVolume pcssVolume = volumeStack?.GetComponent<TsukuyomiPcssVolume>();
             TsukuyomiContactShadowVolume contactShadowVolume = volumeStack?.GetComponent<TsukuyomiContactShadowVolume>();
             TsukuyomiGroundTruthAmbientOcclusionVolume gtaoVolume = volumeStack?.GetComponent<TsukuyomiGroundTruthAmbientOcclusionVolume>();
             TsukuyomiVolumeLightVolume volumeLightVolume = volumeStack?.GetComponent<TsukuyomiVolumeLightVolume>();
+            TsukuyomiSssSkinVolume sssSkinVolume = volumeStack?.GetComponent<TsukuyomiSssSkinVolume>();
 
             bool contactShadowsEnabled = _contactShadowPass != null && _contactShadowPass.Configure(Profile, contactShadowVolume);
             bool contactShadowDenoiseEnabled = _contactShadowDenoisePass != null && _contactShadowDenoisePass.Configure(Profile, contactShadowVolume);
@@ -214,41 +209,26 @@ namespace Tsukuyomi.Rendering
                 renderer.EnqueuePass(_volumeLightBridgePass);
             }
 
-            EnqueueFsr3Pass(renderer, ref renderingData);
+            bool useSharedDepthNormals = RequiresCameraNormals(contactShadowDenoiseEnabled, gtaoEnabled && depthPyramidEnabled);
+            if (_sssSkinPass != null && _sssSkinPass.Configure(Profile, sssSkinVolume, useSharedDepthNormals))
+            {
+                _sssSkinBridgePass.ConfigureInputFromTextureSlots();
+                renderer.EnqueuePass(_sssSkinBridgePass);
+            }
 
-            foreach (var bridge in _bridgePasses)
+            foreach (TsukuyomiBridgePass bridge in _bridgePasses)
             {
                 bridge.ConfigureInputFromTextureSlots();
                 renderer.EnqueuePass(bridge);
             }
         }
 
-        private void EnqueueFsr3Pass(ScriptableRenderer renderer, ref RenderingData renderingData)
+        private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled)
         {
-            if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources) ||
-                _fsr3Pass == null || !_fsr3Pass.Configure(resources))
-            {
-                return;
-            }
-
-            if (!TsukuyomiFsr3Validation.TryValidateForEnqueue(
-                    ref renderingData,
-                    _fsr3TaaConflictCameras,
-                    _fsr3CameraStackCameras,
-                    out Camera camera,
-                    out ulong cameraId))
-            {
-                return;
-            }
-
-            Vector2 jitterOffset = TsukuyomiFsr3Jitter.TryApply(ref renderingData, resources.Fsr3Settings, camera, out Vector2 fsr3JitterOffset)
-                ? fsr3JitterOffset
-                : Vector2.zero;
-            _fsr3Pass.SetJitter(cameraId, jitterOffset, Time.frameCount);
-            _fsr3BridgePass.ConfigureInputFromTextureSlots();
-            renderer.EnqueuePass(_fsr3BridgePass);
+            return (contactShadowDenoiseEnabled && PassRegistry.PassRequiresBuiltinTexture(_contactShadowDenoisePass, BuiltinTexture.CameraNormals))
+                || (gtaoEnabled && PassRegistry.PassRequiresBuiltinTexture(_gtaoPass, BuiltinTexture.CameraNormals))
+                || (_registry != null && _registry.RequiresBuiltinTexture(BuiltinTexture.CameraNormals));
         }
-
         private RenderPassEvent MapInjectionPointToEvent(InjectionPoint point)
         {
             return point switch
@@ -296,21 +276,13 @@ namespace Tsukuyomi.Rendering
             _volumeLightPass?.Dispose();
             _volumeLightPass = null;
             _volumeLightBridgePass = null;
-            _fsr3Pass?.Dispose();
-            _fsr3Pass = null;
-            _fsr3BridgePass = null;
-            _fsr3TaaConflictCameras.Clear();
-            _fsr3CameraStackCameras.Clear();
+            _sssSkinPass?.Dispose();
+            _sssSkinPass = null;
+            _sssSkinBridgePass = null;
             base.Dispose(disposing);
         }
     }
 }
-
-
-
-
-
-
 
 
 

@@ -13,6 +13,7 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_ContactShadowExpanded = true;
         private static bool s_GtaoExpanded = true;
         private static bool s_VolumeLightExpanded = true;
+        private static bool s_SssSkinExpanded = true;
         private static bool s_PassListExpanded = true;
 
         public override void OnInspectorGUI()
@@ -68,6 +69,7 @@ namespace Tsukuyomi.Rendering.Editor
             DrawContactShadowSettings();
             DrawGtaoSettings();
             DrawVolumeLightSettings();
+            DrawSssSkinSettings();
             EditorGUI.indentLevel--;
         }
 
@@ -214,6 +216,44 @@ namespace Tsukuyomi.Rendering.Editor
             CoreEditorUtils.DrawSplitter();
         }
 
+        private void DrawSssSkinSettings()
+        {
+            SerializedProperty enableSssSkin = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableSssSkin));
+
+            s_SssSkinExpanded = CoreEditorUtils.DrawHeaderToggleFoldout(
+                EditorGUIUtility.TrTextContent("SSS Skin"),
+                s_SssSkinExpanded,
+                enableSssSkin,
+                null,
+                null,
+                null,
+                null);
+
+            if (s_SssSkinExpanded)
+            {
+                EditorGUI.indentLevel++;
+                using (new EditorGUI.DisabledScope(!enableSssSkin.boolValue))
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinLayerMask)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinQuality)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinScatteringRadius)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinScatteringIterations)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinShaderIterations)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinDepthTest)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinNormalTest)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinMaxDistance)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinColor)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinRandomizedRotation)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinDitherScale)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinDitherIntensity)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinNoiseTexture)));
+                }
+                EditorGUI.indentLevel--;
+            }
+
+            serializedObject.ApplyModifiedProperties();
+            CoreEditorUtils.DrawSplitter();
+        }
         private void DrawPassList(TsukuyomiPipelineProfile profile)
         {
             s_PassListExpanded = CoreEditorUtils.DrawHeaderFoldout("Pass List", s_PassListExpanded);

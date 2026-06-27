@@ -10,6 +10,13 @@ namespace Tsukuyomi.Rendering
         Spatial
     }
 
+    public enum TsukuyomiSssSkinQuality
+    {
+        High,
+        Medium,
+        Low
+    }
+
     [CreateAssetMenu(menuName = "TsukuyomiRpP/Pipeline Profile", fileName = "TsukuyomiPipelineProfile")]
     public class TsukuyomiPipelineProfile : ScriptableObject
     {
@@ -160,6 +167,43 @@ namespace Tsukuyomi.Rendering
         [Range(0.0f, 0.1f)]
         public float VolumeLightTransmittanceThreshold = 0.01f;
 
+
+        [Header("SSS Skin")]
+        public bool EnableSssSkin;
+
+        public LayerMask SssSkinLayerMask;
+
+        public TsukuyomiSssSkinQuality SssSkinQuality = TsukuyomiSssSkinQuality.High;
+
+        [Range(0.0f, 10.0f)]
+        public float SssSkinScatteringRadius = 1.0f;
+
+        [Range(0, 10)]
+        public int SssSkinScatteringIterations = 3;
+
+        [Range(1, 32)]
+        public int SssSkinShaderIterations = 12;
+
+        [Range(0.0001f, 5.0f)]
+        public float SssSkinDepthTest = 0.3f;
+
+        [Range(0.001f, 2.0f)]
+        public float SssSkinNormalTest = 0.3f;
+
+        [Range(0.0f, 200.0f)]
+        public float SssSkinMaxDistance = 10.0f;
+
+        public Color SssSkinColor = Color.yellow;
+
+        public bool SssSkinRandomizedRotation;
+
+        [Range(0.0f, 5.0f)]
+        public float SssSkinDitherScale = 1.0f;
+
+        [Range(0.0f, 0.5f)]
+        public float SssSkinDitherIntensity = 0.0f;
+
+        public Texture SssSkinNoiseTexture;
         /// <summary>
         /// Polymorphic list of passes configured via the Graph Editor.
         /// Serialized using Unity's SerializeReference.
@@ -176,3 +220,5 @@ namespace Tsukuyomi.Rendering
         public string GraphLayoutData;
     }
 }
+
+

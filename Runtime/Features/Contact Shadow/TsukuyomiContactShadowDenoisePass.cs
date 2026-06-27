@@ -141,7 +141,7 @@ namespace Tsukuyomi.Rendering
 
         internal static TextureDesc CreateDenoiseDesc(RenderTextureDescriptor cameraDescriptor)
         {
-            GraphicsFormat format = SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, FormatUsage.Linear | FormatUsage.Render)
+            GraphicsFormat format = SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, GraphicsFormatUsage.Linear | GraphicsFormatUsage.Render)
                 ? GraphicsFormat.R16_SFloat
                 : GraphicsFormat.R16G16B16A16_SFloat;
 

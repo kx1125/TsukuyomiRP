@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2024 Nico de Poel
+// Copyright (c) 2024 Nico de Poel
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,8 +43,6 @@ namespace Tsukuyomi.Rendering.FSR3
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             flags |= InitializationFlags.EnableDebugChecking;
 #endif
-            
-            Debug.Log($"Setting up FSR3 Upscaler with render size: {maxRenderSize.x}x{maxRenderSize.y}, display size: {displaySize.x}x{displaySize.y}, flags: {flags}");
             
             var contextDescription = new ContextDescription
             {

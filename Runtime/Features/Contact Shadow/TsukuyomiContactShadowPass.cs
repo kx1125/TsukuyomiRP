@@ -103,7 +103,7 @@ namespace Tsukuyomi.Rendering
 
         internal static TextureDesc CreateContactShadowDesc(RenderTextureDescriptor cameraDescriptor)
         {
-            GraphicsFormat format = SystemInfo.IsFormatSupported(GraphicsFormat.R8_UNorm, FormatUsage.Linear | FormatUsage.Render)
+            GraphicsFormat format = SystemInfo.IsFormatSupported(GraphicsFormat.R8_UNorm, GraphicsFormatUsage.Linear | GraphicsFormatUsage.Render)
                 ? GraphicsFormat.R8_UNorm
                 : GraphicsFormat.B8G8R8A8_UNorm;
 

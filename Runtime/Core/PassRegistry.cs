@@ -1,6 +1,6 @@
-using System.Collections.Generic;
-
+﻿using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 
 namespace Tsukuyomi.Rendering
 {
@@ -23,9 +23,50 @@ namespace Tsukuyomi.Rendering
                 .OrderByDescending(p => p.Priority);
         }
 
+        public bool RequiresBuiltinTexture(BuiltinTexture builtin)
+        {
+            return _passes.Any(pass => pass.Enabled && PassRequiresBuiltinTexture(pass, builtin));
+        }
+
         public void Clear()
         {
             _passes.Clear();
         }
+
+        public static bool PassRequiresBuiltinTexture(RenderPassBase pass, BuiltinTexture builtin)
+        {
+            if (pass == null)
+                return false;
+
+            foreach (TextureSlot slot in EnumerateTextureSlots(pass))
+            {
+                if (slot.Builtin == builtin && slot.Access != ResourceAccess.Write)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static IEnumerable<TextureSlot> EnumerateTextureSlots(RenderPassBase pass)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var type = pass.GetType();
+
+            foreach (var field in type.GetFields(flags))
+            {
+                if (field.FieldType == typeof(TextureSlot))
+                    yield return (TextureSlot)field.GetValue(pass);
+            }
+
+            foreach (var property in type.GetProperties(flags))
+            {
+                if (property.PropertyType != typeof(TextureSlot) || property.GetIndexParameters().Length > 0)
+                    continue;
+
+                yield return (TextureSlot)property.GetValue(pass);
+            }
+        }
     }
 }
+
+

@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace Tsukuyomi.Rendering
 {
@@ -61,12 +61,17 @@ namespace Tsukuyomi.Rendering
         [SerializeField]
         private ComputeShader volumetricFogUpsampleComputeShader;
 
-        [Header("FSR3 Upscaler")]
+        [Header("SSS Skin")]
         [SerializeField]
-        private TsukuyomiFsr3Settings fsr3Settings = new();
+        private Shader sssSkinBlurShader;
 
         [SerializeField]
+        private Material sssSkinBlurMaterial;
+
+        [Header("FSR3 Upscaler Resources")]
+        [SerializeField]
         private TsukuyomiFsr3Shaders fsr3Shaders = new();
+
         [Header("Default Textures")]
         [SerializeField]
         private Texture2D defaultWhiteTexture;
@@ -94,10 +99,11 @@ namespace Tsukuyomi.Rendering
         public ComputeShader VolumetricFogRaymarchComputeShader => volumetricFogRaymarchComputeShader;
         public ComputeShader VolumetricFogBlurComputeShader => volumetricFogBlurComputeShader;
         public ComputeShader VolumetricFogUpsampleComputeShader => volumetricFogUpsampleComputeShader;
+        public Shader SssSkinBlurShader => sssSkinBlurShader;
+        public Material SssSkinBlurMaterial => sssSkinBlurMaterial;
         public Texture2D DefaultWhiteTexture => defaultWhiteTexture;
         public Texture2D DefaultBlackTexture => defaultBlackTexture;
         public Texture2D DefaultNormalTexture => defaultNormalTexture;
-        public TsukuyomiFsr3Settings Fsr3Settings => fsr3Settings;
         public TsukuyomiFsr3Shaders Fsr3Shaders => fsr3Shaders;
 
         public bool HasPcssResources => screenSpacePcssShadowsShader != null || screenSpacePcssShadowsMaterial != null;
@@ -109,8 +115,12 @@ namespace Tsukuyomi.Rendering
             && gtaoBlurAndUpsampleComputeShader != null;
         public bool HasVolumeLightResources => (volumetricFogShader != null || volumetricFogMaterial != null)
             && (downsampleDepthShader != null || downsampleDepthMaterial != null);
+        public bool HasSssSkinResources => sssSkinBlurShader != null || sssSkinBlurMaterial != null;
         public bool HasFsr3Resources => fsr3Shaders != null && fsr3Shaders.IsValid;
     }
 }
+
+
+
 
 

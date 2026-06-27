@@ -8,12 +8,15 @@ namespace Tsukuyomi.Rendering.Editor
     {
         private TsukuyomiRenderPipelineResources _resources;
         private UnityEditor.Editor _resourcesEditor;
+        private SerializedObject _projectSettingsObject;
+        private SerializedProperty _fsr3SettingsProperty;
+        private bool _showFsr3Settings = true;
 
         private TsukuyomiRenderPipelineResourcesSettingsProvider()
             : base("Project/Tsukuyomi RP", SettingsScope.Project)
         {
             label = "Tsukuyomi RP";
-            keywords = new[] { "Tsukuyomi", "Render Pipeline", "Resources", "Preloaded Assets", "PCSS", "Contact Shadow", "FSR3", "Upscaler" };
+            keywords = new[] { "Tsukuyomi", "Render Pipeline", "Resources", "Preloaded Assets", "PCSS", "Contact Shadow", "FSR3", "Upscaler", "Project Settings" };
         }
 
         [SettingsProvider]
@@ -27,11 +30,16 @@ namespace Tsukuyomi.Rendering.Editor
             _resources = TsukuyomiRenderPipelineResourcesPreloader.GetPreloadedResources();
             if (_resources == null)
                 _resources = TsukuyomiRenderPipelineResourcesPreloader.LoadDefaultResources();
+
+            BindProjectSettings();
         }
 
         public override void OnGUI(string searchContext)
         {
             EditorGUILayout.Space();
+            DrawFsr3Settings();
+
+            EditorGUILayout.Space(6.0f);
             EditorGUILayout.LabelField("Default Render Resources", EditorStyles.boldLabel);
 
             EditorGUI.BeginChangeCheck();
@@ -91,6 +99,45 @@ namespace Tsukuyomi.Rendering.Editor
                 Object.DestroyImmediate(_resourcesEditor);
                 _resourcesEditor = null;
             }
+
+            _projectSettingsObject = null;
+            _fsr3SettingsProperty = null;
+        }
+
+        private void BindProjectSettings()
+        {
+            _projectSettingsObject = new SerializedObject(TsukuyomiRenderPipelineProjectSettings.Current);
+            _fsr3SettingsProperty = _projectSettingsObject.FindProperty("fsr3Settings");
+        }
+
+        private void DrawFsr3Settings()
+        {
+            if (_projectSettingsObject == null || _fsr3SettingsProperty == null)
+                BindProjectSettings();
+
+            EditorGUILayout.LabelField("FSR3 Settings", EditorStyles.boldLabel);
+            _projectSettingsObject.Update();
+
+            _showFsr3Settings = EditorGUILayout.BeginFoldoutHeaderGroup(_showFsr3Settings, "Runtime Settings");
+            if (_showFsr3Settings)
+            {
+                EditorGUI.indentLevel++;
+                SerializedProperty property = _fsr3SettingsProperty.Copy();
+                SerializedProperty endProperty = property.GetEndProperty();
+                bool enterChildren = true;
+                while (property.NextVisible(enterChildren) && !SerializedProperty.EqualContents(property, endProperty))
+                {
+                    EditorGUILayout.PropertyField(property, true);
+                    enterChildren = false;
+                }
+
+                EditorGUI.indentLevel--;
+            }
+
+            EditorGUILayout.EndFoldoutHeaderGroup();
+
+            if (_projectSettingsObject.ApplyModifiedProperties())
+                TsukuyomiRenderPipelineProjectSettings.Save();
         }
     }
 }

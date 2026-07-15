@@ -4,8 +4,25 @@
   "version": "0.1.0",
   "unity": "6000.5",
   "unityRelease": "0b7",
-  "description": "Custom RenderPipeline",
+  "description": "An experimental collection of custom rendering features for the Universal Render Pipeline.",
+  "dependencies": {
+    "com.unity.render-pipelines.universal": "17.5.0"
+  },
+  "documentationUrl": "https://github.com/kx1125/TsukuyomiRP#readme",
+  "changelogUrl": "https://github.com/kx1125/TsukuyomiRP/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/kx1125/TsukuyomiRP/blob/main/LICENSE",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kx1125/TsukuyomiRP.git"
+  },
+  "keywords": [
+    "rendering",
+    "urp",
+    "render-pipeline"
+  ],
   "author": {
-    "name": "Tsukuyomi"
+    "name": "Tsukuyomi",
+    "url": "https://github.com/kx1125"
   }
 }

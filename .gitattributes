@@ -1,0 +1,21 @@
+* text=auto
+
+*.cs text eol=lf
+*.hlsl text eol=lf
+*.shader text eol=lf
+*.compute text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.meta text eol=lf
+*.asset text eol=lf
+*.asmdef text eol=lf
+*.asmref text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.exr binary
+*.dds binary
+*.fbx binary
+*.dll binary

@@ -1,4 +1,4 @@
-﻿Shader "SSSSkin/Standard SSS"
+Shader "SSSSkin/Standard SSS"
 {
     Properties
     {
@@ -27,6 +27,15 @@
         TransmissionRange ("Transmission Range", Range(0,5)) = 0.5
         DynamicPassTransmission ("Dynamic Pass Transmission", Range(0,1)) = 1
         SSS_shader ("SSS Shader", Float) = 1
+
+        [Header(Tsukuyomi Lighting)]
+        _MicroShadowOpacity("Micro Shadow Opacity", Range(0.0, 1.0)) = 1.0
+        _RoughDiffuseStrength("Rough Diffuse Strength", Range(0.0, 1.0)) = 1.0
+        _IndirectSpecularFGDStrength("Indirect Specular FGD Strength", Range(0.0, 1.0)) = 1.0
+        _IndirectDiffuseIntensity("Indirect Diffuse Intensity", Range(0.0, 2.0)) = 1.0
+        _IndirectSpecularIntensity("Indirect Specular Intensity", Range(0.0, 2.0)) = 1.0
+        _HorizonOcclusionPower("Horizon Occlusion Power", Range(0.0, 4.0)) = 2.0
+
         [HideInInspector] _Surface ("Surface", Float) = 0.0
         [HideInInspector] _Cull ("Cull", Float) = 2.0
         [HideInInspector] _AlphaToMask ("Alpha To Mask", Float) = 0.0
@@ -49,54 +58,28 @@
             HLSLPROGRAM
             #pragma target 3.0
             #pragma vertex SSSSkinVert
-            #pragma fragment ForwardFragment
+            #pragma fragment SSSSkinForwardFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ EVALUATE_SH_MIXED EVALUATE_SH_VERTEX
             #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_BLENDING
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_BOX_PROJECTION
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_ATLAS
             #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
+            #pragma multi_compile_fragment _ _SCREEN_SPACE_IRRADIANCE
+            #pragma multi_compile_fragment _ _LIGHT_COOKIES
+            #pragma multi_compile _ _LIGHT_LAYERS
             #pragma multi_compile _ LIGHTMAP_SHADOW_MIXING
             #pragma multi_compile _ SHADOWS_SHADOWMASK
+            #pragma multi_compile _ ENABLE_DETAIL_NORMALMAP
             #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
 
-            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinCommon.hlsl"
-
-            half4 ForwardFragment(SSSSkinVaryings input) : SV_Target
-            {
-                UNITY_SETUP_INSTANCE_ID(input);
-                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-
-                half4 albedo = SampleAlbedo(input.uv);
-                #if defined(_ALPHATEST_ON)
-                clip(albedo.a - _Cutoff);
-                #endif
-
-                half3 normalTS = half3(0.0h, 0.0h, 1.0h);
-                half3 normalWS = NormalizeNormalPerPixel(SampleNormalWS(input));
-                half3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
-                half occlusion = SampleOcclusion(input.uv);
-                half4 pbrMask = SamplePBRMask(input.uv);
-                half skinMask = ResolveSkinMask(pbrMask);
-
-                InputData inputData = BuildSSSSkinInputData(input, normalWS, viewDirWS);
-                SurfaceData surfaceData = BuildSSSSkinSurfaceData(albedo, normalTS, occlusion, pbrMask);
-                half4 pbrColor = UniversalFragmentPBR(inputData, surfaceData);
-
-                if (SSS_shader != 1.0h || skinMask <= 0.0h)
-                {
-                    return pbrColor;
-                }
-
-                SurfaceData specularSurfaceData = surfaceData;
-                specularSurfaceData.albedo = half3(0.0h, 0.0h, 0.0h);
-                half3 specularLighting = UniversalFragmentPBR(inputData, specularSurfaceData).rgb;
-                half3 sssDiffuse = SampleAlbedoTexture(input.uv).rgb * SampleBlurredSSSLighting(input.positionCS);
-                half3 sssColor = specularLighting + sssDiffuse;
-
-                return half4(lerp(pbrColor.rgb, sssColor, skinMask), albedo.a);
-            }
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinPass.hlsl"
             ENDHLSL
         }
 
@@ -115,13 +98,12 @@
             #pragma vertex ShadowPassVertex
             #pragma fragment ShadowPassFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
             #pragma multi_compile _ LOD_FADE_CROSSFADE
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/ShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -140,12 +122,11 @@
             #pragma vertex DepthOnlyVertex
             #pragma fragment DepthOnlyFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
             #pragma multi_compile _ LOD_FADE_CROSSFADE
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/DepthOnlyPass.hlsl"
             ENDHLSL
         }
@@ -160,23 +141,19 @@
 
             HLSLPROGRAM
             #pragma target 2.0
-            #pragma vertex DepthNormalsVertex
-            #pragma fragment DepthNormalsFragment
-            #pragma shader_feature_local _NORMALMAP
-            #pragma shader_feature_local _PARALLAXMAP
-            #pragma shader_feature_local _ _DETAIL_MULX2 _DETAIL_SCALED
+            #pragma vertex SSSSkinDepthNormalsVertex
+            #pragma fragment SSSSkinDepthNormalsFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
             #pragma multi_compile _ LOD_FADE_CROSSFADE
+            #pragma multi_compile _ ENABLE_DETAIL_NORMALMAP
+            #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitDepthNormalsPass.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinPass.hlsl"
             ENDHLSL
         }
-
 
         Pass
         {
@@ -191,29 +168,14 @@
             HLSLPROGRAM
             #pragma target 3.0
             #pragma vertex SSSSkinVert
-            #pragma fragment MaskFragment
+            #pragma fragment SSSSkinMaskFragment
             #pragma shader_feature_local _ALPHATEST_ON
             #pragma multi_compile_instancing
 
-            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinCommon.hlsl"
-
-            half4 MaskFragment(SSSSkinVaryings input) : SV_Target
-            {
-                UNITY_SETUP_INSTANCE_ID(input);
-                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-
-                half4 albedo = SampleAlbedo(input.uv);
-                #if defined(_ALPHATEST_ON)
-                clip(albedo.a - _Cutoff);
-                #endif
-
-                if (SSS_shader != 1.0h)
-                    return 0.0h;
-
-                return ResolveSkinMask(SamplePBRMask(input.uv));
-            }
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinPass.hlsl"
             ENDHLSL
         }
+
         Pass
         {
             Name "SSSSkin Lighting"
@@ -226,9 +188,9 @@
             HLSLPROGRAM
             #pragma target 3.0
             #pragma vertex SSSSkinVert
-            #pragma fragment LightingFragment
+            #pragma fragment SSSSkinLightingFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
             #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
             #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
@@ -241,128 +203,12 @@
             #pragma multi_compile _ TRANSMISSION
             #pragma multi_compile _ ENABLE_DETAIL_NORMALMAP
             #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
 
-            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinCommon.hlsl"
-
-            half3 SSSSkinDirectLight(Light light, half3 lightingAlbedo, half3 normalWS, half3 viewDirWS, half3 transmission)
-            {
-                half3 attenuatedLightColor = light.color * (light.distanceAttenuation * light.shadowAttenuation);
-                half3 diffuse = lightingAlbedo * LightingLambert(attenuatedLightColor, light.direction, normalWS);
-                #if defined(TRANSMISSION)
-                diffuse += SSSSkinTransmissionDynamic(transmission, light.direction, normalWS, viewDirWS, light.shadowAttenuation) * light.color;
-                #endif
-                return diffuse;
-            }
-
-            SurfaceData SSSSkinSurfaceData(half alpha)
-            {
-                SurfaceData surfaceData = (SurfaceData)0;
-                surfaceData.albedo = half3(1.0h, 1.0h, 1.0h);
-                surfaceData.specular = half3(0.0h, 0.0h, 0.0h);
-                surfaceData.metallic = 0.0h;
-                surfaceData.smoothness = 0.0h;
-                surfaceData.normalTS = half3(0.0h, 0.0h, 1.0h);
-                surfaceData.emission = half3(0.0h, 0.0h, 0.0h);
-                surfaceData.occlusion = 1.0h;
-                surfaceData.alpha = alpha;
-                surfaceData.clearCoatMask = 0.0h;
-                surfaceData.clearCoatSmoothness = 1.0h;
-                return surfaceData;
-            }
-
-            half4 LightingFragment(SSSSkinVaryings input) : SV_Target
-            {
-                UNITY_SETUP_INSTANCE_ID(input);
-                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-
-                half alpha = 1.0h;
-                #if defined(_ALPHATEST_ON)
-                alpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv).a;
-                clip(alpha - _Cutoff);
-                #endif
-
-                if (SSS_shader != 1.0h)
-                    return half4(0.0h, 0.0h, 0.0h, 1.0h);
-
-                half skinMask = ResolveSkinMask(SamplePBRMask(input.uv));
-                if (skinMask <= 0.0h)
-                    return half4(0.0h, 0.0h, 0.0h, 1.0h);
-
-                half3 normalWS = NormalizeNormalPerPixel(SampleNormalWS(input));
-                half3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
-
-                InputData inputData = (InputData)0;
-                inputData.positionWS = input.positionWS;
-                inputData.positionCS = input.positionCS;
-                inputData.normalWS = normalWS;
-                inputData.viewDirectionWS = viewDirWS;
-                #if defined(MAIN_LIGHT_CALCULATE_SHADOWS)
-                inputData.shadowCoord = TransformWorldToShadowCoord(input.positionWS);
-                #else
-                inputData.shadowCoord = float4(0.0, 0.0, 0.0, 0.0);
-                #endif
-                inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
-                inputData.bakedGI = SampleSH(normalWS);
-                inputData.shadowMask = half4(1.0h, 1.0h, 1.0h, 1.0h);
-                #if defined(_ADDITIONAL_LIGHTS_VERTEX)
-                inputData.vertexLighting = VertexLighting(input.positionWS, normalWS);
-                #endif
-
-                SurfaceData surfaceData = SSSSkinSurfaceData(alpha);
-                half4 shadowMask = CalculateShadowMask(inputData);
-                AmbientOcclusionFactor aoFactor = CreateAmbientOcclusionFactor(inputData, surfaceData);
-                uint meshRenderingLayers = GetMeshRenderingLayer();
-                half3 lightingAlbedo = SampleLightingAlbedo(input.uv);
-                half3 transmission = SampleTransmission(input.uv);
-                half3 lighting = inputData.bakedGI * lightingAlbedo;
-
-                Light mainLight = GetMainLight(inputData, shadowMask, aoFactor);
-                #if defined(_LIGHT_LAYERS)
-                if (IsMatchingLightLayer(mainLight.layerMask, meshRenderingLayers))
-                #endif
-                {
-                    lighting += SSSSkinDirectLight(mainLight, lightingAlbedo, normalWS, viewDirWS, transmission);
-                }
-
-                #if defined(_ADDITIONAL_LIGHTS)
-                uint pixelLightCount = GetAdditionalLightsCount();
-
-                #if USE_CLUSTER_LIGHT_LOOP
-                [loop] for (uint lightIndex = 0; lightIndex < min(URP_FP_DIRECTIONAL_LIGHTS_COUNT, MAX_VISIBLE_LIGHTS); lightIndex++)
-                {
-                    CLUSTER_LIGHT_LOOP_SUBTRACTIVE_LIGHT_CHECK
-                    Light light = GetAdditionalLight(lightIndex, inputData, shadowMask, aoFactor);
-                    #if defined(_LIGHT_LAYERS)
-                    if (IsMatchingLightLayer(light.layerMask, meshRenderingLayers))
-                    #endif
-                    {
-                        lighting += SSSSkinDirectLight(light, lightingAlbedo, normalWS, viewDirWS, transmission);
-                    }
-                }
-                #endif
-
-                LIGHT_LOOP_BEGIN(pixelLightCount)
-                    Light light = GetAdditionalLight(lightIndex, inputData, shadowMask, aoFactor);
-                    #if defined(_LIGHT_LAYERS)
-                    if (IsMatchingLightLayer(light.layerMask, meshRenderingLayers))
-                    #endif
-                    {
-                        lighting += SSSSkinDirectLight(light, lightingAlbedo, normalWS, viewDirWS, transmission);
-                    }
-                LIGHT_LOOP_END
-                #endif
-
-                #if defined(_ADDITIONAL_LIGHTS_VERTEX)
-                lighting += inputData.vertexLighting * lightingAlbedo;
-                #endif
-
-                return half4(lighting * skinMask, 1.0h);
-            }
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinPass.hlsl"
             ENDHLSL
         }
     }
 
     Fallback Off
 }
-
-

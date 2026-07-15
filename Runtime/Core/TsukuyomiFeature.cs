@@ -11,6 +11,13 @@ namespace Tsukuyomi.Rendering
     {
         public TsukuyomiPipelineProfile Profile;
 
+        private static bool s_WarnedPerObjectShadowRenderingLayersDisabled;
+
+        private Light _perObjectShadowMainLight;
+        private bool _hasMainLightShadowLayerOverride;
+        private bool _originalMainLightCustomShadowLayers;
+        private uint _originalMainLightShadowRenderingLayers;
+
         private PassRegistry _registry;
         private PassRegistry _contactShadowRegistry;
         private PassRegistry _contactShadowDenoiseRegistry;
@@ -19,8 +26,10 @@ namespace Tsukuyomi.Rendering
         private PassRegistry _gtaoRestoreRegistry;
         private PassRegistry _pcssRegistry;
         private PassRegistry _pcssRestoreRegistry;
+        private PassRegistry _planarReflectionRegistry;
         private PassRegistry _volumeLightRegistry;
         private PassRegistry _sssSkinRegistry;
+        private PassRegistry _postProcessRegistry;
         private ResourceHub _resourceHub;
         private readonly List<TsukuyomiBridgePass> _bridgePasses = new();
         private TsukuyomiBridgePass _contactShadowBridgePass;
@@ -30,8 +39,10 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiBridgePass _gtaoRestoreBridgePass;
         private TsukuyomiBridgePass _pcssBridgePass;
         private TsukuyomiBridgePass _pcssRestoreBridgePass;
+        private TsukuyomiBridgePass _planarReflectionBridgePass;
         private TsukuyomiBridgePass _volumeLightBridgePass;
         private TsukuyomiBridgePass _sssSkinBridgePass;
+        private TsukuyomiBridgePass _postProcessBridgePass;
         private TsukuyomiContactShadowPass _contactShadowPass;
         private TsukuyomiContactShadowDenoisePass _contactShadowDenoisePass;
         private TsukuyomiDepthPyramidPass _depthPyramidPass;
@@ -39,8 +50,11 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiGroundTruthAmbientOcclusionRestoreKeywordsPass _gtaoRestorePass;
         private TsukuyomiPcssScreenSpaceShadowPass _pcssPass;
         private TsukuyomiPcssRestoreShadowKeywordsPass _pcssRestorePass;
+        private TsukuyomiPlanarReflectionPass _planarReflectionPass;
+        private TsukuyomiPerObjectShadowCasterPass _perObjectShadowPass;
         private TsukuyomiVolumetricFogPass _volumeLightPass;
         private TsukuyomiSssSkinPass _sssSkinPass;
+        private TsukuyomiPostProcessPass _postProcessPass;
 
         private void OnEnable()
         {
@@ -60,8 +74,10 @@ namespace Tsukuyomi.Rendering
             _gtaoRestoreRegistry = new PassRegistry();
             _pcssRegistry = new PassRegistry();
             _pcssRestoreRegistry = new PassRegistry();
+            _planarReflectionRegistry = new PassRegistry();
             _volumeLightRegistry = new PassRegistry();
             _sssSkinRegistry = new PassRegistry();
+            _postProcessRegistry = new PassRegistry();
             _resourceHub?.Dispose();
             _resourceHub = new ResourceHub();
             _bridgePasses.Clear();
@@ -73,8 +89,11 @@ namespace Tsukuyomi.Rendering
             _gtaoRestorePass ??= new TsukuyomiGroundTruthAmbientOcclusionRestoreKeywordsPass();
             _pcssPass ??= new TsukuyomiPcssScreenSpaceShadowPass();
             _pcssRestorePass ??= new TsukuyomiPcssRestoreShadowKeywordsPass();
+            _planarReflectionPass ??= new TsukuyomiPlanarReflectionPass();
+            _perObjectShadowPass ??= new TsukuyomiPerObjectShadowCasterPass();
             _volumeLightPass ??= new TsukuyomiVolumetricFogPass();
             _sssSkinPass ??= new TsukuyomiSssSkinPass();
+            _postProcessPass ??= new TsukuyomiPostProcessPass();
 
             _contactShadowPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _contactShadowDenoisePass.InjectionPoint = InjectionPoint.BeforeOpaque;
@@ -83,8 +102,10 @@ namespace Tsukuyomi.Rendering
             _gtaoRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
             _pcssPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _pcssRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _planarReflectionPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _volumeLightPass.InjectionPoint = InjectionPoint.BeforePostProcess;
             _sssSkinPass.InjectionPoint = InjectionPoint.BeforeOpaque;
+            _postProcessPass.InjectionPoint = InjectionPoint.BeforePostProcess;
 
             _contactShadowRegistry.AddPass(_contactShadowPass);
             _contactShadowDenoiseRegistry.AddPass(_contactShadowDenoisePass);
@@ -93,8 +114,10 @@ namespace Tsukuyomi.Rendering
             _gtaoRestoreRegistry.AddPass(_gtaoRestorePass);
             _pcssRegistry.AddPass(_pcssPass);
             _pcssRestoreRegistry.AddPass(_pcssRestorePass);
+            _planarReflectionRegistry.AddPass(_planarReflectionPass);
             _volumeLightRegistry.AddPass(_volumeLightPass);
             _sssSkinRegistry.AddPass(_sssSkinPass);
+            _postProcessRegistry.AddPass(_postProcessPass);
 
             _contactShadowBridgePass = new TsukuyomiBridgePass(_contactShadowRegistry, _contactShadowPass.InjectionPoint, _resourceHub)
             {
@@ -121,6 +144,10 @@ namespace Tsukuyomi.Rendering
             {
                 renderPassEvent = RenderPassEvent.BeforeRenderingTransparents
             };
+            _planarReflectionBridgePass = new TsukuyomiBridgePass(_planarReflectionRegistry, _planarReflectionPass.InjectionPoint, _resourceHub)
+            {
+                renderPassEvent = RenderPassEvent.BeforeRenderingOpaques - 1
+            };
             _volumeLightBridgePass = new TsukuyomiBridgePass(_volumeLightRegistry, _volumeLightPass.InjectionPoint, _resourceHub)
             {
                 renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 3
@@ -128,6 +155,10 @@ namespace Tsukuyomi.Rendering
             _sssSkinBridgePass = new TsukuyomiBridgePass(_sssSkinRegistry, _sssSkinPass.InjectionPoint, _resourceHub)
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 5
+            };
+            _postProcessBridgePass = new TsukuyomiBridgePass(_postProcessRegistry, _postProcessPass.InjectionPoint, _resourceHub)
+            {
+                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1
             };
 
             if (Profile != null && Profile.Passes != null)
@@ -149,10 +180,16 @@ namespace Tsukuyomi.Rendering
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
             if (Profile == null)
+            {
+                RestoreMainLightShadowLayerOverride();
+                TsukuyomiPerObjectShadowRenderer.RestoreRenderingLayersForAll();
+                TsukuyomiPlanarReflectionPass.ClearGlobals();
                 return;
+            }
 
             VolumeStack volumeStack = VolumeManager.instance.stack;
             TsukuyomiPcssVolume pcssVolume = volumeStack?.GetComponent<TsukuyomiPcssVolume>();
+            TsukuyomiPerObjectShadowVolume perObjectShadowVolume = volumeStack?.GetComponent<TsukuyomiPerObjectShadowVolume>();
             TsukuyomiContactShadowVolume contactShadowVolume = volumeStack?.GetComponent<TsukuyomiContactShadowVolume>();
             TsukuyomiGroundTruthAmbientOcclusionVolume gtaoVolume = volumeStack?.GetComponent<TsukuyomiGroundTruthAmbientOcclusionVolume>();
             TsukuyomiVolumeLightVolume volumeLightVolume = volumeStack?.GetComponent<TsukuyomiVolumeLightVolume>();
@@ -160,6 +197,16 @@ namespace Tsukuyomi.Rendering
 
             bool contactShadowsEnabled = _contactShadowPass != null && _contactShadowPass.Configure(Profile, contactShadowVolume);
             bool contactShadowDenoiseEnabled = _contactShadowDenoisePass != null && _contactShadowDenoisePass.Configure(Profile, contactShadowVolume);
+
+            if (_planarReflectionPass != null && _planarReflectionPass.Configure(Profile))
+            {
+                _planarReflectionBridgePass.ConfigureInputFromTextureSlots();
+                renderer.EnqueuePass(_planarReflectionBridgePass);
+            }
+            else
+            {
+                TsukuyomiPlanarReflectionPass.ClearGlobals();
+            }
 
             if (contactShadowsEnabled)
             {
@@ -189,9 +236,27 @@ namespace Tsukuyomi.Rendering
                 renderer.EnqueuePass(_gtaoRestoreBridgePass);
             }
 
-            if (_pcssPass != null && _pcssPass.Configure(Profile, pcssVolume, contactShadowsEnabled, contactShadowDenoiseEnabled))
+            bool usesDeferredLighting = UsesDeferredLighting(renderer);
+            bool perObjectShadowsEnabled = _perObjectShadowPass != null && _perObjectShadowPass.Configure(Profile, perObjectShadowVolume, pcssVolume);
+            if (perObjectShadowsEnabled)
             {
-                bool usesDeferredLighting = UsesDeferredLighting(renderer);
+                TsukuyomiPerObjectShadowRenderer.ApplyRenderingLayerMaskToAll(Profile.PerObjectShadowRenderingLayer);
+                ExcludePerObjectShadowLayerFromMainLight(ref renderingData, Profile.PerObjectShadowRenderingLayer);
+                _perObjectShadowPass.renderPassEvent = usesDeferredLighting
+                    ? RenderPassEvent.BeforeRenderingGbuffer - 1
+                    : contactShadowsEnabled
+                        ? RenderPassEvent.AfterRenderingPrePasses + 2
+                        : RenderPassEvent.AfterRenderingPrePasses;
+                renderer.EnqueuePass(_perObjectShadowPass);
+            }
+            else
+            {
+                RestoreMainLightShadowLayerOverride();
+                TsukuyomiPerObjectShadowRenderer.RestoreRenderingLayersForAll();
+            }
+
+            if (_pcssPass != null && _pcssPass.Configure(Profile, pcssVolume, contactShadowsEnabled, contactShadowDenoiseEnabled, perObjectShadowsEnabled))
+            {
                 _pcssBridgePass.renderPassEvent = usesDeferredLighting
                     ? RenderPassEvent.BeforeRenderingGbuffer
                     : contactShadowsEnabled
@@ -207,6 +272,12 @@ namespace Tsukuyomi.Rendering
             {
                 _volumeLightBridgePass.ConfigureInputFromTextureSlots();
                 renderer.EnqueuePass(_volumeLightBridgePass);
+            }
+
+            if (_postProcessPass != null && _postProcessPass.Configure(Profile, volumeStack))
+            {
+                _postProcessBridgePass.ConfigureInputFromTextureSlots();
+                renderer.EnqueuePass(_postProcessBridgePass);
             }
 
             bool useSharedDepthNormals = RequiresCameraNormals(contactShadowDenoiseEnabled, gtaoEnabled && depthPyramidEnabled);
@@ -253,9 +324,75 @@ namespace Tsukuyomi.Rendering
             PropertyInfo property = renderer.GetType().GetProperty("usesDeferredLighting", flags);
             return property != null && property.PropertyType == typeof(bool) && (bool)property.GetValue(renderer);
         }
+        private void ExcludePerObjectShadowLayerFromMainLight(ref RenderingData renderingData, RenderingLayerMask perObjectShadowRenderingLayer)
+        {
+            uint perObjectShadowLayerMask = perObjectShadowRenderingLayer;
+            if (perObjectShadowLayerMask == 0)
+            {
+                RestoreMainLightShadowLayerOverride();
+                return;
+            }
+
+            UniversalRenderPipelineAsset urpAsset = UniversalRenderPipeline.asset;
+            if (urpAsset != null && !urpAsset.useRenderingLayers && !s_WarnedPerObjectShadowRenderingLayersDisabled)
+            {
+                Debug.LogWarning("Tsukuyomi Per Object Shadows require the URP Asset \"Use Rendering Layers\" option to exclude their casters from the main light shadow map.");
+                s_WarnedPerObjectShadowRenderingLayersDisabled = true;
+            }
+
+            int mainLightIndex = renderingData.lightData.mainLightIndex;
+            if (mainLightIndex < 0 || mainLightIndex >= renderingData.lightData.visibleLights.Length)
+            {
+                RestoreMainLightShadowLayerOverride();
+                return;
+            }
+
+            VisibleLight mainLight = renderingData.lightData.visibleLights[mainLightIndex];
+            if (!mainLight.light || mainLight.lightType != LightType.Directional)
+            {
+                RestoreMainLightShadowLayerOverride();
+                return;
+            }
+
+            UniversalAdditionalLightData mainLightData = mainLight.light.GetUniversalAdditionalLightData();
+            if (_hasMainLightShadowLayerOverride && _perObjectShadowMainLight != mainLight.light)
+                RestoreMainLightShadowLayerOverride();
+
+            if (!_hasMainLightShadowLayerOverride)
+            {
+                _perObjectShadowMainLight = mainLight.light;
+                _originalMainLightCustomShadowLayers = mainLightData.customShadowLayers;
+                _originalMainLightShadowRenderingLayers = (uint)mainLightData.shadowRenderingLayers;
+                _hasMainLightShadowLayerOverride = true;
+            }
+
+            uint baseShadowLayers = _originalMainLightCustomShadowLayers
+                ? _originalMainLightShadowRenderingLayers
+                : uint.MaxValue;
+            mainLightData.customShadowLayers = true;
+            mainLightData.shadowRenderingLayers = baseShadowLayers & ~perObjectShadowLayerMask;
+        }
+
+        private void RestoreMainLightShadowLayerOverride()
+        {
+            if (!_hasMainLightShadowLayerOverride)
+                return;
+
+            if (_perObjectShadowMainLight)
+            {
+                UniversalAdditionalLightData mainLightData = _perObjectShadowMainLight.GetUniversalAdditionalLightData();
+                mainLightData.customShadowLayers = _originalMainLightCustomShadowLayers;
+                mainLightData.shadowRenderingLayers = _originalMainLightShadowRenderingLayers;
+            }
+
+            _perObjectShadowMainLight = null;
+            _hasMainLightShadowLayerOverride = false;
+        }
 
         protected override void Dispose(bool disposing)
         {
+            RestoreMainLightShadowLayerOverride();
+            TsukuyomiPerObjectShadowRenderer.RestoreRenderingLayersForAll();
             _resourceHub?.Dispose();
             _resourceHub = null;
             _contactShadowPass = null;
@@ -273,9 +410,16 @@ namespace Tsukuyomi.Rendering
             _pcssRestorePass = null;
             _pcssBridgePass = null;
             _pcssRestoreBridgePass = null;
+            _planarReflectionPass = null;
+            _planarReflectionBridgePass = null;
+            _perObjectShadowPass?.Dispose();
+            _perObjectShadowPass = null;
             _volumeLightPass?.Dispose();
             _volumeLightPass = null;
             _volumeLightBridgePass = null;
+            _postProcessPass?.Dispose();
+            _postProcessPass = null;
+            _postProcessBridgePass = null;
             _sssSkinPass?.Dispose();
             _sssSkinPass = null;
             _sssSkinBridgePass = null;
@@ -283,6 +427,12 @@ namespace Tsukuyomi.Rendering
         }
     }
 }
+
+
+
+
+
+
 
 
 

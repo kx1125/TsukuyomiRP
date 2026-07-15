@@ -13,10 +13,12 @@ Shader "Hidden/Tsukuyomi/ScreenSpacePCSSShadows"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RealtimeLights.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+        #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
         #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
         #define TSUKUYOMI_PCSS_DISK_SAMPLE_COUNT 64
+        #define APPLY_SHADOW_BIAS_FRAGMENT (defined(_SHADOW_BIAS_FRAGMENT))
 
         TEXTURE2D_X(_TsukuyomiPenumbraMaskTex);
         TEXTURE2D_X(_ContactShadowMap);
@@ -35,6 +37,25 @@ Shader "Hidden/Tsukuyomi/ScreenSpacePCSSShadows"
         float _TsukuyomiPcssMaxSamplingDistance;
         float _TsukuyomiPcssMinFilterSizeTexels;
 
+        #define TSUKUYOMI_MAX_PER_OBJECT_SHADOW_COUNT 16
+
+        #if UNITY_REVERSED_Z
+            #define TSUKUYOMI_Z_OFFSET_DIRECTION 1.0
+        #else
+            #define TSUKUYOMI_Z_OFFSET_DIRECTION (-1.0)
+        #endif
+
+        TEXTURE2D_SHADOW(_PerObjSceneShadowMap);
+        SAMPLER_CMP(sampler_PerObjSceneShadowMap);
+        float _TsukuyomiEnablePerObjectShadow;
+        int _PerObjSceneShadowCount;
+        float4x4 _PerObjSceneShadowMatrices[TSUKUYOMI_MAX_PER_OBJECT_SHADOW_COUNT];
+        float4 _PerObjSceneShadowMapRects[TSUKUYOMI_MAX_PER_OBJECT_SHADOW_COUNT];
+        float4 _PerObjSceneShadowMapSize;
+        float4 _PerObjShadowBiases[TSUKUYOMI_MAX_PER_OBJECT_SHADOW_COUNT];
+        float4 _PerObjShadowPcssParams0[TSUKUYOMI_MAX_PER_OBJECT_SHADOW_COUNT];
+        float4 _PerObjShadowPcssParams1[TSUKUYOMI_MAX_PER_OBJECT_SHADOW_COUNT];
+        float4 _PerObjShadowPcssProjs[TSUKUYOMI_MAX_PER_OBJECT_SHADOW_COUNT];
         static const float2 TsukuyomiPenumbraOffsets[4] =
         {
             float2(-1.0, 1.0),
@@ -225,6 +246,178 @@ Shader "Hidden/Tsukuyomi/ScreenSpacePCSSShadows"
             return LerpWhiteTo(FilterShadow(shadowCoord, filterRadius, jitter, pcfSamples), GetMainLightShadowParams().x);
         }
 
+        bool PerObjectShadowCoordInRect(float4 shadowCoord, float4 rect)
+        {
+            return !(shadowCoord.x < rect.x || shadowCoord.x > rect.y || shadowCoord.y < rect.z || shadowCoord.y > rect.w);
+        }
+
+        float SamplePerObjectHardShadow(int shadowIndex, float4 shadowCoord)
+        {
+            float4 rect = _PerObjSceneShadowMapRects[shadowIndex];
+            if (!PerObjectShadowCoordInRect(shadowCoord, rect) || BEYOND_SHADOW_FAR(shadowCoord))
+                return 1.0;
+
+            float shadow = SAMPLE_TEXTURE2D_SHADOW(_PerObjSceneShadowMap, sampler_PerObjSceneShadowMap, shadowCoord.xyz);
+            return LerpWhiteTo(shadow, GetMainLightShadowParams().x);
+        }
+
+        float PerObjectRawShadowDepth(float2 uv)
+        {
+            return SAMPLE_TEXTURE2D_LOD(_PerObjSceneShadowMap, sampler_LinearClamp, uv, 0).r;
+        }
+
+        float BlockerSearchRadius(float receiverDepth, float depthToRadialScale, float maxSampleDepthDistance, float minFilterRadius)
+        {
+        #if UNITY_REVERSED_Z
+            return max(min(1.0 - receiverDepth, maxSampleDepthDistance) * depthToRadialScale, minFilterRadius);
+        #else
+            return max(min(receiverDepth, maxSampleDepthDistance) * depthToRadialScale, minFilterRadius);
+        #endif
+        }
+
+        float2 ComputeFindBlockerSampleOffset(float searchRadius, int sampleIndex, float sampleCountInv, float2 jitter, float2 atlasScale, out float sampleDistNorm)
+        {
+            sampleDistNorm = (float)sampleIndex * sampleCountInv;
+            float2 offset = RotateSample(TsukuyomiPcssDisk[sampleIndex] * sampleDistNorm, jitter);
+            return offset * searchRadius * atlasScale;
+        }
+
+        float2 ComputePcfSampleOffset(float filterSize, float samplingFilterSize, int sampleIndex, float sampleCountInv, float sampleBias, float2 jitter, float2 atlasScale, float radialToDepthScale, float maxPcssOffset, out float zOffset)
+        {
+            float sampleDistNorm = sqrt((float)sampleIndex * sampleCountInv + sampleBias);
+            float2 offset = RotateSample(TsukuyomiPcssDisk[sampleIndex] * sampleDistNorm, jitter);
+            zOffset = min(filterSize * sampleDistNorm * radialToDepthScale, maxPcssOffset) * TSUKUYOMI_Z_OFFSET_DIRECTION;
+            return offset * samplingFilterSize * atlasScale;
+        }
+
+        float FindPerObjectBlocker(float4 shadowCoord, float searchRadius, float2 jitter, float2 minCoord, float2 maxCoord, float2 atlasScale, float minFilterRadius, float minFilterRadialToDepthScale, float blockerRadialToDepthScale)
+        {
+            float depthSum = 0.0;
+            float depthCount = 0.0;
+            int sampleCount = clamp((int)_TsukuyomiPcssFindBlockerSampleCount, 1, TSUKUYOMI_PCSS_DISK_SAMPLE_COUNT);
+            float sampleCountInv = rcp((float)sampleCount);
+
+            [loop]
+            for (int i = 0; i < sampleCount && i < TSUKUYOMI_PCSS_DISK_SAMPLE_COUNT; ++i)
+            {
+                float sampleDistNorm;
+                float2 uv = shadowCoord.xy + ComputeFindBlockerSampleOffset(searchRadius, i, sampleCountInv, jitter, atlasScale, sampleDistNorm);
+                if (any(uv < minCoord) || any(uv > maxCoord))
+                    continue;
+
+                float radialOffset = searchRadius * sampleDistNorm;
+                float zOffset = radialOffset * (radialOffset < minFilterRadius ? minFilterRadialToDepthScale : blockerRadialToDepthScale);
+                float receiverDepth = shadowCoord.z + TSUKUYOMI_Z_OFFSET_DIRECTION * zOffset;
+                float sampleDepth = PerObjectRawShadowDepth(uv);
+                if (COMPARE_DEVICE_DEPTH_CLOSER(sampleDepth, receiverDepth))
+                {
+                    depthSum += sampleDepth;
+                    depthCount += 1.0;
+                }
+            }
+
+            return depthCount > Eps_float() ? depthSum / depthCount : 0.0;
+        }
+
+        float EstimatePerObjectPenumbra(float receiverDepth, float avgBlockerDepth, float depthToRadialScale, float maxSampleDepthDistance, float minFilterRadius, out float filterSize, out float blockerDistance)
+        {
+            if (avgBlockerDepth < Eps_float())
+            {
+                filterSize = 0.0;
+                blockerDistance = 0.0;
+                return 0.0;
+            }
+
+            blockerDistance = min(abs(avgBlockerDepth - receiverDepth) * 0.9, maxSampleDepthDistance);
+            filterSize = blockerDistance * depthToRadialScale;
+            return max(filterSize, minFilterRadius);
+        }
+
+        float FilterPerObjectPCSS(float4 shadowCoord, float samplingFilterSize, float filterSize, float2 jitter, float2 minCoord, float2 maxCoord, float2 atlasScale, float radialToDepthScale, float maxPcssOffset)
+        {
+            float sum = 0.0;
+            float count = 0.0;
+            int sampleCount = clamp((int)_TsukuyomiPcssPcfSampleCount, 1, TSUKUYOMI_PCSS_DISK_SAMPLE_COUNT);
+            float sampleCountInv = rcp((float)sampleCount);
+            float sampleBias = 0.5 * sampleCountInv;
+
+            [loop]
+            for (int i = 0; i < sampleCount && i < TSUKUYOMI_PCSS_DISK_SAMPLE_COUNT; ++i)
+            {
+                float zOffset;
+                float2 uv = shadowCoord.xy + ComputePcfSampleOffset(filterSize, samplingFilterSize, i, sampleCountInv, sampleBias, jitter, atlasScale, radialToDepthScale, maxPcssOffset, zOffset);
+                if (any(uv < minCoord) || any(uv > maxCoord))
+                    continue;
+
+                sum += SAMPLE_TEXTURE2D_SHADOW(_PerObjSceneShadowMap, sampler_PerObjSceneShadowMap, float3(uv, shadowCoord.z + zOffset));
+                count += 1.0;
+            }
+
+            return count > 0.0 ? sum / count : 1.0;
+        }
+
+        float3 ApplyPerObjectShadowBias(float3 positionWS, float3 normalWS, float3 lightDirection, int shadowIndex)
+        {
+            float4 shadowBias = _PerObjShadowBiases[shadowIndex];
+            float invNdotL = 1.0 - saturate(dot(lightDirection, normalWS));
+            float scale = -invNdotL * shadowBias.y;
+            positionWS = -lightDirection * shadowBias.xxx + positionWS;
+            positionWS = normalWS * scale.xxx + positionWS;
+            return positionWS;
+        }
+
+        float SamplePerObjectPCSS(int shadowIndex, float4 shadowCoord, float2 positionCS)
+        {
+            float4 rect = _PerObjSceneShadowMapRects[shadowIndex];
+            if (!PerObjectShadowCoordInRect(shadowCoord, rect) || BEYOND_SHADOW_FAR(shadowCoord))
+                return 1.0;
+
+            float2 minCoord = float2(rect.x, rect.z);
+            float2 maxCoord = float2(rect.y, rect.w);
+            float2 atlasScale = max(maxCoord - minCoord, Eps_float());
+            float4 pcss0 = _PerObjShadowPcssParams0[shadowIndex];
+            float4 pcss1 = _PerObjShadowPcssParams1[shadowIndex];
+            float4 proj = _PerObjShadowPcssProjs[shadowIndex];
+            float minFilterRadius = (_PerObjSceneShadowMapSize.x / atlasScale.x) * max(0.0, pcss1.x);
+            float maxPcssOffset = max(0.0, pcss0.w * abs(proj.z));
+            float maxSampleDepthDistance = max(0.0, pcss0.z * abs(proj.z));
+            float2 jitter = SampleJitter(positionCS);
+
+            float searchRadius = BlockerSearchRadius(shadowCoord.z, max(0.0, pcss0.x), maxSampleDepthDistance, minFilterRadius);
+            float avgBlockerDepth = FindPerObjectBlocker(shadowCoord, searchRadius, jitter, minCoord, maxCoord, atlasScale, minFilterRadius, pcss1.y, pcss1.z);
+
+            float filterSize;
+            float blockerDistance;
+            float samplingFilterSize = EstimatePerObjectPenumbra(shadowCoord.z, avgBlockerDepth, max(0.0, pcss0.x), maxSampleDepthDistance, minFilterRadius, filterSize, blockerDistance);
+            if (samplingFilterSize <= Eps_float())
+                return 1.0;
+
+            maxPcssOffset = min(maxPcssOffset, blockerDistance * 0.25);
+            return LerpWhiteTo(FilterPerObjectPCSS(shadowCoord, samplingFilterSize, filterSize, jitter, minCoord, maxCoord, atlasScale, pcss1.y, maxPcssOffset), GetMainLightShadowParams().x);
+        }
+        float SamplePerObjectScreenShadow(float3 positionWS, float3 normalWS, half3 lightDir, float2 positionCS, bool enablePcss, float penumbraMask)
+        {
+            if (_TsukuyomiEnablePerObjectShadow < 0.5 || _PerObjSceneShadowCount <= 0)
+                return 1.0;
+
+            float shadow = 1.0;
+            int count = min(_PerObjSceneShadowCount, TSUKUYOMI_MAX_PER_OBJECT_SHADOW_COUNT);
+            [loop]
+            for (int i = 0; i < count; ++i)
+            {
+                float3 biasPositionWS = positionWS;
+#if APPLY_SHADOW_BIAS_FRAGMENT
+                biasPositionWS = ApplyPerObjectShadowBias(positionWS, normalWS, lightDir, i);
+#endif
+                float4 shadowCoord = mul(_PerObjSceneShadowMatrices[i], float4(biasPositionWS, 1.0));
+                float sample = enablePcss && penumbraMask > Eps_float()
+                    ? SamplePerObjectPCSS(i, shadowCoord, positionCS)
+                    : SamplePerObjectHardShadow(i, shadowCoord);
+                shadow = min(shadow, sample);
+            }
+
+            return shadow;
+        }
         float4 LoadWorldAndShadow(float2 uv, out float deviceDepth)
         {
             deviceDepth = SampleSceneDepth(uv);
@@ -249,8 +442,13 @@ Shader "Hidden/Tsukuyomi/ScreenSpacePCSSShadows"
                 float sampleDepth;
                 float4 shadowCoord = LoadWorldAndShadow(uv, sampleDepth);
                 float realtimeShadow = SampleRawMainLightShadow(shadowCoord);
+                float3 samplePositionWS = ComputeWorldSpacePosition(uv, sampleDepth, unity_MatrixInvVP);
+                float3 normalWS = LoadSceneNormals(uv * _ScreenParams.xy);
+                half3 lightDir = GetMainLight().direction;
+                float perObjectShadow = SamplePerObjectScreenShadow(samplePositionWS, normalWS, lightDir, uv * _ScreenParams.xy, false, 1.0);
+                float combinedShadow = min(realtimeShadow, perObjectShadow);
 
-                shadowAttenuation += 0.25 * lerp(1.0, realtimeShadow, step(Eps_float(), sampleDepth));
+                shadowAttenuation += 0.25 * lerp(1.0, combinedShadow, step(Eps_float(), sampleDepth));
             }
 
             return shadowAttenuation > 1.0 - Eps_float() ? 0.0 : 1.0;
@@ -309,6 +507,9 @@ Shader "Hidden/Tsukuyomi/ScreenSpacePCSSShadows"
                 return half4(1.0, 1.0, 1.0, 1.0);
 
             float penumbraMask = SAMPLE_TEXTURE2D_X(_TsukuyomiPenumbraMaskTex, sampler_LinearClamp, UnityStereoTransformScreenSpaceTex(input.texcoord)).r;
+            float3 positionWS = ComputeWorldSpacePosition(input.texcoord.xy, deviceDepth, unity_MatrixInvVP);
+            float3 normalWS = LoadSceneNormals(input.positionCS.xy);
+            half3 lightDir = GetMainLight().direction;
             float attenuation = 1.0;
             if (_TsukuyomiEnableMainLightShadow > 0.5)
             {
@@ -316,6 +517,8 @@ Shader "Hidden/Tsukuyomi/ScreenSpacePCSSShadows"
                     ? SampleMainLightPCSS(shadowCoord, input.positionCS.xy)
                     : SampleMainLightShadowWithStrength(shadowCoord);
             }
+
+            attenuation = min(attenuation, SamplePerObjectScreenShadow(positionWS, normalWS, lightDir, input.positionCS.xy, _TsukuyomiEnablePCSS > 0.5, penumbraMask));
 
 #ifdef _CONTACT_SHADOWS
             float contactShadow = 1.0 - LOAD_TEXTURE2D_X(_ContactShadowMap, input.positionCS.xy).r;
@@ -334,6 +537,17 @@ Shader "Hidden/Tsukuyomi/ScreenSpacePCSSShadows"
                 ? SAMPLE_TEXTURE2D_X(_TsukuyomiBaseScreenSpaceShadowmapTexture, sampler_PointClamp, uv).r
                 : 1.0;
 
+            float deviceDepth = SampleSceneDepth(input.texcoord.xy);
+#if !UNITY_REVERSED_Z
+            deviceDepth = deviceDepth * 2.0 - 1.0;
+#endif
+            if (deviceDepth > Eps_float())
+            {
+                float3 positionWS = ComputeWorldSpacePosition(input.texcoord.xy, deviceDepth, unity_MatrixInvVP);
+                float3 normalWS = LoadSceneNormals(input.positionCS.xy);
+                half3 lightDir = GetMainLight().direction;
+                attenuation = min(attenuation, SamplePerObjectScreenShadow(positionWS, normalWS, lightDir, input.positionCS.xy, false, 1.0));
+            }
 #ifdef _CONTACT_SHADOWS
             float contactShadow = 1.0 - LOAD_TEXTURE2D_X(_ContactShadowMap, input.positionCS.xy).r;
             attenuation = min(attenuation, contactShadow);
@@ -413,3 +627,16 @@ Shader "Hidden/Tsukuyomi/ScreenSpacePCSSShadows"
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+

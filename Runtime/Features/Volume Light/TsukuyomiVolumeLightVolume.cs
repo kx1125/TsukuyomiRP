@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace Tsukuyomi.Rendering
 {
-    [Serializable, VolumeComponentMenu("Tsukuyomi RP/Volume Light")]
+    [Serializable, VolumeComponentMenu("TsukuyomiRP/Volume Light")]
     public sealed class TsukuyomiVolumeLightVolume : VolumeComponent
     {
         public BoolParameter enable = new(false, BoolParameter.DisplayType.EnumPopup);

@@ -1,4 +1,4 @@
-﻿Shader "SSSSkin/Standard PBR"
+Shader "SSSSkin/Standard PBR"
 {
     Properties
     {
@@ -19,6 +19,15 @@
         [NoScaleOffset] _DetailNormalMap ("Detail Normal Map", 2D) = "bump" {}
         _DetailNormalMapScale ("Detail Normal Scale", Range(0,2)) = 1
         _DetailNormalMapTile ("Detail Normal Tile", Float) = 1
+
+        [Header(Tsukuyomi Lighting)]
+        _MicroShadowOpacity("Micro Shadow Opacity", Range(0.0, 1.0)) = 1.0
+        _RoughDiffuseStrength("Rough Diffuse Strength", Range(0.0, 1.0)) = 1.0
+        _IndirectSpecularFGDStrength("Indirect Specular FGD Strength", Range(0.0, 1.0)) = 1.0
+        _IndirectDiffuseIntensity("Indirect Diffuse Intensity", Range(0.0, 2.0)) = 1.0
+        _IndirectSpecularIntensity("Indirect Specular Intensity", Range(0.0, 2.0)) = 1.0
+        _HorizonOcclusionPower("Horizon Occlusion Power", Range(0.0, 4.0)) = 2.0
+
         [HideInInspector] _Surface ("Surface", Float) = 0.0
         [HideInInspector] _Cull ("Cull", Float) = 2.0
         [HideInInspector] _AlphaToMask ("Alpha To Mask", Float) = 0.0
@@ -40,41 +49,29 @@
 
             HLSLPROGRAM
             #pragma target 3.0
-            #pragma vertex SSSSkinPBRVert
-            #pragma fragment ForwardFragment
+            #pragma vertex SSSSkinVert
+            #pragma fragment SSSSkinPBRForwardFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ EVALUATE_SH_MIXED EVALUATE_SH_VERTEX
             #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_BLENDING
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_BOX_PROJECTION
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_ATLAS
             #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
+            #pragma multi_compile_fragment _ _SCREEN_SPACE_IRRADIANCE
+            #pragma multi_compile_fragment _ _LIGHT_COOKIES
+            #pragma multi_compile _ _LIGHT_LAYERS
             #pragma multi_compile _ LIGHTMAP_SHADOW_MIXING
             #pragma multi_compile _ SHADOWS_SHADOWMASK
+            #pragma multi_compile _ ENABLE_DETAIL_NORMALMAP
             #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
 
-            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinPBRCommon.hlsl"
-
-            half4 ForwardFragment(SSSSkinPBRVaryings input) : SV_Target
-            {
-                UNITY_SETUP_INSTANCE_ID(input);
-                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-
-                half4 albedo = SamplePBRAlbedo(input.uv);
-                #if defined(_ALPHATEST_ON)
-                clip(albedo.a - _Cutoff);
-                #endif
-
-                half3 normalTS = half3(0.0h, 0.0h, 1.0h);
-                half3 normalWS = NormalizeNormalPerPixel(SamplePBRNormalWS(input));
-                half3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
-                half occlusion = SamplePBROcclusion(input.uv);
-                half4 pbrMask = SamplePBRMask(input.uv);
-
-                InputData inputData = BuildSSSSkinPBRInputData(input, normalWS, viewDirWS);
-                SurfaceData surfaceData = BuildSSSSkinPBRSurfaceData(albedo, normalTS, occlusion, pbrMask);
-                return UniversalFragmentPBR(inputData, surfaceData);
-            }
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinPass.hlsl"
             ENDHLSL
         }
 
@@ -93,13 +90,12 @@
             #pragma vertex ShadowPassVertex
             #pragma fragment ShadowPassFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
             #pragma multi_compile _ LOD_FADE_CROSSFADE
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/ShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -118,12 +114,11 @@
             #pragma vertex DepthOnlyVertex
             #pragma fragment DepthOnlyFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
             #pragma multi_compile _ LOD_FADE_CROSSFADE
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/DepthOnlyPass.hlsl"
             ENDHLSL
         }
@@ -138,24 +133,20 @@
 
             HLSLPROGRAM
             #pragma target 2.0
-            #pragma vertex DepthNormalsVertex
-            #pragma fragment DepthNormalsFragment
-            #pragma shader_feature_local _NORMALMAP
-            #pragma shader_feature_local _PARALLAXMAP
-            #pragma shader_feature_local _ _DETAIL_MULX2 _DETAIL_SCALED
+            #pragma vertex SSSSkinDepthNormalsVertex
+            #pragma fragment SSSSkinDepthNormalsFragment
             #pragma shader_feature_local _ALPHATEST_ON
-            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
             #pragma multi_compile _ LOD_FADE_CROSSFADE
+            #pragma multi_compile _ ENABLE_DETAIL_NORMALMAP
+            #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitDepthNormalsPass.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSS Skin/SSSSkinPass.hlsl"
             ENDHLSL
         }
     }
 
     Fallback Off
 }
-

@@ -20,7 +20,6 @@ namespace Tsukuyomi.Rendering
         private static readonly int BaseScreenSpaceShadowmapTextureId = Shader.PropertyToID("_TsukuyomiBaseScreenSpaceShadowmapTexture");
         private static readonly int EnablePcssId = Shader.PropertyToID("_TsukuyomiEnablePCSS");
         private static readonly int EnableMainLightShadowId = Shader.PropertyToID("_TsukuyomiEnableMainLightShadow");
-        private static readonly int InverseViewProjectionMatrixId = Shader.PropertyToID("unity_MatrixInvVP");
         private static readonly int PenumbraMaskTexId = Shader.PropertyToID("_TsukuyomiPenumbraMaskTex");
         private static readonly int PenumbraMaskTexelSizeId = Shader.PropertyToID("_TsukuyomiPenumbraMaskTex_TexelSize");
         private static readonly int ColorAttachmentTexelSizeId = Shader.PropertyToID("_TsukuyomiColorAttachmentTexelSize");
@@ -52,6 +51,7 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiPcssResolvedSettings _settings;
         private bool _contactShadowsEnabled;
         private bool _contactShadowDenoiseEnabled;
+        private bool _perObjectShadowsEnabled;
         private readonly ProfilingSampler _pcssPenumbraSampler = new("PCSS Penumbra");
         private readonly ProfilingSampler _screenSpaceShadowSampler = new("Screen Space Shadows");
 
@@ -73,21 +73,23 @@ namespace Tsukuyomi.Rendering
             TsukuyomiPipelineProfile profile,
             TsukuyomiPcssVolume volume,
             bool contactShadowsEnabled = false,
-            bool contactShadowDenoiseEnabled = false)
+            bool contactShadowDenoiseEnabled = false,
+            bool perObjectShadowsEnabled = false)
         {
             _profile = profile;
             _contactShadowsEnabled = contactShadowsEnabled;
             _contactShadowDenoiseEnabled = contactShadowDenoiseEnabled;
+            _perObjectShadowsEnabled = perObjectShadowsEnabled;
 
             if (profile == null)
                 return false;
 
             _settings = TsukuyomiPcssResolvedSettings.From(profile, volume);
 
-            if (!_settings.Enabled && !contactShadowsEnabled)
+            if (!_settings.Enabled && !contactShadowsEnabled && !perObjectShadowsEnabled)
                 return false;
 
-            if (_material != null && (_settings.Enabled || _screenSpaceShadowsMaterial != null))
+            if (_material != null && (_settings.Enabled || perObjectShadowsEnabled || contactShadowsEnabled || _screenSpaceShadowsMaterial != null))
                 return true;
 
             if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources))
@@ -96,7 +98,7 @@ namespace Tsukuyomi.Rendering
             if (_material == null && !LoadPcssMaterial(resources))
                 return false;
 
-            if (!_settings.Enabled && contactShadowsEnabled && _screenSpaceShadowsMaterial == null && !LoadScreenSpaceShadowsMaterial(resources))
+            if (!_settings.Enabled && (contactShadowsEnabled || perObjectShadowsEnabled) && _screenSpaceShadowsMaterial == null && !LoadScreenSpaceShadowsMaterial(resources))
                 return false;
 
             return true;
@@ -149,7 +151,7 @@ namespace Tsukuyomi.Rendering
 
         public override bool IsActive(in FrameContext frame)
         {
-            return base.IsActive(frame) && _profile != null && (_settings.Enabled || _contactShadowsEnabled) && _material != null;
+            return base.IsActive(frame) && _profile != null && (_settings.Enabled || _contactShadowsEnabled || _perObjectShadowsEnabled) && _material != null;
         }
 
         public void Dispose()
@@ -166,7 +168,7 @@ namespace Tsukuyomi.Rendering
 
         public override void Record(in UnsafePassContext context)
         {
-            if (!s_KeywordsInitialized || _material == null || _profile == null || (!_settings.Enabled && !_contactShadowsEnabled))
+            if (!s_KeywordsInitialized || _material == null || _profile == null || (!_settings.Enabled && !_contactShadowsEnabled && !_perObjectShadowsEnabled))
                 return;
 
             var shadowData = context.FrameData.Get<UniversalShadowData>();
@@ -212,6 +214,7 @@ namespace Tsukuyomi.Rendering
             bool enablePcss = _settings.Enabled;
             bool useOfficialScreenSpaceShadows = !enablePcss && useMainLightShadow && screenSpaceShadowsMaterial != null && baseScreenShadow.IsValid();
             bool enableContactShadows = _contactShadowsEnabled && contactShadowMap.IsValid();
+            bool enablePerObjectShadows = _perObjectShadowsEnabled;
             ProfilingSampler pcssPenumbraSampler = _pcssPenumbraSampler;
             ProfilingSampler screenSpaceShadowSampler = _screenSpaceShadowSampler;
 
@@ -263,6 +266,7 @@ namespace Tsukuyomi.Rendering
                     SetCommonGlobals(graphContext, settings, cameraDepthTexture, cameraData);
                     graphContext.cmd.SetKeyword(ContactShadowsKeyword, enableContactShadows);
                     graphContext.cmd.SetGlobalFloat(EnableMainLightShadowId, useMainLightShadow ? 1.0f : 0.0f);
+                    graphContext.cmd.SetGlobalFloat("_TsukuyomiEnablePerObjectShadow", enablePerObjectShadows ? 1.0f : 0.0f);
 
                     if (enablePcss)
                     {
@@ -297,10 +301,6 @@ namespace Tsukuyomi.Rendering
                     graphContext.cmd.SetKeyword(MainLightShadowsKeyword, false);
                     graphContext.cmd.SetKeyword(MainLightShadowCascadesKeyword, false);
                     graphContext.cmd.SetKeyword(MainLightShadowScreenKeyword, true);
-
-                    TextureUVOrigin activeOrigin = graphContext.GetTextureUVOrigin(activeColorTexture);
-                    Matrix4x4 activeInvVP = ComputeInverseViewProjectionMatrix(activeOrigin, cameraData);
-                    graphContext.cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, activeInvVP);
                 }
             });
         }
@@ -337,10 +337,6 @@ namespace Tsukuyomi.Rendering
             SetPcssSettings(context.cmd, settings);
             context.cmd.SetGlobalVector(PenumbraMaskTexelSizeId, settings.PenumbraMaskTexelSize);
             context.cmd.SetGlobalVector(ColorAttachmentTexelSizeId, settings.ColorAttachmentTexelSize);
-
-            TextureUVOrigin depthOrigin = context.GetTextureUVOrigin(cameraDepthTexture);
-            Matrix4x4 depthInvVP = ComputeInverseViewProjectionMatrix(depthOrigin, cameraData);
-            context.cmd.SetGlobalMatrix(InverseViewProjectionMatrixId, depthInvVP);
         }
 
         private static void SetPcssSettings(UnsafeCommandBuffer cmd, TsukuyomiPcssSettings settings)
@@ -353,13 +349,6 @@ namespace Tsukuyomi.Rendering
             cmd.SetGlobalFloat(MaxPenumbraSizeId, settings.MaxPenumbraSize);
             cmd.SetGlobalFloat(MaxSamplingDistanceId, settings.MaxSamplingDistance);
             cmd.SetGlobalFloat(MinFilterSizeTexelsId, settings.MinFilterSizeTexels);
-        }
-
-        private static Matrix4x4 ComputeInverseViewProjectionMatrix(TextureUVOrigin textureUVOrigin, UniversalCameraData cameraData)
-        {
-            bool isFlipped = textureUVOrigin == TextureUVOrigin.BottomLeft;
-            Matrix4x4 projection = GL.GetGPUProjectionMatrix(cameraData.GetProjectionMatrix(), isFlipped);
-            return Matrix4x4.Inverse(projection * cameraData.GetViewMatrix());
         }
 
         private readonly struct TsukuyomiPcssSettings
@@ -427,3 +416,5 @@ namespace Tsukuyomi.Rendering
         }
     }
 }
+
+

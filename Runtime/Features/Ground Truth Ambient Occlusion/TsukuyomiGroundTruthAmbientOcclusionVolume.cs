@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace Tsukuyomi.Rendering
 {
-    [Serializable, VolumeComponentMenu("Tsukuyomi RP/Ground Truth Ambient Occlusion")]
+    [Serializable, VolumeComponentMenu("TsukuyomiRP/Ground Truth Ambient Occlusion")]
     public sealed class TsukuyomiGroundTruthAmbientOcclusionVolume : VolumeComponent
     {
         public BoolParameter enable = new(false);

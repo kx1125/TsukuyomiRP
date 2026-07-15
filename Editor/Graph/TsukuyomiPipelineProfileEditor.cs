@@ -9,10 +9,13 @@ namespace Tsukuyomi.Rendering.Editor
     public class TsukuyomiPipelineProfileEditor : UnityEditor.Editor
     {
         private static bool s_RenderingFeaturesExpanded = true;
+        private static bool s_PlanarReflectionExpanded = true;
         private static bool s_PcssExpanded = true;
+        private static bool s_PerObjectShadowExpanded = true;
         private static bool s_ContactShadowExpanded = true;
         private static bool s_GtaoExpanded = true;
         private static bool s_VolumeLightExpanded = true;
+        private static bool s_PostProcessingExpanded = true;
         private static bool s_SssSkinExpanded = true;
         private static bool s_PassListExpanded = true;
 
@@ -65,12 +68,45 @@ namespace Tsukuyomi.Rendering.Editor
             }
 
             EditorGUI.indentLevel++;
+            DrawPlanarReflectionSettings();
             DrawPcssSettings();
+            DrawPerObjectShadowSettings();
             DrawContactShadowSettings();
             DrawGtaoSettings();
             DrawVolumeLightSettings();
+            DrawPostProcessingSettings();
             DrawSssSkinSettings();
             EditorGUI.indentLevel--;
+        }
+
+        private void DrawPlanarReflectionSettings()
+        {
+            SerializedProperty enablePlanarReflection = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnablePlanarReflection));
+
+            CoreEditorUtils.DrawSplitter();
+            s_PlanarReflectionExpanded = CoreEditorUtils.DrawHeaderToggleFoldout(
+                EditorGUIUtility.TrTextContent("Planar Reflection"),
+                s_PlanarReflectionExpanded,
+                enablePlanarReflection,
+                null,
+                null,
+                null,
+                null);
+
+            if (s_PlanarReflectionExpanded)
+            {
+                EditorGUI.indentLevel++;
+                using (new EditorGUI.DisabledScope(!enablePlanarReflection.boolValue))
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.PlanarReflectionRenderTextureScale)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.PlanarReflectionLayerMask)));
+                    EditorGUILayout.HelpBox("Add a TsukuyomiPlanarReflectionPlane component in the scene to define the active reflection plane. The reflection pass renders the scene skybox before opaque objects.", MessageType.Info);
+                }
+                EditorGUI.indentLevel--;
+            }
+
+            serializedObject.ApplyModifiedProperties();
+            CoreEditorUtils.DrawSplitter();
         }
 
         private void DrawPcssSettings()
@@ -106,6 +142,35 @@ namespace Tsukuyomi.Rendering.Editor
             CoreEditorUtils.DrawSplitter();
         }
 
+        private void DrawPerObjectShadowSettings()
+        {
+            SerializedProperty enablePerObjectShadow = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnablePerObjectShadow));
+
+            s_PerObjectShadowExpanded = CoreEditorUtils.DrawHeaderToggleFoldout(
+                EditorGUIUtility.TrTextContent("Per Object Shadows"),
+                s_PerObjectShadowExpanded,
+                enablePerObjectShadow,
+                null,
+                null,
+                null,
+                null);
+
+            if (s_PerObjectShadowExpanded)
+            {
+                EditorGUI.indentLevel++;
+                using (new EditorGUI.DisabledScope(!enablePerObjectShadow.boolValue))
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.PerObjectShadowRenderingLayer)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.PerObjectShadowDepthBits)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.PerObjectShadowTileResolution)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.PerObjectShadowLengthOffset)));
+                }
+                EditorGUI.indentLevel--;
+            }
+
+            serializedObject.ApplyModifiedProperties();
+            CoreEditorUtils.DrawSplitter();
+        }
         private void DrawVolumeLightSettings()
         {
             SerializedProperty enableVolumeLight = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableVolumeLight));
@@ -147,6 +212,90 @@ namespace Tsukuyomi.Rendering.Editor
 
             serializedObject.ApplyModifiedProperties();
             CoreEditorUtils.DrawSplitter();
+        }
+
+        private void DrawPostProcessingSettings()
+        {
+            SerializedProperty enablePostProcessing = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableTsukuyomiPostProcessing));
+            SerializedProperty enableCustomBloom = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableCustomBloom));
+            SerializedProperty enableTonemapping = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableTonemapping));
+
+            s_PostProcessingExpanded = CoreEditorUtils.DrawHeaderToggleFoldout(
+                EditorGUIUtility.TrTextContent("Post Processing"),
+                s_PostProcessingExpanded,
+                enablePostProcessing,
+                null,
+                null,
+                null,
+                null);
+
+            if (s_PostProcessingExpanded)
+            {
+                EditorGUI.indentLevel++;
+                using (new EditorGUI.DisabledScope(!enablePostProcessing.boolValue))
+                {
+                    EditorGUILayout.PropertyField(enableCustomBloom, EditorGUIUtility.TrTextContent("Custom Bloom"));
+                    using (new EditorGUI.DisabledScope(!enableCustomBloom.boolValue))
+                    {
+                        EditorGUI.indentLevel++;
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.CustomBloomThreshold)));
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.CustomBloomIntensity)));
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.CustomBloomLumRangeScale)));
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.CustomBloomPreFilterScale)));
+                        DrawClampedVector4(
+                            serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.CustomBloomBlurCompositeWeight)),
+                            EditorGUIUtility.TrTextContent("Custom Bloom Blur Composite Weight"));
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.CustomBloomTint)));
+                        EditorGUI.indentLevel--;
+                    }
+
+                    EditorGUILayout.PropertyField(enableTonemapping, EditorGUIUtility.TrTextContent("Tonemapping"));
+                    using (new EditorGUI.DisabledScope(!enableTonemapping.boolValue))
+                    {
+                        EditorGUI.indentLevel++;
+                        SerializedProperty tonemappingMode = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.TonemappingMode));
+                        EditorGUILayout.PropertyField(tonemappingMode);
+
+                        if ((TsukuyomiTonemappingMode)tonemappingMode.enumValueIndex == TsukuyomiTonemappingMode.GranTurismo)
+                        {
+                            EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.TonemappingMaxBrightness)));
+                            EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.TonemappingContrast)));
+                            EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.TonemappingLinearSectionStart)));
+                            EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.TonemappingLinearSectionLength)));
+                            EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.TonemappingBlackPow)));
+                            EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.TonemappingBlackMin)));
+                        }
+
+                        EditorGUI.indentLevel--;
+                    }
+                }
+                EditorGUI.indentLevel--;
+            }
+
+            serializedObject.ApplyModifiedProperties();
+            CoreEditorUtils.DrawSplitter();
+        }
+
+        private static void DrawClampedVector4(SerializedProperty property, GUIContent label)
+        {
+            if (property == null)
+                return;
+
+            Vector4 value = property.vector4Value;
+            value.x = Mathf.Clamp01(value.x);
+            value.y = Mathf.Clamp01(value.y);
+            value.z = Mathf.Clamp01(value.z);
+            value.w = Mathf.Clamp01(value.w);
+
+            EditorGUILayout.LabelField(label);
+            EditorGUI.indentLevel++;
+            value.x = EditorGUILayout.Slider("X", value.x, 0.0f, 1.0f);
+            value.y = EditorGUILayout.Slider("Y", value.y, 0.0f, 1.0f);
+            value.z = EditorGUILayout.Slider("Z", value.z, 0.0f, 1.0f);
+            value.w = EditorGUILayout.Slider("W", value.w, 0.0f, 1.0f);
+            EditorGUI.indentLevel--;
+
+            property.vector4Value = value;
         }
 
         private void DrawGtaoSettings()
@@ -292,3 +441,4 @@ namespace Tsukuyomi.Rendering.Editor
         }
     }
 }
+

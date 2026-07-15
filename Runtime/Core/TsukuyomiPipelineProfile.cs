@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 
 namespace Tsukuyomi.Rendering
@@ -17,9 +18,28 @@ namespace Tsukuyomi.Rendering
         Low
     }
 
+    public enum TsukuyomiTonemappingMode
+    {
+        None,
+        Neutral,
+        ACES,
+        [InspectorName("ACES Simple")]
+        ACESSimple,
+        [InspectorName("Gran Turismo")]
+        GranTurismo
+    }
+
     [CreateAssetMenu(menuName = "TsukuyomiRpP/Pipeline Profile", fileName = "TsukuyomiPipelineProfile")]
     public class TsukuyomiPipelineProfile : ScriptableObject
     {
+        [Header("Planar Reflection")]
+        public bool EnablePlanarReflection;
+
+        [Min(0.01f)]
+        public float PlanarReflectionRenderTextureScale = 0.5f;
+
+        public LayerMask PlanarReflectionLayerMask = -1;
+
         public bool EnablePCSS;
 
         [Min(1)]
@@ -48,6 +68,18 @@ namespace Tsukuyomi.Rendering
 
         [Range(1, 32)]
         public int PcssPenumbraMaskScale = 4;
+
+        [Header("Per Object Shadow")]
+        public bool EnablePerObjectShadow;
+
+        public RenderingLayerMask PerObjectShadowRenderingLayer = TsukuyomiPerObjectShadowDefaults.RenderingLayerMask;
+
+        public TsukuyomiPerObjectShadowDepthBits PerObjectShadowDepthBits = TsukuyomiPerObjectShadowDepthBits.Depth16;
+
+        public TsukuyomiPerObjectShadowTileResolution PerObjectShadowTileResolution = TsukuyomiPerObjectShadowTileResolution._1024;
+
+        [Range(0.0f, 1000.0f)]
+        public float PerObjectShadowLengthOffset = 500.0f;
 
         public bool EnableContactShadow;
 
@@ -167,6 +199,49 @@ namespace Tsukuyomi.Rendering
         [Range(0.0f, 0.1f)]
         public float VolumeLightTransmittanceThreshold = 0.01f;
 
+        [Header("Post Processing")]
+        public bool EnableTsukuyomiPostProcessing = true;
+
+        public bool EnableCustomBloom;
+
+        [Min(0.0f)]
+        public float CustomBloomThreshold = 0.7f;
+
+        [Min(0.0f)]
+        public float CustomBloomIntensity = 0.75f;
+
+        [Range(0.0f, 1.0f)]
+        public float CustomBloomLumRangeScale = 0.2f;
+
+        [Range(0.0f, 5.0f)]
+        public float CustomBloomPreFilterScale = 2.5f;
+
+        public Vector4 CustomBloomBlurCompositeWeight = new(0.3f, 0.3f, 0.26f, 0.15f);
+
+        public Color CustomBloomTint = new(1.0f, 1.0f, 1.0f, 0.0f);
+
+        public bool EnableTonemapping;
+
+        public TsukuyomiTonemappingMode TonemappingMode = TsukuyomiTonemappingMode.None;
+
+        [Range(1.0f, 20.0f)]
+        public float TonemappingMaxBrightness = 1.0f;
+
+        [Range(0.0f, 5.0f)]
+        public float TonemappingContrast = 1.11f;
+
+        [Range(0.0f, 1.0f)]
+        public float TonemappingLinearSectionStart = 0.2f;
+
+        [Range(0.0f, 1.0f)]
+        public float TonemappingLinearSectionLength = 0.4f;
+
+        [Range(1.0f, 3.0f)]
+        public float TonemappingBlackPow = 1.29f;
+
+        [Range(0.0f, 1.0f)]
+        public float TonemappingBlackMin = 0.0f;
+
 
         [Header("SSS Skin")]
         public bool EnableSssSkin;
@@ -220,5 +295,10 @@ namespace Tsukuyomi.Rendering
         public string GraphLayoutData;
     }
 }
+
+
+
+
+
 
 

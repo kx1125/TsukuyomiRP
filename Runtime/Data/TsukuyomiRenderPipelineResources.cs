@@ -68,6 +68,13 @@ namespace Tsukuyomi.Rendering
         [SerializeField]
         private Material sssSkinBlurMaterial;
 
+        [Header("Post Processing")]
+        [SerializeField]
+        private Shader postProcessUberShader;
+
+        [SerializeField]
+        private Material postProcessUberMaterial;
+
         [Header("FSR3 Upscaler Resources")]
         [SerializeField]
         private TsukuyomiFsr3Shaders fsr3Shaders = new();
@@ -101,6 +108,8 @@ namespace Tsukuyomi.Rendering
         public ComputeShader VolumetricFogUpsampleComputeShader => volumetricFogUpsampleComputeShader;
         public Shader SssSkinBlurShader => sssSkinBlurShader;
         public Material SssSkinBlurMaterial => sssSkinBlurMaterial;
+        public Shader PostProcessUberShader => postProcessUberShader;
+        public Material PostProcessUberMaterial => postProcessUberMaterial;
         public Texture2D DefaultWhiteTexture => defaultWhiteTexture;
         public Texture2D DefaultBlackTexture => defaultBlackTexture;
         public Texture2D DefaultNormalTexture => defaultNormalTexture;
@@ -116,6 +125,7 @@ namespace Tsukuyomi.Rendering
         public bool HasVolumeLightResources => (volumetricFogShader != null || volumetricFogMaterial != null)
             && (downsampleDepthShader != null || downsampleDepthMaterial != null);
         public bool HasSssSkinResources => sssSkinBlurShader != null || sssSkinBlurMaterial != null;
+        public bool HasPostProcessResources => postProcessUberShader != null || postProcessUberMaterial != null;
         public bool HasFsr3Resources => fsr3Shaders != null && fsr3Shaders.IsValid;
     }
 }

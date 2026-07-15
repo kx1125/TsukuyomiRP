@@ -11,6 +11,7 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_ShowDepthPyramid = true;
         private static bool s_ShowGtao = true;
         private static bool s_ShowVolumeLight = true;
+        private static bool s_ShowPostProcessing = true;
         private static bool s_ShowFsr3Resources = true;
         private static bool s_ShowDefaultTextures = true;
 
@@ -54,6 +55,12 @@ namespace Tsukuyomi.Rendering.Editor
                 "volumetricFogRaymarchComputeShader",
                 "volumetricFogBlurComputeShader",
                 "volumetricFogUpsampleComputeShader");
+
+            DrawFoldout(
+                ref s_ShowPostProcessing,
+                "Post Processing",
+                "postProcessUberShader",
+                "postProcessUberMaterial");
 
             DrawChildFoldout(ref s_ShowFsr3Resources, "FSR3 Resources", "fsr3Shaders");
 

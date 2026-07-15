@@ -31,6 +31,8 @@ MonoBehaviour:
   volumetricFogUpsampleComputeShader: {fileID: 7200000, guid: 7f09899e19697cf4fb572d64e783bf8d, type: 3}
   sssSkinBlurShader: {fileID: 4800000, guid: 94036da6e0ac2de499bce2e73a776188, type: 3}
   sssSkinBlurMaterial: {fileID: 0}
+  postProcessUberShader: {fileID: 4800000, guid: b3f7c52a0dd4474da67fbe00302fa421, type: 3}
+  postProcessUberMaterial: {fileID: 0}
   fsr3Shaders:
     prepareInputsPass: {fileID: 7200000, guid: 4f59e5b9179d74844ae06a30ae1e0629, type: 3}
     lumaPyramidPass: {fileID: 7200000, guid: d253be05abcdc80428503d3e4cce3a36, type: 3}

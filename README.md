@@ -15,7 +15,7 @@ TsukuyomiRP is an experimental collection of custom rendering features for Unity
 In Unity, open **Window > Package Management > Package Manager**, select **Install package from git URL**, and enter:
 
 ```text
-https://github.com/kx1125/TsukuyomiRP.git#v0.1.0
+https://github.com/kx1125/TsukuyomiRP.git#v0.1.1
 ```
 
 You can also add the package directly to your project's `Packages/manifest.json`:
@@ -23,7 +23,7 @@ You can also add the package directly to your project's `Packages/manifest.json`
 ```json
 {
   "dependencies": {
-    "tsukuyomi.render-pipelines.universal": "https://github.com/kx1125/TsukuyomiRP.git#v0.1.0"
+    "tsukuyomi.render-pipelines.universal": "https://github.com/kx1125/TsukuyomiRP.git#v0.1.1"
   }
 }
 ```

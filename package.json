@@ -1,7 +1,7 @@
 {
   "name": "tsukuyomi.render-pipelines.universal",
   "displayName": "TsukuyomiRP",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "unity": "6000.5",
   "unityRelease": "0b7",
   "description": "An experimental collection of custom rendering features for the Universal Render Pipeline.",

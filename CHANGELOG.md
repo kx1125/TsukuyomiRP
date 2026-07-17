@@ -8,6 +8,10 @@ All notable changes to this package are documented in this file.
 
 - Added the LookDev package sample with its scene, rendering configuration, and required assets.
 
+### Fixed
+
+- Added a user-confirmed LookDev setup flow that applies the required URP Asset and repairs APV Scene GUID references after sample import.
+
 ## [0.1.1] - 2026-07-16
 
 ### Fixed

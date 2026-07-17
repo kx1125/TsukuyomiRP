@@ -1,3 +1,5 @@
+![TsukuyomiRP](Documentation~/Images/b4b1b4a4-47fb-49ec-9658-2636c1ba4e48.png)
+
 # TsukuyomiRP
 
 TsukuyomiRP is an experimental collection of custom rendering features for Unity's Universal Render Pipeline (URP).
@@ -34,11 +36,11 @@ The **LookDev** sample contains a subway scene configured to demonstrate Tsukuyo
 
 1. Open **Window > Package Management > Package Manager** and select **TsukuyomiRP**.
 2. Open the **Samples** tab and import **LookDev**.
-3. In **Project Settings > Graphics**, assign the imported `LookDev/Settings/PC_RPAsset.asset` as the Default Render Pipeline Asset.
-4. Assign the same asset to the active quality level in **Project Settings > Quality**.
-5. Open the imported `LookDev.unity` scene.
+3. In the setup prompt, select **Apply and Open**.
 
-The sample render pipeline asset references its included renderer and Tsukuyomi pipeline profile. Assigning it changes rendering for the current project, so restore your previous pipeline asset after evaluating the sample if necessary.
+The setup assigns the imported `PC_RPAsset.asset` to Graphics Settings and the active Quality level, repairs APV Scene GUID references if the sample importer changed them, and opens `LookDev.unity`. If the prompt was dismissed, run **Tools > Tsukuyomi RP > Samples > Setup LookDev Sample**.
+
+The sample render pipeline asset references its included renderer and Tsukuyomi pipeline profile. Applying it changes rendering for the current project, so restore your previous pipeline asset after evaluating the sample if necessary.
 
 ## License
 

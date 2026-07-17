@@ -1,0 +1,116 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: af9c99167c04c5d42a83befff9521b0e, type: 3}
+  m_Name: TsukuyomiPipelineProfile
+  m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiPipelineProfile
+  EnablePlanarReflection: 1
+  PlanarReflectionRenderTextureScale: 0.5
+  PlanarReflectionLayerMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  EnablePCSS: 1
+  PcssFindBlockerSampleCount: 89
+  PcssPcfSampleCount: 36
+  PcssAngularDiameter: 1.94
+  PcssBlockerSearchAngularDiameter: 0.62
+  PcssMinFilterMaxAngularDiameter: 0.001
+  PcssMaxPenumbraSize: 0.41
+  PcssMaxSamplingDistance: 0.06
+  PcssMinFilterSizeTexels: 0.74
+  PcssPenumbraMaskScale: 18
+  EnablePerObjectShadow: 1
+  PerObjectShadowRenderingLayer:
+    serializedVersion: 0
+    m_Bits: 2
+  PerObjectShadowDepthBits: 32
+  PerObjectShadowTileResolution: 2048
+  PerObjectShadowLengthOffset: 500
+  EnableContactShadow: 1
+  ContactShadowComputeShader: {fileID: 0}
+  ContactShadowDenoiserComputeShader: {fileID: 0}
+  ContactShadowLength: 0.096
+  ContactShadowDistanceScaleFactor: 0.307
+  ContactShadowMaxDistance: 50
+  ContactShadowMinDistance: 0
+  ContactShadowFadeDistance: 5
+  ContactShadowFadeInDistance: 0
+  ContactShadowRayBias: 0.2
+  ContactShadowThicknessScale: 0.15
+  ContactShadowDenoiser: 0
+  ContactShadowSampleCount: 10
+  ContactShadowFilterSize: 16
+  EnableGTAO: 1
+  GtaoDownSample: 1
+  GtaoIntensity: 2.45
+  GtaoDirectLightingStrength: 0
+  GtaoRadius: 1.31
+  GtaoThickness: 0.001
+  GtaoSpatialBilateralAggressiveness: 0
+  GtaoBlurSharpness: 0
+  GtaoStepCount: 6
+  GtaoMaximumRadiusInPixels: 62
+  GtaoDirectionCount: 6
+  EnableVolumeLight: 1
+  VolumeLightDistance: 64
+  VolumeLightBaseHeight: 0
+  VolumeLightMaximumHeight: 50
+  VolumeLightEnableGround: 0
+  VolumeLightGroundHeight: 0
+  VolumeLightDensity: 0.2
+  VolumeLightAttenuationDistance: 128
+  VolumeLightEnableProbeVolumeContribution: 0
+  VolumeLightProbeVolumeContributionWeight: 1
+  VolumeLightEnableMainLightContribution: 1
+  VolumeLightAnisotropy: 0.4
+  VolumeLightScattering: 0.15
+  VolumeLightTint: {r: 1, g: 1, b: 1, a: 1}
+  VolumeLightEnableAdditionalLightsContribution: 0
+  VolumeLightMaxSteps: 128
+  VolumeLightBlurIterations: 2
+  VolumeLightTransmittanceThreshold: 0.01
+  EnableTsukuyomiPostProcessing: 1
+  EnableCustomBloom: 1
+  CustomBloomThreshold: 0.7
+  CustomBloomIntensity: 0.75
+  CustomBloomLumRangeScale: 0.2
+  CustomBloomPreFilterScale: 2.5
+  CustomBloomBlurCompositeWeight: {x: 0.3, y: 0.3, z: 0.26, w: 0.15}
+  CustomBloomTint: {r: 1, g: 1, b: 1, a: 0}
+  EnableTonemapping: 1
+  TonemappingMode: 0
+  TonemappingMaxBrightness: 1
+  TonemappingContrast: 1.11
+  TonemappingLinearSectionStart: 0.2
+  TonemappingLinearSectionLength: 0.4
+  TonemappingBlackPow: 1.29
+  TonemappingBlackMin: 0
+  EnableSssSkin: 1
+  SssSkinLayerMask:
+    serializedVersion: 2
+    m_Bits: 8
+  SssSkinQuality: 0
+  SssSkinScatteringRadius: 1
+  SssSkinScatteringIterations: 3
+  SssSkinShaderIterations: 12
+  SssSkinDepthTest: 0.3
+  SssSkinNormalTest: 0.3
+  SssSkinMaxDistance: 10
+  SssSkinColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  SssSkinRandomizedRotation: 0
+  SssSkinDitherScale: 1
+  SssSkinDitherIntensity: 0
+  SssSkinNoiseTexture: {fileID: 0}
+  Passes: []
+  GraphLayoutData: 
+  references:
+    version: 2
+    RefIds: []

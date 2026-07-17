@@ -8,6 +8,13 @@
   "dependencies": {
     "com.unity.render-pipelines.universal": "17.5.0"
   },
+  "samples": [
+    {
+      "displayName": "LookDev",
+      "description": "Subway look-development scene showcasing TsukuyomiRP rendering features.",
+      "path": "Samples~/LookDev"
+    }
+  ],
   "documentationUrl": "https://github.com/kx1125/TsukuyomiRP#readme",
   "changelogUrl": "https://github.com/kx1125/TsukuyomiRP/blob/main/CHANGELOG.md",
   "licensesUrl": "https://github.com/kx1125/TsukuyomiRP/blob/main/LICENSE",

@@ -19,3 +19,8 @@
 *.dds binary
 *.fbx binary
 *.dll binary
+
+# Large binary assets distributed with package samples.
+Samples~/**/*.png filter=lfs diff=lfs merge=lfs -text
+Samples~/**/*.fbx filter=lfs diff=lfs merge=lfs -text
+Samples~/**/*.bytes filter=lfs diff=lfs merge=lfs -text

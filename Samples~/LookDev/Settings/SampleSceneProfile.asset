@@ -1,0 +1,346 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &-7762792927220835561
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a8c269e0972cf10408463af63159e42f, type: 3}
+  m_Name: TsukuyomiPerObjectShadowVolume
+  m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiPerObjectShadowVolume
+  active: 0
+  enable:
+    m_OverrideState: 0
+    m_Value: 0
+  depthBits:
+    m_OverrideState: 0
+    m_Value: 16
+  tileResolution:
+    m_OverrideState: 0
+    m_Value: 2048
+  shadowLengthOffset:
+    m_OverrideState: 0
+    m_Value: 500
+--- !u!114 &-6544570317809352699
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5485954d14dfb9a4c8ead8edb0ded5b1, type: 3}
+  m_Name: LiftGammaGain
+  m_EditorClassIdentifier: Unity.RenderPipelines.Universal.Runtime::UnityEngine.Rendering.Universal.LiftGammaGain
+  active: 1
+  lift:
+    m_OverrideState: 1
+    m_Value: {x: 1, y: 1, z: 1, w: 0.010224793}
+  gamma:
+    m_OverrideState: 1
+    m_Value: {x: 0.9382385, y: 0.9892005, z: 1, w: -0.061349805}
+  gain:
+    m_OverrideState: 1
+    m_Value: {x: 1, y: 1, z: 1, w: 0.07157447}
+--- !u!114 &-3630831104083658456
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2e3e27d939634c64a80482b41168e197, type: 3}
+  m_Name: TsukuyomiGroundTruthAmbientOcclusionVolume
+  m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiGroundTruthAmbientOcclusionVolume
+  active: 1
+  enable:
+    m_OverrideState: 1
+    m_Value: 1
+  downSample:
+    m_OverrideState: 1
+    m_Value: 0
+  intensity:
+    m_OverrideState: 1
+    m_Value: 1
+  directLightingStrength:
+    m_OverrideState: 1
+    m_Value: 0.5
+  radius:
+    m_OverrideState: 1
+    m_Value: 1
+  thickness:
+    m_OverrideState: 1
+    m_Value: 0.001
+  spatialBilateralAggressiveness:
+    m_OverrideState: 1
+    m_Value: 0
+  blurSharpness:
+    m_OverrideState: 1
+    m_Value: 0.032
+  stepCount:
+    m_OverrideState: 1
+    m_Value: 4
+  maximumRadiusInPixels:
+    m_OverrideState: 1
+    m_Value: 35
+  directionCount:
+    m_OverrideState: 1
+    m_Value: 5
+--- !u!114 &-351870418855230554
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 685ce1786283467982f7a41250d94418, type: 3}
+  m_Name: TsukuyomiTonemappingVolume
+  m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiTonemappingVolume
+  active: 1
+  enable:
+    m_OverrideState: 1
+    m_Value: 1
+  mode:
+    m_OverrideState: 1
+    m_Value: 4
+  maxBrightness:
+    m_OverrideState: 1
+    m_Value: 1
+  contrast:
+    m_OverrideState: 1
+    m_Value: 1
+  linearSectionStart:
+    m_OverrideState: 1
+    m_Value: 0.254
+  linearSectionLength:
+    m_OverrideState: 1
+    m_Value: 0.556
+  blackPow:
+    m_OverrideState: 1
+    m_Value: 1.386
+  blackMin:
+    m_OverrideState: 1
+    m_Value: 0
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d7fd9488000d3734a9e00ee676215985, type: 3}
+  m_Name: SampleSceneProfile
+  m_EditorClassIdentifier: 
+  components:
+  - {fileID: 6435132574863729065}
+  - {fileID: 3408157876379272493}
+  - {fileID: -3630831104083658456}
+  - {fileID: -7762792927220835561}
+  - {fileID: 5820118594799608351}
+  - {fileID: -351870418855230554}
+  - {fileID: 893227761152444302}
+  - {fileID: -6544570317809352699}
+--- !u!114 &893227761152444302
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2d6355e4f31e4d4fafdd991da5e22cbb, type: 3}
+  m_Name: TsukuyomiVolumeLightVolume
+  m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiVolumeLightVolume
+  active: 1
+  enable:
+    m_OverrideState: 1
+    m_Value: 1
+  distance:
+    m_OverrideState: 1
+    m_Value: 64
+  baseHeight:
+    m_OverrideState: 1
+    m_Value: 0
+  maximumHeight:
+    m_OverrideState: 1
+    m_Value: 50
+  enableGround:
+    m_OverrideState: 1
+    m_Value: 0
+  groundHeight:
+    m_OverrideState: 1
+    m_Value: 0
+  density:
+    m_OverrideState: 1
+    m_Value: 1
+  attenuationDistance:
+    m_OverrideState: 1
+    m_Value: 128
+  enableProbeVolumeContribution:
+    m_OverrideState: 1
+    m_Value: 0
+  probeVolumeContributionWeight:
+    m_OverrideState: 1
+    m_Value: 1
+  enableMainLightContribution:
+    m_OverrideState: 1
+    m_Value: 1
+  anisotropy:
+    m_OverrideState: 1
+    m_Value: 0.6
+  scattering:
+    m_OverrideState: 1
+    m_Value: 0.667
+  tint:
+    m_OverrideState: 1
+    m_Value: {r: 0.7490196, g: 0.7490196, b: 0.7490196, a: 1}
+  enableAdditionalLightsContribution:
+    m_OverrideState: 1
+    m_Value: 0
+  maxSteps:
+    m_OverrideState: 1
+    m_Value: 128
+  blurIterations:
+    m_OverrideState: 1
+    m_Value: 2
+  transmittanceThreshold:
+    m_OverrideState: 1
+    m_Value: 0.01
+--- !u!114 &3408157876379272493
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 17c70c97c1e64a92ac61a580883dd9c6, type: 3}
+  m_Name: TsukuyomiPcssVolume
+  m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiPcssVolume
+  active: 1
+  enable:
+    m_OverrideState: 1
+    m_Value: 1
+  findBlockerSampleCount:
+    m_OverrideState: 1
+    m_Value: 17
+  pcfSampleCount:
+    m_OverrideState: 1
+    m_Value: 4
+  angularDiameter:
+    m_OverrideState: 1
+    m_Value: 0.87
+  blockerSearchAngularDiameter:
+    m_OverrideState: 1
+    m_Value: 6
+  minFilterMaxAngularDiameter:
+    m_OverrideState: 1
+    m_Value: 1.36
+  maxPenumbraSize:
+    m_OverrideState: 1
+    m_Value: 0.3
+  maxSamplingDistance:
+    m_OverrideState: 1
+    m_Value: 0.33
+  minFilterSizeTexels:
+    m_OverrideState: 1
+    m_Value: 0
+  penumbraMaskScale:
+    m_OverrideState: 1
+    m_Value: 10
+--- !u!114 &5820118594799608351
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7db9f7cd74f6486ebf5a631fa9e270aa, type: 3}
+  m_Name: TsukuyomiCustomBloomVolume
+  m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiCustomBloomVolume
+  active: 1
+  enable:
+    m_OverrideState: 1
+    m_Value: 1
+  threshold:
+    m_OverrideState: 1
+    m_Value: 0.5
+  intensity:
+    m_OverrideState: 1
+    m_Value: 1
+  lumRangeScale:
+    m_OverrideState: 1
+    m_Value: 0.312
+  preFilterScale:
+    m_OverrideState: 1
+    m_Value: 0.61
+  blurCompositeWeight:
+    m_OverrideState: 1
+    m_Value: {x: 0.3, y: 0.3, z: 0.26, w: 0.15}
+  tint:
+    m_OverrideState: 1
+    m_Value: {r: 1, g: 1, b: 1, a: 0}
+--- !u!114 &6435132574863729065
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e1a475623164d69abcf83af64c6605a, type: 3}
+  m_Name: TsukuyomiContactShadowVolume
+  m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiContactShadowVolume
+  active: 1
+  enable:
+    m_OverrideState: 1
+    m_Value: 1
+  length:
+    m_OverrideState: 1
+    m_Value: 0.1
+  distanceScaleFactor:
+    m_OverrideState: 1
+    m_Value: 0.422
+  maxDistance:
+    m_OverrideState: 1
+    m_Value: 50
+  minDistance:
+    m_OverrideState: 1
+    m_Value: 0
+  fadeDistance:
+    m_OverrideState: 1
+    m_Value: 5
+  fadeInDistance:
+    m_OverrideState: 1
+    m_Value: 0
+  rayBias:
+    m_OverrideState: 1
+    m_Value: 0.15
+  thicknessScale:
+    m_OverrideState: 1
+    m_Value: 0.15
+  denoiser:
+    m_OverrideState: 1
+    m_Value: 1
+  sampleCount:
+    m_OverrideState: 1
+    m_Value: 4
+  filterSize:
+    m_OverrideState: 1
+    m_Value: 16

@@ -5,6 +5,38 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GlobalIllumination.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Lighting/TsukuyomiEvaluateMaterial.hlsl"
 
+TEXTURE2D(_TsukuyomiPlanarReflectionTexture);
+SAMPLER(sampler_TsukuyomiPlanarReflectionTexture);
+
+float4 _TsukuyomiPlanarReflectionTexelSize;
+float _TsukuyomiPlanarReflectionEnabled;
+
+half3 TsukuyomiGlossyEnvironmentReflection(half3 reflectVector, float3 positionWS,
+    half perceptualRoughness, half occlusion, float2 normalizedScreenSpaceUV)
+{
+#if defined(_TSUKUYOMI_PLANAR_REFLECTION) && !defined(_ENVIRONMENTREFLECTIONS_OFF)
+    if (_TsukuyomiPlanarReflectionEnabled > 0.5)
+    {
+        float maxDimension = max(_TsukuyomiPlanarReflectionTexelSize.z, _TsukuyomiPlanarReflectionTexelSize.w);
+        uint maxMipLevel = (uint)max(0.0, floor(log2(max(maxDimension, 1.0))));
+        half mip = PerceptualRoughnessToMipmapLevel(perceptualRoughness, maxMipLevel);
+        half3 reflection = SAMPLE_TEXTURE2D_LOD(
+            _TsukuyomiPlanarReflectionTexture,
+            sampler_TsukuyomiPlanarReflectionTexture,
+            saturate(normalizedScreenSpaceUV),
+            mip).rgb;
+        return reflection * occlusion;
+    }
+#endif
+
+    return GlossyEnvironmentReflection(
+        reflectVector,
+        positionWS,
+        perceptualRoughness,
+        occlusion,
+        normalizedScreenSpaceUV);
+}
+
 half3 TsukuyomiEnvironmentBRDFSpecularDFG(BRDFData brdfData, half NoV, half fresnelTerm)
 {
     // Analytic split-sum DFG approximation used as a lightweight replacement for a preintegrated LUT.
@@ -29,7 +61,8 @@ half3 TsukuyomiGlobalIllumination(BRDFData brdfData, BRDFData brdfDataClearCoat,
     half fresnelTerm = Pow4(1.0h - NoV);
 
     half3 indirectDiffuse = bakedGI;
-    half3 indirectSpecular = GlossyEnvironmentReflection(reflectVector, positionWS, brdfData.perceptualRoughness, 1.0h, normalizedScreenSpaceUV);
+    half3 indirectSpecular = TsukuyomiGlossyEnvironmentReflection(
+        reflectVector, positionWS, brdfData.perceptualRoughness, 1.0h, normalizedScreenSpaceUV);
 
     // Filament-style horizon falloff reduces reflection leaks near grazing normal-map angles.
     half horizon = saturate(1.0h + dot(reflectVector, normalWS));
@@ -46,7 +79,8 @@ half3 TsukuyomiGlobalIllumination(BRDFData brdfData, BRDFData brdfDataClearCoat,
     }
 
 #if defined(_CLEARCOAT) || defined(_CLEARCOATMAP)
-    half3 coatIndirectSpecular = GlossyEnvironmentReflection(reflectVector, positionWS, brdfDataClearCoat.perceptualRoughness, 1.0h, normalizedScreenSpaceUV);
+    half3 coatIndirectSpecular = TsukuyomiGlossyEnvironmentReflection(
+        reflectVector, positionWS, brdfDataClearCoat.perceptualRoughness, 1.0h, normalizedScreenSpaceUV);
     half3 coatColor = EnvironmentBRDFClearCoat(brdfDataClearCoat, clearCoatMask, coatIndirectSpecular, fresnelTerm);
     half coatFresnel = kDielectricSpec.x + kDielectricSpec.a * fresnelTerm;
     color = color * (1.0h - coatFresnel * clearCoatMask) + coatColor * aoFactor.indirectSpecularOcclusion;

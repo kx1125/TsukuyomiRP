@@ -15,6 +15,7 @@ namespace Tsukuyomi.Rendering
 
     [Serializable]
     [VolumeComponentMenu("TsukuyomiRP/SSS Skin")]
+    [DisplayInfo(name = "Sss Skin Volume")]
     public sealed class TsukuyomiSssSkinVolume : VolumeComponent
     {
         public BoolParameter enable = new(false, BoolParameter.DisplayType.EnumPopup);

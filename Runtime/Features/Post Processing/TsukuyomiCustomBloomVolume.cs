@@ -34,6 +34,7 @@ namespace Tsukuyomi.Rendering
     }
 
     [Serializable, VolumeComponentMenu("TsukuyomiRP/Postprocessing/Custom Bloom")]
+    [DisplayInfo(name = "Custom Bloom Volume")]
     public sealed class TsukuyomiCustomBloomVolume : VolumeComponent
     {
         public BoolParameter enable = new(false, BoolParameter.DisplayType.EnumPopup);

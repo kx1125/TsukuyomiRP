@@ -5,6 +5,7 @@ using UnityEngine.Rendering;
 namespace Tsukuyomi.Rendering
 {
     [Serializable, VolumeComponentMenu("TsukuyomiRP/PCSS Screen Space Shadows")]
+    [DisplayInfo(name = "Pcss Volume")]
     public sealed class TsukuyomiPcssVolume : VolumeComponent
     {
         public BoolParameter enable = new(false);

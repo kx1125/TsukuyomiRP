@@ -4,6 +4,7 @@ using UnityEngine.Rendering;
 namespace Tsukuyomi.Rendering
 {
     [Serializable, VolumeComponentMenu("TsukuyomiRP/Per Object Shadows")]
+    [DisplayInfo(name = "Per Object Shadow Volume")]
     public sealed class TsukuyomiPerObjectShadowVolume : VolumeComponent
     {
         public BoolParameter enable = new(false);

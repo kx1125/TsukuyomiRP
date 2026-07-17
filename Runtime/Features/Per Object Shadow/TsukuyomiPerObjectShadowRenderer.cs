@@ -78,6 +78,7 @@ namespace Tsukuyomi.Rendering
 
         private void Awake()
         {
+            UnregisterClusters();
             AllocateClusters();
             SetupRenderingLayers(renderingLayerMask);
         }

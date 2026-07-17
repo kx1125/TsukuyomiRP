@@ -2,6 +2,8 @@ Shader "TsukuyomiRP/Lit/PBR"
 {
     Properties
     {
+        [Toggle(_ALPHATEST_ON)] _AlphaClip("AlphaClip", Float) = 0.0
+        [Enum(UnityEngine.Rendering.CullMode)] _Cull("Render Face", Float) = 2.0
         [MainTexture] _BaseMap("Albedo", 2D) = "white" {}
         [MainColor] _BaseColor("Color", Color) = (1, 1, 1, 1)
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
@@ -30,10 +32,8 @@ Shader "TsukuyomiRP/Lit/PBR"
         [HideInInspector] _ClearCoatMask("_ClearCoatMask", Float) = 0.0
         [HideInInspector] _ClearCoatSmoothness("_ClearCoatSmoothness", Float) = 0.0
 
-        _Surface("__surface", Float) = 0.0
-        _Blend("__blend", Float) = 0.0
-        _Cull("__cull", Float) = 2.0
-        [Toggle(_ALPHATEST_ON)] _AlphaClip("__clip", Float) = 0.0
+        [HideInInspector]_Surface("__surface", Float) = 0.0
+        [HideInInspector]_Blend("__blend", Float) = 0.0
         [HideInInspector] _SrcBlend("__src", Float) = 1.0
         [HideInInspector] _DstBlend("__dst", Float) = 0.0
         [HideInInspector] _SrcBlendAlpha("__srcA", Float) = 1.0
@@ -92,6 +92,7 @@ Shader "TsukuyomiRP/Lit/PBR"
             #pragma shader_feature_local_fragment _EMISSION
             #pragma shader_feature_local_fragment _SPECULARHIGHLIGHTS_OFF
             #pragma shader_feature_local_fragment _ENVIRONMENTREFLECTIONS_OFF
+            #pragma multi_compile_local_fragment _ _TSUKUYOMI_PLANAR_REFLECTION
             #pragma shader_feature_local_fragment _DISNEY_DIFFUSE_BURLEY
 
 #if defined(UNITY_PLATFORM_META_QUEST)

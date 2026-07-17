@@ -37,6 +37,13 @@ namespace Tsukuyomi.Rendering
 
         public int VisibleCount => _cullingResults.Count;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRegisteredCasters()
+        {
+            s_Casters.Clear();
+            s_NextCasterId = 1;
+        }
+
         public static void Register(ITsukuyomiShadowCaster caster)
         {
             if (caster == null)

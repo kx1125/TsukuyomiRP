@@ -33,6 +33,10 @@ namespace Tsukuyomi.Rendering
                 new Object[] { settings },
                 ProjectSettingsAssetPath,
                 true);
+
+            // SaveToSerializedFileAndForget can invalidate the serialized object that
+            // was passed to it. Force callers to load the persisted instance again.
+            s_Current = null;
         }
 #endif
 

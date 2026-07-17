@@ -135,11 +135,11 @@ namespace Tsukuyomi.Rendering
             PassSettings passSettings = CreatePassSettings(lightingDescriptor, context.CameraData.camera);
             bool executeBlur = passSettings.Iterations > 0 && passSettings.Radius > 0.0f;
 
-            TextureSlot skinMaskSlot = TextureSlot.ReadWrite(SkinMaskTextureName, CreateTextureDesc(CreateMaskDescriptor(baseDescriptor), FilterMode.Point, true, Color.clear));
-            TextureSlot skinLightingSlot = TextureSlot.ReadWrite(SkinLightingTextureName, CreateTextureDesc(lightingDescriptor, FilterMode.Bilinear, true, Color.clear));
-            TextureSlot skinLightingBlurredSlot = TextureSlot.Write(SkinLightingBlurredTextureName, CreateTextureDesc(lightingDescriptor, FilterMode.Bilinear, true, Color.clear));
-            TextureSlot blurPingSlot = TextureSlot.ReadWrite(SkinLightingBlurPingTextureName, CreateTextureDesc(lightingDescriptor, FilterMode.Bilinear, true, Color.clear));
-            TextureSlot blurPongSlot = TextureSlot.ReadWrite(SkinLightingBlurPongTextureName, CreateTextureDesc(lightingDescriptor, FilterMode.Bilinear, true, Color.clear));
+            TextureSlot skinMaskSlot = TextureSlot.ReadWrite(SkinMaskTextureName, CreateTextureDesc(CreateMaskDescriptor(baseDescriptor), FilterMode.Point, false, Color.clear));
+            TextureSlot skinLightingSlot = TextureSlot.ReadWrite(SkinLightingTextureName, CreateTextureDesc(lightingDescriptor, FilterMode.Bilinear, false, Color.clear));
+            TextureSlot skinLightingBlurredSlot = TextureSlot.Write(SkinLightingBlurredTextureName, CreateTextureDesc(lightingDescriptor, FilterMode.Bilinear, false, Color.clear));
+            TextureSlot blurPingSlot = TextureSlot.ReadWrite(SkinLightingBlurPingTextureName, CreateTextureDesc(lightingDescriptor, FilterMode.Bilinear, false, Color.clear));
+            TextureSlot blurPongSlot = TextureSlot.ReadWrite(SkinLightingBlurPongTextureName, CreateTextureDesc(lightingDescriptor, FilterMode.Bilinear, false, Color.clear));
 
             TextureHandle skinMask = context.GetTexture(skinMaskSlot);
             TextureHandle skinLighting = context.GetTexture(skinLightingSlot);
@@ -165,8 +165,8 @@ namespace Tsukuyomi.Rendering
             }
             else
             {
-                TextureSlot skinDepthSlot = TextureSlot.ReadWrite(SkinDepthTextureName, CreateTextureDesc(CreateDepthDescriptor(baseDescriptor), FilterMode.Point, true, Color.clear));
-                TextureSlot skinNormalsSlot = TextureSlot.ReadWrite(SkinNormalsTextureName, CreateTextureDesc(CreateNormalDescriptor(baseDescriptor), FilterMode.Point, true, Color.clear));
+                TextureSlot skinDepthSlot = TextureSlot.ReadWrite(SkinDepthTextureName, CreateTextureDesc(CreateDepthDescriptor(baseDescriptor), FilterMode.Point, false, Color.clear));
+                TextureSlot skinNormalsSlot = TextureSlot.ReadWrite(SkinNormalsTextureName, CreateTextureDesc(CreateNormalDescriptor(baseDescriptor), FilterMode.Point, false, Color.clear));
                 skinDepth = context.GetTexture(skinDepthSlot);
                 skinNormals = context.GetTexture(skinNormalsSlot);
                 depthTexture = skinDepth;
@@ -179,8 +179,8 @@ namespace Tsukuyomi.Rendering
             TextureHandle lightingDepthMask = TextureHandle.nullHandle;
             if (lightingUsesSeparateDepth)
             {
-                TextureSlot lightingDepthSlot = TextureSlot.ReadWrite(SkinLightingDepthTextureName, CreateTextureDesc(CreateDepthDescriptor(lightingDescriptor), FilterMode.Point, true, Color.clear));
-                TextureSlot lightingDepthMaskSlot = TextureSlot.ReadWrite(SkinLightingDepthMaskTextureName, CreateTextureDesc(CreateMaskDescriptor(lightingDescriptor), FilterMode.Point, true, Color.clear));
+                TextureSlot lightingDepthSlot = TextureSlot.ReadWrite(SkinLightingDepthTextureName, CreateTextureDesc(CreateDepthDescriptor(lightingDescriptor), FilterMode.Point, false, Color.clear));
+                TextureSlot lightingDepthMaskSlot = TextureSlot.ReadWrite(SkinLightingDepthMaskTextureName, CreateTextureDesc(CreateMaskDescriptor(lightingDescriptor), FilterMode.Point, false, Color.clear));
                 lightingDepthAttachment = context.GetTexture(lightingDepthSlot);
                 lightingDepthMask = context.GetTexture(lightingDepthMaskSlot);
             }

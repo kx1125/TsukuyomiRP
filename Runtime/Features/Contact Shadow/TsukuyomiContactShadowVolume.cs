@@ -14,6 +14,7 @@ namespace Tsukuyomi.Rendering
     }
 
     [Serializable, VolumeComponentMenu("TsukuyomiRP/Contact Shadows")]
+    [DisplayInfo(name = "Contact Shadow Volume")]
     public sealed class TsukuyomiContactShadowVolume : VolumeComponent
     {
         public BoolParameter enable = new(false);

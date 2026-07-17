@@ -103,7 +103,7 @@ namespace Tsukuyomi.Rendering
             using (var builder = renderGraph.AddRasterRenderPass("Tsukuyomi Per Object Shadowmap", out PassData passData, profilingSampler))
             {
                 InitPassData(passData, lightData, shadowData);
-                passData.ShadowmapTexture = UniversalRenderer.CreateRenderGraphTexture(renderGraph, _shadowMapDescriptor, "_PerObjSceneShadowMap", true);
+                passData.ShadowmapTexture = UniversalRenderer.CreateRenderGraphTexture(renderGraph, _shadowMapDescriptor, "_PerObjSceneShadowMap", false);
                 builder.SetRenderAttachmentDepth(passData.ShadowmapTexture);
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
@@ -214,6 +214,7 @@ namespace Tsukuyomi.Rendering
 
         private static void RenderShadowMap(RasterCommandBuffer cmd, PassData data)
         {
+            cmd.ClearRenderTarget(true, false, Color.clear, 1.0f, 0);
             cmd.SetGlobalDepthBias(1.0f, 2.5f);
             CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.CastingPunctualLightShadow, false);
 

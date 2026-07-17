@@ -5,6 +5,7 @@ using UnityEngine.Rendering;
 namespace Tsukuyomi.Rendering
 {
     [Serializable, VolumeComponentMenu("TsukuyomiRP/Volume Light")]
+    [DisplayInfo(name = "Volume Light Volume")]
     public sealed class TsukuyomiVolumeLightVolume : VolumeComponent
     {
         public BoolParameter enable = new(false, BoolParameter.DisplayType.EnumPopup);

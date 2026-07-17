@@ -84,8 +84,16 @@ namespace Tsukuyomi.Rendering
             int width = Mathf.Max(1, Mathf.RoundToInt(cameraDescriptor.width * _renderTextureScale));
             int height = Mathf.Max(1, Mathf.RoundToInt(cameraDescriptor.height * _renderTextureScale));
 
-            Vector3 planeNormal = _plane.PlaneNormal;
-            Vector3 planePosition = _plane.PlanePosition;
+            if (!_plane.TryGetPlane(out Vector3 planePosition, out Vector3 planeNormal))
+            {
+                RecordClear(context);
+                return;
+            }
+
+            Vector3 cameraPosition = context.CameraData.worldSpaceCameraPos;
+            if (Vector3.Dot(planeNormal, cameraPosition - planePosition) < 0.0f)
+                planeNormal = -planeNormal;
+
             Matrix4x4 reflectionMatrix = CalculateReflectionMatrix(planeNormal, planePosition);
             Matrix4x4 reflectionView = camera.worldToCameraMatrix * reflectionMatrix;
             Matrix4x4 skyboxProjection = camera.projectionMatrix;
@@ -144,7 +152,6 @@ namespace Tsukuyomi.Rendering
 
             Matrix4x4 cameraView = context.CameraData.GetViewMatrix();
             Matrix4x4 cameraProjection = context.CameraData.GetProjectionMatrix();
-            Vector3 cameraPosition = context.CameraData.worldSpaceCameraPos;
             Rect reflectionViewport = new(0.0f, 0.0f, width, height);
             Rect cameraViewport = new(0.0f, 0.0f, cameraDescriptor.width, cameraDescriptor.height);
             Vector4 texelSize = new(1.0f / width, 1.0f / height, width, height);
@@ -202,16 +209,18 @@ namespace Tsukuyomi.Rendering
             RenderTextureDescriptor descriptor = new(width, height, format, GraphicsFormat.None)
             {
                 msaaSamples = 1,
-                useMipMap = false,
-                autoGenerateMips = false
+                mipCount = 0,
+                useMipMap = true,
+                autoGenerateMips = true
             };
 
             return new TextureDesc(descriptor)
             {
                 name = TextureName,
-                filterMode = FilterMode.Bilinear,
+                filterMode = FilterMode.Trilinear,
+                wrapMode = TextureWrapMode.Clamp,
                 msaaSamples = MSAASamples.None,
-                clearBuffer = true,
+                clearBuffer = false,
                 clearColor = Color.clear
             };
         }
@@ -228,7 +237,7 @@ namespace Tsukuyomi.Rendering
                 name = "_TsukuyomiPlanarReflectionDepth",
                 filterMode = FilterMode.Point,
                 msaaSamples = MSAASamples.None,
-                clearBuffer = true,
+                clearBuffer = false,
                 clearColor = Color.clear
             };
         }

@@ -188,11 +188,11 @@ namespace Tsukuyomi.Rendering
             RenderTextureDescriptor screenDesc = CreateScreenShadowDescriptor(context.CameraData.cameraTargetDescriptor);
             RenderTextureDescriptor penumbraDesc = CreatePenumbraDescriptor(context.CameraData.cameraTargetDescriptor, settings.PenumbraMaskScale);
 
-            TextureHandle penumbraMask = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, penumbraDesc, "_TsukuyomiPenumbraMaskTex", true, FilterMode.Bilinear);
-            TextureHandle penumbraBlurTemp = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, penumbraDesc, "_TsukuyomiPenumbraMaskBlurTempTex", true, FilterMode.Bilinear);
-            TextureHandle screenShadow = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, screenDesc, "_ScreenSpaceShadowmapTexture", true);
+            TextureHandle penumbraMask = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, penumbraDesc, "_TsukuyomiPenumbraMaskTex", false, FilterMode.Bilinear);
+            TextureHandle penumbraBlurTemp = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, penumbraDesc, "_TsukuyomiPenumbraMaskBlurTempTex", false, FilterMode.Bilinear);
+            TextureHandle screenShadow = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, screenDesc, "_ScreenSpaceShadowmapTexture", false);
             TextureHandle baseScreenShadow = !_settings.Enabled
-                ? UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, screenDesc, "_TsukuyomiBaseScreenSpaceShadowmapTexture", true)
+                ? UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, screenDesc, "_TsukuyomiBaseScreenSpaceShadowmapTexture", false)
                 : TextureHandle.nullHandle;
             TextureHandle cameraDepthTexture = resourceData.cameraDepthTexture;
             TextureHandle mainShadowsTexture = resourceData.mainShadowsTexture;

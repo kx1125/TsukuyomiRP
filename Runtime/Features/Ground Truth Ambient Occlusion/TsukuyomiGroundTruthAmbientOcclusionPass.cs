@@ -324,7 +324,7 @@ namespace Tsukuyomi.Rendering
                 depthBufferBits = DepthBits.None,
                 msaaSamples = MSAASamples.None,
                 enableRandomWrite = true,
-                clearBuffer = true,
+                clearBuffer = false,
                 clearColor = Color.white,
                 filterMode = FilterMode.Bilinear
             };

@@ -112,8 +112,14 @@ namespace Tsukuyomi.Rendering.Editor
 
         private void DrawFsr3Settings()
         {
-            if (_projectSettingsObject == null || _fsr3SettingsProperty == null)
+            TsukuyomiRenderPipelineProjectSettings currentSettings = TsukuyomiRenderPipelineProjectSettings.Current;
+            if (_projectSettingsObject == null ||
+                _projectSettingsObject.targetObject == null ||
+                _projectSettingsObject.targetObject != currentSettings ||
+                _fsr3SettingsProperty == null)
+            {
                 BindProjectSettings();
+            }
 
             EditorGUILayout.LabelField("FSR3 Settings", EditorStyles.boldLabel);
             _projectSettingsObject.Update();
@@ -137,7 +143,10 @@ namespace Tsukuyomi.Rendering.Editor
             EditorGUILayout.EndFoldoutHeaderGroup();
 
             if (_projectSettingsObject.ApplyModifiedProperties())
+            {
                 TsukuyomiRenderPipelineProjectSettings.Save();
+                BindProjectSettings();
+            }
         }
     }
 }

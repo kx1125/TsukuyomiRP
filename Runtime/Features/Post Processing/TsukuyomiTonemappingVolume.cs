@@ -14,6 +14,7 @@ namespace Tsukuyomi.Rendering
     }
 
     [Serializable, VolumeComponentMenu("TsukuyomiRP/Postprocessing/Tonemapping")]
+    [DisplayInfo(name = "Tonemapping Volume")]
     public sealed class TsukuyomiTonemappingVolume : VolumeComponent
     {
         public BoolParameter enable = new(false, BoolParameter.DisplayType.EnumPopup);

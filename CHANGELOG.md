@@ -4,6 +4,13 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-07-18
+
+### Fixed
+
+- Renamed the LookDev sample render pipeline asset and renderer data to avoid GUID collisions with Unity's default URP project assets.
+- Regenerated the sample render pipeline asset and renderer data GUIDs, and updated the sample setup flow and documentation.
+
 ## [0.1.3] - 2026-07-18
 
 ### Added

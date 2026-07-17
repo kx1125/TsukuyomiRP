@@ -46,7 +46,7 @@ namespace Tsukuyomi.Rendering.Editor
             int choice = EditorUtility.DisplayDialogComplex(
                 "Configure TsukuyomiRP LookDev Sample?",
                 "The LookDev sample requires its included URP Asset to enable Adaptive Probe Volumes and TsukuyomiRP rendering features.\n\n" +
-                "Apply assigns PC_RPAsset to Graphics Settings and the active Quality level. If Unity changed the imported Scene GUID, the sample's APV Baking Set is repaired before the scene opens.",
+                "Apply assigns SampleScene_Asset to Graphics Settings and the active Quality level. If Unity changed the imported Scene GUID, the sample's APV Baking Set is repaired before the scene opens.",
                 "Apply and Open",
                 "Not Now",
                 "Select URP Asset");
@@ -85,7 +85,7 @@ namespace Tsukuyomi.Rendering.Editor
             if (string.IsNullOrEmpty(sampleRoot))
                 return;
 
-            string pipelineAssetPath = sampleRoot + "/Settings/PC_RPAsset.asset";
+            string pipelineAssetPath = sampleRoot + "/Settings/SampleScene_Asset.asset";
             string bakingSetPath = sampleRoot + "/LookDev/LookDev Baking Set.asset";
             UniversalRenderPipelineAsset pipelineAsset =
                 AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(pipelineAssetPath);
@@ -223,7 +223,7 @@ namespace Tsukuyomi.Rendering.Editor
             string sampleRoot = Path.GetDirectoryName(scenePath)?.Replace('\\', '/');
             UniversalRenderPipelineAsset pipelineAsset = string.IsNullOrEmpty(sampleRoot)
                 ? null
-                : AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(sampleRoot + "/Settings/PC_RPAsset.asset");
+                : AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(sampleRoot + "/Settings/SampleScene_Asset.asset");
 
             if (pipelineAsset == null)
                 return;

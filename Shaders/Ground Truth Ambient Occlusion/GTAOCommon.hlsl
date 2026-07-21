@@ -1,4 +1,4 @@
-﻿#ifndef GTAO_COMMON_INCLUDED
+#ifndef GTAO_COMMON_INCLUDED
 #define GTAO_COMMON_INCLUDED
 
 // Includes

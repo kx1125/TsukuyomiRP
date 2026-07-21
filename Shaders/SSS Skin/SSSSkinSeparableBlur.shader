@@ -1,4 +1,4 @@
-﻿Shader "Hidden/SSSSkin/SeparableBlur"
+Shader "Hidden/SSSSkin/SeparableBlur"
 {
     SubShader
     {

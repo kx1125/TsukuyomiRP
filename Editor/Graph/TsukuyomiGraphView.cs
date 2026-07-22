@@ -11,9 +11,24 @@ namespace Tsukuyomi.Rendering.Editor
 {
     public class TsukuyomiGraphView : GraphView
     {
+        [Serializable]
+        private sealed class ClipboardPassData
+        {
+            public string TypeName;
+            public string PassJson;
+            public Vector2 Position;
+        }
+
+        [Serializable]
+        private sealed class ClipboardData
+        {
+            public List<ClipboardPassData> Passes = new();
+        }
+
         public InjectionPoint? CurrentDetailPoint { get; set; }
         public event Action<InjectionPoint> OnNodeDoubleClicked;
         public event Action<IEnumerable<ISelectable>> OnSelectionChanged;
+        public event Action OnGraphChanged;
 
         private GridBackground _grid;
 
@@ -36,6 +51,15 @@ namespace Tsukuyomi.Rendering.Editor
             RegisterCallback<MouseDownEvent>(OnMouseDown, TrickleDown.TrickleDown);
             RegisterCallback<MouseUpEvent>(_ => OnSelectionChanged?.Invoke(selection));
             RegisterCallback<KeyUpEvent>(_ => OnSelectionChanged?.Invoke(selection));
+
+            graphViewChanged = change =>
+            {
+                OnGraphChanged?.Invoke();
+                return change;
+            };
+
+            serializeGraphElements = SerializePassElements;
+            unserializeAndPaste = PastePassElements;
         }
 
         public void SetBackgroundStyle(bool isDetail)
@@ -114,12 +138,18 @@ namespace Tsukuyomi.Rendering.Editor
             }
         }
 
-        public TsukuyomiPassNode CreatePassNode(Type type, Vector2 position, bool convertMousePosition)
+        public TsukuyomiPassNode CreatePassNode(
+            Type type,
+            Vector2 position,
+            bool convertMousePosition,
+            RenderPassBase passInstance = null)
         {
-            var node = new TsukuyomiPassNode(type);
+            var node = new TsukuyomiPassNode(type, passInstance);
             var finalPosition = convertMousePosition ? contentViewContainer.WorldToLocal(position) : position;
             node.SetPosition(new Rect(finalPosition, Vector2.zero));
             AddElement(node);
+            ClearSelection();
+            AddToSelection(node);
             OnSelectionChanged?.Invoke(selection);
             return node;
         }
@@ -154,6 +184,57 @@ namespace Tsukuyomi.Rendering.Editor
                     compatiblePorts.Add(port);
             });
             return compatiblePorts;
+        }
+
+        private string SerializePassElements(IEnumerable<GraphElement> elements)
+        {
+            var clipboard = new ClipboardData();
+            foreach (TsukuyomiPassNode node in elements.OfType<TsukuyomiPassNode>())
+            {
+                clipboard.Passes.Add(new ClipboardPassData
+                {
+                    TypeName = node.PassType.AssemblyQualifiedName,
+                    PassJson = JsonUtility.ToJson(node.PassInstance),
+                    Position = node.GetPosition().position
+                });
+            }
+
+            return clipboard.Passes.Count > 0 ? JsonUtility.ToJson(clipboard) : string.Empty;
+        }
+
+        private void PastePassElements(string operationName, string data)
+        {
+            if (!CurrentDetailPoint.HasValue || string.IsNullOrEmpty(data))
+                return;
+
+            ClipboardData clipboard = JsonUtility.FromJson<ClipboardData>(data);
+            if (clipboard?.Passes == null)
+                return;
+
+            ClearSelection();
+            foreach (ClipboardPassData passData in clipboard.Passes)
+            {
+                Type type = Type.GetType(passData.TypeName);
+                if (type == null || !typeof(RenderPassBase).IsAssignableFrom(type) || type.IsAbstract)
+                    continue;
+
+                bool supportsPoint = type.GetCustomAttributes<InjectionPointAttribute>(true)
+                    .Any(attribute => attribute.Point == CurrentDetailPoint.Value);
+                if (!supportsPoint)
+                    continue;
+
+                var pass = (RenderPassBase)Activator.CreateInstance(type);
+                JsonUtility.FromJsonOverwrite(passData.PassJson, pass);
+                pass.InjectionPoint = CurrentDetailPoint.Value;
+                TsukuyomiPassNode node = CreatePassNode(
+                    type,
+                    passData.Position + new Vector2(30.0f, 30.0f),
+                    false,
+                    pass);
+                AddToSelection(node);
+            }
+
+            OnGraphChanged?.Invoke();
         }
 
         private static string GetPassCategory(Type type)

@@ -21,5 +21,6 @@ namespace Tsukuyomi.Rendering
 
         public virtual bool IsActive(in FrameContext frame) => Enabled;
         public virtual void Setup(in FrameContext frame) { }
+        public virtual void ValidateSettings() { }
     }
 }

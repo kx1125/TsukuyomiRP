@@ -10,10 +10,12 @@ namespace Tsukuyomi.Rendering.Editor
     public class TsukuyomiPassNode : Node
     {
         public Type PassType { get; private set; }
+        public RenderPassBase PassInstance { get; }
 
-        public TsukuyomiPassNode(Type passType)
+        public TsukuyomiPassNode(Type passType, RenderPassBase passInstance = null)
         {
             PassType = passType;
+            PassInstance = passInstance ?? (RenderPassBase)Activator.CreateInstance(passType);
             title = passType.Name;
             AddToClassList("tsukuyomi-pass-node");
             style.minWidth = 220;

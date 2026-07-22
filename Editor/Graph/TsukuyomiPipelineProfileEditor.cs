@@ -17,7 +17,7 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_VolumeLightExpanded = true;
         private static bool s_PostProcessingExpanded = true;
         private static bool s_SssSkinExpanded = true;
-        private static bool s_PassListExpanded = true;
+        private static bool s_PassListExpanded;
 
         public override void OnInspectorGUI()
         {
@@ -413,6 +413,7 @@ namespace Tsukuyomi.Rendering.Editor
             }
 
             EditorGUI.indentLevel++;
+            EditorGUILayout.HelpBox("Select a pass node in the Graph Editor to edit its settings.", MessageType.Info);
             if (profile.Passes != null && profile.Passes.Count > 0)
             {
                 for (int i = 0; i < profile.Passes.Count; i++)

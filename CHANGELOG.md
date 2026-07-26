@@ -4,6 +4,18 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-07-26
+
+### Added
+
+- Added pass node inspection and editing to the render graph tooling.
+- Added a standard particle shader with its custom material inspector.
+- Added render-object pass support and a first-person weapon camera rendering feature.
+
+### Fixed
+
+- Updated shader keywords and includes to resolve Unity 6 rendering warnings.
+
 ## [0.1.4] - 2026-07-18
 
 ### Fixed

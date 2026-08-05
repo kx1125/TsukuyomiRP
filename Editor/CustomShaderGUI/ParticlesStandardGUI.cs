@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEngine.Rendering.Universal;
 
 [ExecuteInEditMode]
 public class ParticlesStandardGUI : ShaderProperty
@@ -53,6 +54,7 @@ public class ParticlesStandardGUI : ShaderProperty
             _props.NoiseTexMoveCenter = FindProperty("_NoiseTex_MoveCenter", properties);
             _props.NoiseTexRotator = FindProperty("_NoiseTex_Rotator", properties);
             _props.NoiseTexRotate = FindProperty("_NoiseTex_Rota", properties);
+            _props.NoiseTexChannel = FindProperty("_NoiseTex_Channel", properties);
         }
         
         //if (_props.MaskTex.textureValue != null)
@@ -60,7 +62,7 @@ public class ParticlesStandardGUI : ShaderProperty
             _props.MaskTexMoveCenter = FindProperty("_MaskTex_MoveCenter", properties);
             _props.MaskTexRotator = FindProperty("_MaskTex_Rotator", properties);
             _props.MaskTexRotate = FindProperty("_MaskTex_Rota", properties);
-            _props.MaskRA = FindProperty("_MaskRA", properties);
+            _props.MaskTexChannel = FindProperty("_MaskTex_Channel", properties);
             _props.MaskPower = FindProperty("_MaskPower", properties);
         }
         
@@ -70,6 +72,7 @@ public class ParticlesStandardGUI : ShaderProperty
             _props.DistortionTexMoveCenter = FindProperty("_DistortionTex_MoveCenter", properties);
             _props.DistortionTexRotator = FindProperty("_DistortionTex_Rotator", properties);
             _props.DistortionTexRotate = FindProperty("_DistortionTex_Rota", properties);
+            _props.DistortionTexChannel = FindProperty("_DistortionTex_Channel", properties);
         }
         
         //if (_props.DissolveTex.textureValue != null)
@@ -86,6 +89,7 @@ public class ParticlesStandardGUI : ShaderProperty
             _props.DissolveMoveSmooth = FindProperty("_DissolveMoveSmooth", properties);
             _props.DissolveFlip = FindProperty("_DissolveFlip", properties);
             _props.DissolveAxisDir = FindProperty("_DissolveAxisDir", properties);
+            _props.DissolveTexChannel = FindProperty("_DissolveTex_Channel", properties);
         }
 
         _props.Glow = FindProperty("_Glow", properties);
@@ -106,6 +110,10 @@ public class ParticlesStandardGUI : ShaderProperty
         _props.NoiseDistortionInt = FindProperty("_NoiseDistortionInt", properties);
         _props.NoiseDissolveInt = FindProperty("_NoiseDissolveInt", properties);
         _props.NoiseFresnelInt = FindProperty("_NoiseFresnelInt", properties);
+        _props.SoftParticlesEnabled = FindProperty("_SoftParticlesEnabled", properties);
+        _props.SoftParticlesNearFadeDistance = FindProperty("_SoftParticlesNearFadeDistance", properties);
+        _props.SoftParticlesFarFadeDistance = FindProperty("_SoftParticlesFarFadeDistance", properties);
+        _props.SoftParticleFadeParams = FindProperty("_SoftParticleFadeParams", properties);
         //FLOAT
     }
     
@@ -175,6 +183,74 @@ public class ParticlesStandardGUI : ShaderProperty
                 materialEditor.ShaderProperty(_props.StencilComp, new GUIContent("StencilComp", "模板值比较方式"));
                 materialEditor.ShaderProperty(_props.StencilOp, new GUIContent("StencilOp", "模板测试通过操作"));
                 materialEditor.ShaderProperty(_props.StencilFailOp, new GUIContent("StencilFailOp", "模板测试失败操作"));
+                EditorGUI.indentLevel--;
+            }
+
+            using (new EditorGUILayout.VerticalScope("helpbox"))
+            {
+                ShaderGUIHelper.GetSubHeader("Soft Particles");
+                EditorGUI.indentLevel++;
+
+                _features.SoftParticles = material != null && material.IsKeywordEnabled("_SOFTPARTICLES_ON");
+                EditorGUI.BeginChangeCheck();
+                _features.SoftParticles = EditorGUILayout.Toggle(
+                    new GUIContent("Enabled", "根据场景深度淡化粒子与不透明物体的交界处"),
+                    _features.SoftParticles);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    _props.SoftParticlesEnabled.floatValue = _features.SoftParticles ? 1.0f : 0.0f;
+                    foreach (Object target in materialEditor.targets)
+                    {
+                        if (target is Material targetMaterial)
+                            ApplyKeyworld(targetMaterial, "_SOFTPARTICLES_ON", _features.SoftParticles);
+                    }
+
+                    if (_features.SoftParticles)
+                        SetSoftParticleAlphaBlend(materialEditor.targets);
+                }
+
+                if (_features.SoftParticles)
+                {
+                    if (material != null && !IsSoftParticleBlendCompatible(material))
+                    {
+                        EditorGUILayout.HelpBox(
+                            "The current blend mode ignores particle alpha, so Soft Particles cannot fade. Use SrcAlpha / OneMinusSrcAlpha.",
+                            MessageType.Warning);
+                        if (GUILayout.Button("Use Soft Particle Alpha Blend"))
+                            SetSoftParticleAlphaBlend(materialEditor.targets);
+                    }
+
+                    UniversalRenderPipelineAsset pipelineAsset = UniversalRenderPipeline.asset;
+                    if (pipelineAsset != null && !pipelineAsset.supportsCameraDepthTexture)
+                    {
+                        EditorGUILayout.HelpBox(
+                            "Soft Particles require Depth Texture. Enable it in the active URP Asset or on the Camera.",
+                            MessageType.Warning);
+                    }
+
+                    EditorGUI.BeginChangeCheck();
+                    float nearFade = Mathf.Max(0.0f, _props.SoftParticlesNearFadeDistance.floatValue);
+                    float farFade = Mathf.Max(nearFade + 0.0001f, _props.SoftParticlesFarFadeDistance.floatValue);
+                    nearFade = EditorGUILayout.FloatField(new GUIContent("Near Fade", "完全透明的深度差起点"), nearFade);
+                    farFade = EditorGUILayout.FloatField(new GUIContent("Far Fade", "完全可见的深度差终点"), farFade);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        nearFade = Mathf.Max(0.0f, nearFade);
+                        farFade = Mathf.Max(nearFade + 0.0001f, farFade);
+                        _props.SoftParticlesNearFadeDistance.floatValue = nearFade;
+                        _props.SoftParticlesFarFadeDistance.floatValue = farFade;
+                    }
+
+                    nearFade = Mathf.Max(0.0f, _props.SoftParticlesNearFadeDistance.floatValue);
+                    farFade = Mathf.Max(nearFade + 0.0001f, _props.SoftParticlesFarFadeDistance.floatValue);
+                    _props.SoftParticleFadeParams.vectorValue = new Vector4(
+                        nearFade, 1.0f / (farFade - nearFade), 0.0f, 0.0f);
+                }
+                else
+                {
+                    _props.SoftParticleFadeParams.vectorValue = Vector4.zero;
+                }
+
                 EditorGUI.indentLevel--;
             }
             
@@ -286,6 +362,7 @@ public class ParticlesStandardGUI : ShaderProperty
                     
                     ShaderGUIHelper.GetSubHeader("NoiseTex Settings");
                     EditorGUI.indentLevel++;
+                    materialEditor.ShaderProperty(_props.NoiseTexChannel, new GUIContent("Channel", "选择噪声纹理使用的单一通道"));
                     materialEditor.ShaderProperty(_props.NoiseTexRotator, new GUIContent("UV Animation", "移动或旋转贴图"));
                     if (material.IsKeywordEnabled("_NOISETEX_ROTATOR_MOVE_NOISETEX"))
                     {
@@ -328,7 +405,7 @@ public class ParticlesStandardGUI : ShaderProperty
                     
                     ShaderGUIHelper.GetSubHeader("MaskTex Settings");
                     EditorGUI.indentLevel++;
-                    materialEditor.ShaderProperty(_props.MaskRA, new GUIContent("Use Alpha Channel","使用Alpha通道作为遮罩(默认为R通道)"));
+                    materialEditor.ShaderProperty(_props.MaskTexChannel, new GUIContent("Channel", "选择遮罩纹理使用的单一通道"));
                     materialEditor.ShaderProperty(_props.MaskPower, new GUIContent("Mask Power", "遮罩范围"));
                     materialEditor.ShaderProperty(_props.MaskTexRotator, new GUIContent("UV Animation", "移动或旋转贴图"));
                     if (material.IsKeywordEnabled("_MASKTEX_ROTATOR_MOVE_MASKTEX"))
@@ -383,6 +460,7 @@ public class ParticlesStandardGUI : ShaderProperty
                     
                     ShaderGUIHelper.GetSubHeader("DistortionTex Settings");
                     EditorGUI.indentLevel++;
+                    materialEditor.ShaderProperty(_props.DistortionTexChannel, new GUIContent("Channel", "选择扭曲纹理使用的单一通道"));
                     materialEditor.ShaderProperty(_props.Distortion, new GUIContent("Distortion Intensity", "扭曲强度"));
                     materialEditor.ShaderProperty(_props.DistortionTexRotator, new GUIContent("UV Animation", "移动或旋转贴图"));
                     if (material.IsKeywordEnabled("_DISTORTIONTEX_ROTATOR_MOVE_DISTORTIONTEX"))
@@ -450,6 +528,7 @@ public class ParticlesStandardGUI : ShaderProperty
 
                         ShaderGUIHelper.GetSubHeader("DissolveTex Settings");
                         EditorGUI.indentLevel++;
+                        materialEditor.ShaderProperty(_props.DissolveTexChannel, new GUIContent("Channel", "选择溶解纹理使用的单一通道"));
                         
                         _features.CustomData = material.IsKeywordEnabled("_USECUSTOMDATA");
                         EditorGUI.BeginChangeCheck();
@@ -565,4 +644,33 @@ public class ParticlesStandardGUI : ShaderProperty
 
         base.OnGUI(materialEditor, new MaterialProperty[] { });
     }
+
+    private static bool IsSoftParticleBlendCompatible(Material material)
+    {
+        UnityEngine.Rendering.BlendMode source =
+            (UnityEngine.Rendering.BlendMode)Mathf.RoundToInt(material.GetFloat("_SrcBlend"));
+        UnityEngine.Rendering.BlendMode destination =
+            (UnityEngine.Rendering.BlendMode)Mathf.RoundToInt(material.GetFloat("_DstBlend"));
+
+        return source == UnityEngine.Rendering.BlendMode.SrcAlpha ||
+               source == UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha ||
+               source == UnityEngine.Rendering.BlendMode.SrcAlphaSaturate ||
+               destination == UnityEngine.Rendering.BlendMode.SrcAlpha ||
+               destination == UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha;
+    }
+
+    private static void SetSoftParticleAlphaBlend(Object[] targets)
+    {
+        foreach (Object target in targets)
+        {
+            if (!(target is Material targetMaterial) || IsSoftParticleBlendCompatible(targetMaterial))
+                continue;
+
+            Undo.RecordObject(targetMaterial, "Set Soft Particle Alpha Blend");
+            targetMaterial.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            targetMaterial.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            EditorUtility.SetDirty(targetMaterial);
+        }
+    }
+
 }

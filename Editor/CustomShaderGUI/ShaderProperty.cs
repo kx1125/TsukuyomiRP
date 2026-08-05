@@ -11,6 +11,7 @@ public class ShaderProperty : ShaderGUI
         public bool CenterDissolve;
         public bool UseFresnel;
         public bool UseDissolve;
+        public bool SoftParticles;
     }
 
     public class Property
@@ -58,6 +59,9 @@ public class ShaderProperty : ShaderGUI
         public MaterialProperty NoiseDistortionInt;
         public MaterialProperty NoiseDissolveInt;
         public MaterialProperty NoiseFresnelInt;
+        public MaterialProperty SoftParticlesNearFadeDistance;
+        public MaterialProperty SoftParticlesFarFadeDistance;
+        public MaterialProperty SoftParticleFadeParams;
         
         //INT
         public MaterialProperty CullMode;
@@ -66,7 +70,11 @@ public class ShaderProperty : ShaderGUI
         public MaterialProperty DistortionTexRotator;
         public MaterialProperty MaskTexRotator;
         public MaterialProperty DissolveTexRotator;
-        public MaterialProperty MaskRA;
+        public MaterialProperty NoiseTexChannel;
+        public MaterialProperty MaskTexChannel;
+        public MaterialProperty DistortionTexChannel;
+        public MaterialProperty DissolveTexChannel;
+        public MaterialProperty SoftParticlesEnabled;
         public MaterialProperty SrcBlend;
         public MaterialProperty DstBlend;
         public MaterialProperty StencilComp;

@@ -11,6 +11,7 @@ Shader "Universal Render Pipeline/Particles_Standard"
 		[Toggle] _UseCustomData ("Use CustomData", Float) = 0
 		[Toggle] _ClampMainUV ("Clamp MainUV", Float) = 0
 		_NoiseTex ("NoiseTex", 2D) = "white" {}
+		[Enum(R,0,G,1,B,2,A,3)] _NoiseTex_Channel ("NoiseTex Channel", Float) = 0
 		_NoiseTex_MoveCenter ("NoiseTex_Move&Center", Vector) = (0,0,0.5,0.5)
 		[KeywordEnum(Rotate_NoiseTex,Move_NoiseTex)] _NoiseTex_Rotator ("NoiseTex_Rotator", Float) = 0
 		_NoiseTex_Rota ("NoiseTex_Rota", Float) = 0
@@ -23,18 +24,20 @@ Shader "Universal Render Pipeline/Particles_Standard"
 		[Toggle] _NoiseFresnel("Noise_Fresnel", float) = 0
 		_NoiseFresnelInt("Noise_Fresnel Intensity", range(0,1)) = 0
 		_MaskTex ("MaskTex", 2D) = "white" {}
-		[Toggle] _MaskRA ("MaskA", Float) = 0
+		[Enum(R,0,G,1,B,2,A,3)] _MaskTex_Channel ("MaskTex Channel", Float) = 0
 		_MaskTex_MoveCenter ("MaskTex_Move&Center", Vector) = (0,0,0.5,0.5)
 		[KeywordEnum(Rotate_MaskTex,Move_MaskTex)] _MaskTex_Rotator ("MaskTex_Rotator", Float) = 0
 		_MaskTex_Rota ("Mask_Rota", Float) = 0
 		_MaskPower ("MaskPower", Float) = 1
 		_DistortionTex ("DistortionTex", 2D) = "black" {}
+		[Enum(R,0,G,1,B,2,A,3)] _DistortionTex_Channel ("DistortionTex Channel", Float) = 0
 		_Distortion ("Distortion", Range(0, 1)) = 0
 		_DistortionTex_MoveCenter ("DistortionTex_Move&Center", Vector) = (0,0,0.5,0.5)
 		[KeywordEnum(Rotate_DistortionTex,Move_DistortionTex)] _DistortionTex_Rotator ("DistortionTex_Rotator", Float) = 0
 		_DistortionTex_Rota ("DistortionTex_Rota", Float) = 0
 		//[Toggle(_USEDISSOLVE)] _UseDissolve ("Use Dissolve", Float) = 0
 		_DissolveTex ("DissolveTex", 2D) = "white" {}
+		[Enum(R,0,G,1,B,2,A,3)] _DissolveTex_Channel ("DissolveTex Channel", Float) = 0
 		_DissolveProgress ("DissolveProgress", Range(0, 1)) = 0
 		[HDR]_DissolveColor ("DissolveColor", color) = (1,1,1,1)
 		_DissolveRange ("DissolveRange", Range(0, 1)) = 0.5
@@ -49,6 +52,11 @@ Shader "Universal Render Pipeline/Particles_Standard"
 		_DissolveTex_Rota ("DissolveTex_Rota", Float) = 0
 		_GlowColor ("Glow Color", Color) = (0,0,0,0)
 		_Glow ("Glow Color Intensity", Range(0, 100)) = 0
+
+		[Toggle] _SoftParticlesEnabled ("Soft Particles", Float) = 0
+		_SoftParticlesNearFadeDistance ("Soft Particles Near Fade", Float) = 0
+		_SoftParticlesFarFadeDistance ("Soft Particles Far Fade", Float) = 1
+		[HideInInspector] _SoftParticleFadeParams ("Soft Particle Fade Params", Vector) = (0,1,0,0)
 		
 		[Enum(Cull Off,0, Cull Front,1, Cull Back,2)] _CullMode ("Culling", Float) = 2
 		[Enum(UnityEngine.Rendering.BlendMode)]_SrcBlend ("SrcBlend", Float) = 5
@@ -121,7 +129,11 @@ Shader "Universal Render Pipeline/Particles_Standard"
             #pragma shader_feature_local _USEFRESNEL
             #pragma shader_feature_local _USEDISSOLVE
             #pragma shader_feature_local _USECUSTOMDATA
+			#pragma shader_feature_local _SOFTPARTICLES_ON
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+			#include_with_pragmas "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
+			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRendering.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
             float4 _MainTex_ST;
@@ -157,7 +169,10 @@ Shader "Universal Render Pipeline/Particles_Standard"
             half _DissolveRange;
             half _DissolveAlphaControl;
             half _Glow;
-            half _MaskRA;
+			half _NoiseTex_Channel;
+			half _MaskTex_Channel;
+			half _DistortionTex_Channel;
+			half _DissolveTex_Channel;
             half _MaskPower;
             half _FresnelRange;
             half _FresnelSmooth;
@@ -171,6 +186,7 @@ Shader "Universal Render Pipeline/Particles_Standard"
             half _NoiseDistortionInt;
             half _NoiseDissolveInt;
             half _NoiseFresnelInt;
+			float4 _SoftParticleFadeParams;
             CBUFFER_END
 
             TEXTURE2D(_MainTex);
@@ -207,11 +223,16 @@ Shader "Universal Render Pipeline/Particles_Standard"
 				
 			    half4 color                     : COLOR;
 
+				#ifdef _SOFTPARTICLES_ON
+				float4 projectedPosition        : TEXCOORD4;
+				#endif
+
 				#ifdef _USECUSTOMDATA
 				half dissolveProgress			: TEXCOORD3;
 				#endif
 				
 				UNITY_VERTEX_INPUT_INSTANCE_ID
+				UNITY_VERTEX_OUTPUT_STEREO
 			};
 
             float2 RotateUV(float2 uv, float2 center, float angle)
@@ -222,16 +243,48 @@ Shader "Universal Render Pipeline/Particles_Standard"
             	return rotatedUV;
             }
 
+			half SelectTextureChannel(half4 value, half channel)
+			{
+				if (channel < 0.5h) return value.r;
+				if (channel < 1.5h) return value.g;
+				if (channel < 2.5h) return value.b;
+				return value.a;
+			}
+
+			#if defined(_SOFTPARTICLES_ON)
+			float SoftParticleFade(float4 projectedPosition)
+			{
+				float2 uv = UnityStereoTransformScreenSpaceTex(projectedPosition.xy / projectedPosition.w);
+				#if defined(UNITY_PRETRANSFORM_TO_DISPLAY_ORIENTATION)
+				uv = RemovePretransformRotation(uv);
+				#endif
+				uv = FoveatedRemapLinearToNonUniform(uv);
+
+				// Match URP's particle shaders: normalized sampling remains valid when the
+				// camera depth texture resolution differs from the final screen resolution.
+				float rawDepth = SAMPLE_TEXTURE2D_X(_CameraDepthTexture, sampler_PointClamp, uv).r;
+				float sceneDepth = (unity_OrthoParams.w == 0.0)
+					? LinearEyeDepth(rawDepth, _ZBufferParams)
+					: LinearDepthToEyeDepth(rawDepth);
+				float particleDepth = LinearEyeDepth(projectedPosition.z / projectedPosition.w, _ZBufferParams);
+				return saturate(_SoftParticleFadeParams.y * ((sceneDepth - _SoftParticleFadeParams.x) - particleDepth));
+			}
+			#endif
+
 			VaryingsParticle vertParticle(AttributesParticle input)
 			{
 			    VaryingsParticle output = (VaryingsParticle)0;
             	UNITY_SETUP_INSTANCE_ID(input);
 			    UNITY_TRANSFER_INSTANCE_ID(input, output);
+				UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
             	
 				VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
 				output.clipPos = vertexInput.positionCS;
 				output.texcoord = input.texcoords.xy;
             	output.color = input.color;
+				#ifdef _SOFTPARTICLES_ON
+				output.projectedPosition = vertexInput.positionNDC;
+				#endif
             	#ifdef _USEFRESNEL
             	output.normal = input.normal;
             	output.positionWS = vertexInput.positionWS;
@@ -247,6 +300,7 @@ Shader "Universal Render Pipeline/Particles_Standard"
 
 			half4 fragParticle(VaryingsParticle input) : SV_TARGET
 			{
+				UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 				//NOISE
 				float2 noiseTexUV = input.texcoord * _NoiseTex_ST.xy + _NoiseTex_ST.zw;
 				#ifdef _NOISETEX_ROTATOR_ROTATE_NOISETEX
@@ -254,7 +308,8 @@ Shader "Universal Render Pipeline/Particles_Standard"
 				#elif _NOISETEX_ROTATOR_MOVE_NOISETEX
 				noiseTexUV += _NoiseTex_MoveCenter.xy * _Time.y;
 				#endif
-				half noiseTex_sample = SAMPLE_TEXTURE2D(_NoiseTex, sampler_NoiseTex, noiseTexUV).r;
+				half noiseTex_sample = SelectTextureChannel(
+					SAMPLE_TEXTURE2D(_NoiseTex, sampler_NoiseTex, noiseTexUV), _NoiseTex_Channel);
 				noiseTex_sample = noiseTex_sample * 2 - 1;
 
 				//MASK
@@ -266,7 +321,7 @@ Shader "Universal Render Pipeline/Particles_Standard"
 				maskTexUV += _MaskTex_MoveCenter.xy * _Time.y;
 				#endif
 				half4 maskTex_sample = SAMPLE_TEXTURE2D(_MaskTex, sampler_MaskTex, maskTexUV);
-				half mask = _MaskRA > 0? maskTex_sample.a : maskTex_sample.r;
+				half mask = SelectTextureChannel(maskTex_sample, _MaskTex_Channel);
 				mask = pow(abs(mask), _MaskPower);
 
 				//DISTORTION
@@ -277,7 +332,8 @@ Shader "Universal Render Pipeline/Particles_Standard"
 				#elif _DISTORTIONTEX_ROTATOR_MOVE_DISTORTIONTEX
 				distortionUV += _DistortionTex_MoveCenter.xy * _Time.y;
 				#endif
-				half distortionTex_sample = SAMPLE_TEXTURE2D(_DistortionTex, sampler_DistortionTex, distortionUV).r;
+				half distortionTex_sample = SelectTextureChannel(
+					SAMPLE_TEXTURE2D(_DistortionTex, sampler_DistortionTex, distortionUV), _DistortionTex_Channel);
 				half distortion = (distortionTex_sample * 2 - 1) * _Distortion;
 
 				//DISSOLVE
@@ -294,7 +350,8 @@ Shader "Universal Render Pipeline/Particles_Standard"
 				#elif _DISSOLVETEX_ROTATOR_MOVE_DISSOLVETEX
 				dissolveUV += _DissolveTex_MoveCenter.xy * _Time.y;
 				#endif
-				half dissolveTex_sample = SAMPLE_TEXTURE2D(_DissolveTex, sampler_DissolveTex, dissolveUV).r;
+				half dissolveTex_sample = SelectTextureChannel(
+					SAMPLE_TEXTURE2D(_DissolveTex, sampler_DissolveTex, dissolveUV), _DissolveTex_Channel);
 				_DissolveProgress = _DissolveFlip > 0.5 ? 1 - _DissolveProgress : _DissolveProgress;
 
 				float centerDist = distance(input.texcoord, float2(0.5, 0.5));
@@ -349,6 +406,9 @@ Shader "Universal Render Pipeline/Particles_Standard"
 				
 				finalColor.a = _DissolveAlphaControl > 0.5 ? finalColor.a * d : finalColor.a;
 				finalColor.a *= d;
+				#ifdef _SOFTPARTICLES_ON
+				finalColor.a *= SoftParticleFade(input.projectedPosition);
+				#endif
 				//return half4(mask,0,0,1);
 				return finalColor * input.color;
 			}

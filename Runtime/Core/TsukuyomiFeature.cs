@@ -200,8 +200,7 @@ namespace Tsukuyomi.Rendering
 
             if (_planarReflectionPass != null && _planarReflectionPass.Configure(Profile))
             {
-                _planarReflectionBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_planarReflectionBridgePass);
+                EnqueueBridge(renderer, _planarReflectionBridgePass);
             }
             else
             {
@@ -210,13 +209,11 @@ namespace Tsukuyomi.Rendering
 
             if (contactShadowsEnabled)
             {
-                _contactShadowBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_contactShadowBridgePass);
+                EnqueueBridge(renderer, _contactShadowBridgePass);
 
                 if (contactShadowDenoiseEnabled)
                 {
-                    _contactShadowDenoiseBridgePass.ConfigureInputFromTextureSlots();
-                    renderer.EnqueuePass(_contactShadowDenoiseBridgePass);
+                    EnqueueBridge(renderer, _contactShadowDenoiseBridgePass);
                 }
             }
 
@@ -224,16 +221,13 @@ namespace Tsukuyomi.Rendering
             bool depthPyramidEnabled = gtaoEnabled && _depthPyramidPass != null && _depthPyramidPass.Configure();
             if (depthPyramidEnabled)
             {
-                _depthPyramidBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_depthPyramidBridgePass);
+                EnqueueBridge(renderer, _depthPyramidBridgePass);
             }
 
             if (gtaoEnabled && depthPyramidEnabled)
             {
-                _gtaoBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_gtaoBridgePass);
-                _gtaoRestoreBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_gtaoRestoreBridgePass);
+                EnqueueBridge(renderer, _gtaoBridgePass);
+                EnqueueBridge(renderer, _gtaoRestoreBridgePass);
             }
 
             bool usesDeferredLighting = UsesDeferredLighting(renderer);
@@ -262,36 +256,39 @@ namespace Tsukuyomi.Rendering
                     : contactShadowsEnabled
                         ? RenderPassEvent.AfterRenderingPrePasses + 4
                         : RenderPassEvent.AfterRenderingPrePasses + 1;
-                _pcssBridgePass.ConfigureInputFromTextureSlots();
-                _pcssRestoreBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_pcssBridgePass);
-                renderer.EnqueuePass(_pcssRestoreBridgePass);
+                EnqueueBridge(renderer, _pcssBridgePass);
+                EnqueueBridge(renderer, _pcssRestoreBridgePass);
             }
 
             if (_volumeLightPass != null && _volumeLightPass.Configure(Profile, volumeLightVolume))
             {
-                _volumeLightBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_volumeLightBridgePass);
+                EnqueueBridge(renderer, _volumeLightBridgePass);
             }
 
             if (_postProcessPass != null && _postProcessPass.Configure(Profile, volumeStack))
             {
-                _postProcessBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_postProcessBridgePass);
+                EnqueueBridge(renderer, _postProcessBridgePass);
             }
 
             bool useSharedDepthNormals = RequiresCameraNormals(contactShadowDenoiseEnabled, gtaoEnabled && depthPyramidEnabled);
             if (_sssSkinPass != null && _sssSkinPass.Configure(Profile, sssSkinVolume, useSharedDepthNormals))
             {
-                _sssSkinBridgePass.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(_sssSkinBridgePass);
+                EnqueueBridge(renderer, _sssSkinBridgePass);
             }
 
             foreach (TsukuyomiBridgePass bridge in _bridgePasses)
             {
-                bridge.ConfigureInputFromTextureSlots();
-                renderer.EnqueuePass(bridge);
+                EnqueueBridge(renderer, bridge);
             }
+        }
+
+        private void EnqueueBridge(ScriptableRenderer renderer, TsukuyomiBridgePass bridge)
+        {
+            if (renderer == null || bridge == null)
+                return;
+
+            bridge.ConfigureInputFromTextureSlots();
+            renderer.EnqueuePass(bridge);
         }
 
         private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled)

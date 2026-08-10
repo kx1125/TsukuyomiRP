@@ -13,6 +13,7 @@ namespace Tsukuyomi.Rendering
         private const string TextureName = "_TsukuyomiPlanarReflectionTexture";
         private const string LegacyCorrectTextureName = "_PlanarReflectionTexture";
         private const string LegacyMisspelledTextureName = "_PlanarRefectionTexture";
+        private const int FrustumPlaneCount = 6;
 
         private static readonly int TextureId = Shader.PropertyToID(TextureName);
         private static readonly int LegacyCorrectTextureId = Shader.PropertyToID(LegacyCorrectTextureName);
@@ -22,6 +23,7 @@ namespace Tsukuyomi.Rendering
         private static readonly int WorldSpaceCameraPosId = Shader.PropertyToID("_WorldSpaceCameraPos");
 
         private readonly List<ShaderTagId> _shaderTagIds = new();
+        private readonly Plane[] _reflectionCullingPlanes = new Plane[FrustumPlaneCount];
         private TsukuyomiPlanarReflectionPlane _plane;
         private float _renderTextureScale = 0.5f;
         private int _layerMask = -1;
@@ -101,7 +103,13 @@ namespace Tsukuyomi.Rendering
             Matrix4x4 reflectionProjection = CalculateObliqueMatrix(skyboxProjection, clipPlane);
             Vector3 reflectedCameraPosition = reflectionMatrix.MultiplyPoint(context.CameraData.worldSpaceCameraPos);
 
-            cullingParameters.cullingMatrix = reflectionProjection * reflectionView;
+            Matrix4x4 reflectionViewProjection = reflectionProjection * reflectionView;
+            cullingParameters.cullingMatrix = reflectionViewProjection;
+            GeometryUtility.CalculateFrustumPlanes(reflectionViewProjection, _reflectionCullingPlanes);
+            cullingParameters.cullingPlaneCount = FrustumPlaneCount;
+            for (int i = 0; i < FrustumPlaneCount; i++)
+                cullingParameters.SetCullingPlane(i, _reflectionCullingPlanes[i]);
+
             cullingParameters.origin = reflectedCameraPosition;
             cullingParameters.cullingMask = unchecked((uint)_layerMask);
 

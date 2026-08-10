@@ -4,6 +4,18 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-10
+
+### Added
+
+- Added a transparent glass shader with sphere-model refraction, reflection-probe Fresnel, direct specular lighting, MatCap overlay, and an alpha-blended non-refraction mode.
+- Added a water shader with depth-based absorption, refraction, planar and probe reflections, Gerstner waves, foam, and caustics.
+
+### Changed
+
+- Improved planar-reflection frustum culling and enabled planar-reflection keywords for the water shader.
+- Centralized renderer-feature bridge-pass setup and enqueue handling.
+
 ## [0.1.5] - 2026-07-26
 
 ### Added

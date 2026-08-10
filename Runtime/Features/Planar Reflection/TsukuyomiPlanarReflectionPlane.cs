@@ -7,6 +7,7 @@ namespace Tsukuyomi.Rendering
     public sealed class TsukuyomiPlanarReflectionPlane : MonoBehaviour
     {
         private const string LitPbrShaderName = "TsukuyomiRP/Lit/PBR";
+        private const string LitWaterShaderName = "TsukuyomiRP/Lit/Water";
         private const string PlanarReflectionKeyword = "_TSUKUYOMI_PLANAR_REFLECTION";
 
         private static readonly List<TsukuyomiPlanarReflectionPlane> s_ActivePlanes = new();
@@ -116,7 +117,7 @@ namespace Tsukuyomi.Rendering
 
                 bool usePlanarReflection = enabled
                     && material.shader
-                    && material.shader.name == LitPbrShaderName;
+                    && (material.shader.name == LitPbrShaderName || material.shader.name == LitWaterShaderName);
 
                 if (usePlanarReflection)
                     material.EnableKeyword(PlanarReflectionKeyword);

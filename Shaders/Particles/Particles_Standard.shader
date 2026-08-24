@@ -1,4 +1,4 @@
-Shader "Universal Render Pipeline/Particles_Standard"
+Shader "TsukuyomiRP/Particles/Particles_Standard"
 {
 	Properties
 	{

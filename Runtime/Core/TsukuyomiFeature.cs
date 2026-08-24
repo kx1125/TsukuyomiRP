@@ -55,6 +55,10 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiVolumetricFogPass _volumeLightPass;
         private TsukuyomiSssSkinPass _sssSkinPass;
         private TsukuyomiPostProcessPass _postProcessPass;
+#if ENABLE_UPSCALER_FRAMEWORK
+        private TsukuyomiFsr3OpaqueOnlyCapturePass _fsr3OpaqueOnlyCapturePass;
+        private TsukuyomiFsr3ManualMaskPass _fsr3ManualMaskPass;
+#endif
 
         private void OnEnable()
         {
@@ -94,6 +98,10 @@ namespace Tsukuyomi.Rendering
             _volumeLightPass ??= new TsukuyomiVolumetricFogPass();
             _sssSkinPass ??= new TsukuyomiSssSkinPass();
             _postProcessPass ??= new TsukuyomiPostProcessPass();
+#if ENABLE_UPSCALER_FRAMEWORK
+            _fsr3OpaqueOnlyCapturePass ??= new TsukuyomiFsr3OpaqueOnlyCapturePass();
+            _fsr3ManualMaskPass ??= new TsukuyomiFsr3ManualMaskPass();
+#endif
 
             _contactShadowPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _contactShadowDenoisePass.InjectionPoint = InjectionPoint.BeforeOpaque;
@@ -179,6 +187,11 @@ namespace Tsukuyomi.Rendering
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+#if ENABLE_UPSCALER_FRAMEWORK
+            _fsr3ManualMaskPass.Configure(Profile);
+            renderer.EnqueuePass(_fsr3OpaqueOnlyCapturePass);
+            renderer.EnqueuePass(_fsr3ManualMaskPass);
+#endif
             if (Profile == null)
             {
                 RestoreMainLightShadowLayerOverride();
@@ -420,6 +433,10 @@ namespace Tsukuyomi.Rendering
             _sssSkinPass?.Dispose();
             _sssSkinPass = null;
             _sssSkinBridgePass = null;
+#if ENABLE_UPSCALER_FRAMEWORK
+            _fsr3OpaqueOnlyCapturePass = null;
+            _fsr3ManualMaskPass = null;
+#endif
             base.Dispose(disposing);
         }
     }

@@ -24,6 +24,8 @@ half _IndirectSpecularIntensity;
 half _EnvironmentReflectionRange;
 half _EnvironmentReflectionSharpness;
 half _HorizonOcclusionPower;
+half _Fsr3ReactiveScale;
+half _Fsr3CompositionScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 CBUFFER_END
 

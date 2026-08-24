@@ -47,6 +47,10 @@ Shader "TsukuyomiRP/Lit/PBR"
         [ToggleOff(_RECEIVE_SHADOWS_OFF)] _ReceiveShadows("Receive Shadows", Float) = 1.0
         _QueueOffset("Queue Offset", Float) = 0.0
 
+        [Header(FSR3 Reactivity)]
+        _Fsr3ReactiveScale("Reactive Scale", Range(0.0, 1.0)) = 0.9
+        _Fsr3CompositionScale("Composition Scale", Range(0.0, 1.0)) = 0.0
+
         [HideInInspector] _MainTex("BaseMap", 2D) = "white" {}
         [HideInInspector] _Color("Base Color", Color) = (1, 1, 1, 1)
         [HideInInspector] _GlossMapScale("Smoothness", Float) = 0.0
@@ -137,6 +141,29 @@ Shader "TsukuyomiRP/Lit/PBR"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Lit/Passes/TsukuyomiPBRForwardPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Fsr3Mask"
+            Tags { "LightMode" = "TsukuyomiFsr3Mask" }
+
+            Blend One One
+            BlendOp Max
+            ZWrite Off
+            ZTest LEqual
+            Cull[_Cull]
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex TsukuyomiFsr3MaskVertex
+            #pragma fragment TsukuyomiFsr3MaskFragment
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiPBRInput.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Lit/Passes/TsukuyomiFsr3MaskPass.hlsl"
             ENDHLSL
         }
 

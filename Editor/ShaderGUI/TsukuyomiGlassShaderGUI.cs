@@ -124,6 +124,8 @@ namespace Tsukuyomi.Rendering.Editor.ShaderGUI
                 DrawProperty("_ReceiveShadows", "Receive Shadows");
                 DrawPopup("Render Face", "_Cull", new[] { "Both", "Front", "Back" });
                 DrawProperty("_QueueOffset", "Sorting Priority");
+                DrawProperty("_Fsr3ReactiveScale", "FSR3 Reactive Scale");
+                DrawProperty("_Fsr3CompositionScale", "FSR3 Composition Scale");
                 materialEditor.EnableInstancingField();
                 materialEditor.DoubleSidedGIField();
                 materialEditor.RenderQueueField();

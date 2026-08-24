@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2024 Nico de Poel
+// Copyright (c) 2024 Nico de Poel
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -192,13 +192,17 @@ namespace Tsukuyomi.Rendering.FSR3
             if (dispatchParams.EnableAutoReactive)
             {
                 // Create the auto-TCR resources only when we need them
+                bool createdAutoReactiveResources = false;
                 if (_resources.AutoReactive == null)
-                    _resources.CreateTcrAutogenResources(_contextDescription);
-
-                if (resetAccumulation)
                 {
-                    RenderTargetIdentifier opaqueOnly = dispatchParams.ColorOpaqueOnly.IsValid ? dispatchParams.ColorOpaqueOnly.RenderTarget : Fsr3ShaderIDs.SrvOpaqueOnly;
-                    commandBuffer.Blit(_resources.PrevPreAlpha[frameIndex ^ 1], opaqueOnly);
+                    _resources.CreateTcrAutogenResources(_contextDescription);
+                    createdAutoReactiveResources = true;
+                }
+
+                if (resetAccumulation || createdAutoReactiveResources)
+                {
+                    commandBuffer.Blit(dispatchParams.ColorOpaqueOnly.RenderTarget, _resources.PrevPreAlpha[frameIndex ^ 1]);
+                    commandBuffer.Blit(dispatchParams.Color.RenderTarget, _resources.PrevPostAlpha[frameIndex ^ 1]);
                 }
             }
             else if (_resources.AutoReactive != null)

@@ -105,6 +105,11 @@ namespace Tsukuyomi.Rendering
             float nearClip = io.nearClipPlane;
             float farClip = io.farClipPlane;
             float deltaTime = io.deltaTime;
+            TsukuyomiFsr3FrameData fsrFrameData = frameData.GetOrCreate<TsukuyomiFsr3FrameData>();
+            TextureHandle colorOpaqueOnly = fsrFrameData.ColorOpaqueOnly;
+            TextureHandle reactiveMask = fsrFrameData.ReactiveMask;
+            TextureHandle compositionMask = fsrFrameData.TransparencyAndCompositionMask;
+            bool enableAutoReactive = settings.ReactiveMaskMode != TsukuyomiFsr3ReactiveMaskMode.Disabled && colorOpaqueOnly.IsValid();
 
             using (var builder = renderGraph.AddUnsafePass<PassData>("Tsukuyomi FSR3 Upscaler", out PassData passData))
             {
@@ -112,12 +117,21 @@ namespace Tsukuyomi.Rendering
                 builder.UseTexture(io.cameraDepth, AccessFlags.Read);
                 builder.UseTexture(io.motionVectorColor, AccessFlags.Read);
                 builder.UseTexture(output, AccessFlags.ReadWrite);
+                if (colorOpaqueOnly.IsValid())
+                    builder.UseTexture(colorOpaqueOnly, AccessFlags.Read);
+                if (reactiveMask.IsValid())
+                    builder.UseTexture(reactiveMask, AccessFlags.Read);
+                if (compositionMask.IsValid())
+                    builder.UseTexture(compositionMask, AccessFlags.Read);
                 builder.AllowGlobalStateModification(true);
 
                 passData.Context = fsrContext;
                 passData.Color = io.cameraColor;
                 passData.Depth = io.cameraDepth;
                 passData.MotionVectors = io.motionVectorColor;
+                passData.ColorOpaqueOnly = colorOpaqueOnly;
+                passData.ReactiveMask = reactiveMask;
+                passData.CompositionMask = compositionMask;
                 passData.Output = output;
                 passData.JitterOffset = jitterOffset;
                 passData.RenderSize = renderSize;
@@ -131,6 +145,11 @@ namespace Tsukuyomi.Rendering
                 passData.CameraFovAngleVertical = fieldOfView * Mathf.Deg2Rad;
                 passData.VelocityFactor = settings.VelocityFactor;
                 passData.Flags = settings.EnableDebugView ? Fsr3Upscaler.DispatchFlags.DrawDebugView : 0;
+                passData.EnableAutoReactive = enableAutoReactive;
+                passData.AutoTcThreshold = settings.AutoTcThreshold;
+                passData.AutoTcScale = settings.AutoTcScale;
+                passData.AutoReactiveScale = settings.AutoReactiveScale;
+                passData.AutoReactiveMax = settings.AutoReactiveMax;
 
                 builder.SetRenderFunc(static (PassData data, UnsafeGraphContext context) =>
                 {
@@ -143,8 +162,12 @@ namespace Tsukuyomi.Rendering
                         Depth = new ResourceView(data.Depth, RenderTextureSubElement.Depth),
                         MotionVectors = new ResourceView(data.MotionVectors, RenderTextureSubElement.Color),
                         Exposure = ResourceView.Unassigned,
-                        Reactive = ResourceView.Unassigned,
-                        TransparencyAndComposition = ResourceView.Unassigned,
+                        Reactive = data.ReactiveMask.IsValid()
+                            ? new ResourceView(data.ReactiveMask, RenderTextureSubElement.Color)
+                            : ResourceView.Unassigned,
+                        TransparencyAndComposition = data.CompositionMask.IsValid()
+                            ? new ResourceView(data.CompositionMask, RenderTextureSubElement.Color)
+                            : ResourceView.Unassigned,
                         Output = new ResourceView(data.Output, RenderTextureSubElement.Color),
                         JitterOffset = data.JitterOffset,
                         MotionVectorScale = new Vector2(-data.RenderSize.x, -data.RenderSize.y),
@@ -161,7 +184,14 @@ namespace Tsukuyomi.Rendering
                         ViewSpaceToMetersFactor = 1.0f,
                         VelocityFactor = data.VelocityFactor,
                         Flags = data.Flags,
-                        EnableAutoReactive = false
+                        EnableAutoReactive = data.EnableAutoReactive,
+                        ColorOpaqueOnly = data.ColorOpaqueOnly.IsValid()
+                            ? new ResourceView(data.ColorOpaqueOnly, RenderTextureSubElement.Color)
+                            : ResourceView.Unassigned,
+                        AutoTcThreshold = data.AutoTcThreshold,
+                        AutoTcScale = data.AutoTcScale,
+                        AutoReactiveScale = data.AutoReactiveScale,
+                        AutoReactiveMax = data.AutoReactiveMax
                     };
 
                     if (SystemInfo.usesReversedZBuffer)
@@ -370,6 +400,9 @@ namespace Tsukuyomi.Rendering
             public TextureHandle Color;
             public TextureHandle Depth;
             public TextureHandle MotionVectors;
+            public TextureHandle ColorOpaqueOnly;
+            public TextureHandle ReactiveMask;
+            public TextureHandle CompositionMask;
             public TextureHandle Output;
             public Vector2 JitterOffset;
             public Vector2Int RenderSize;
@@ -383,6 +416,11 @@ namespace Tsukuyomi.Rendering
             public float CameraFovAngleVertical;
             public float VelocityFactor;
             public Fsr3Upscaler.DispatchFlags Flags;
+            public bool EnableAutoReactive;
+            public float AutoTcThreshold;
+            public float AutoTcScale;
+            public float AutoReactiveScale;
+            public float AutoReactiveMax;
         }
     }
 

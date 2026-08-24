@@ -58,6 +58,8 @@ namespace Tsukuyomi.Rendering.Editor.ShaderGUI
                 if (surface != null && surface.floatValue > 0.5f)
                 {
                     DrawPopup("Blending Mode", "_Blend", new[] { "Alpha", "Premultiply", "Additive", "Multiply" });
+                    DrawProperty("_Fsr3ReactiveScale", "FSR3 Reactive Scale");
+                    DrawProperty("_Fsr3CompositionScale", "FSR3 Composition Scale");
                 }
 
                 DrawPopup("Render Face", "_Cull", new[] { "Both", "Front", "Back" });

@@ -1,9 +1,16 @@
-﻿using System;
+using System;
 using Tsukuyomi.Rendering.FSR3;
 using UnityEngine;
 
 namespace Tsukuyomi.Rendering
 {
+    public enum TsukuyomiFsr3ReactiveMaskMode
+    {
+        Disabled,
+        Auto,
+        AutoAndManual
+    }
+
     [Serializable]
     public sealed class TsukuyomiFsr3Settings
     {
@@ -16,6 +23,15 @@ namespace Tsukuyomi.Rendering
         public float VelocityFactor = 1.0f;
         public bool EnableAutoExposure = true;
         public bool EnableDebugView;
+        public TsukuyomiFsr3ReactiveMaskMode ReactiveMaskMode = TsukuyomiFsr3ReactiveMaskMode.AutoAndManual;
+        [Range(0.0f, 1.0f)]
+        public float AutoTcThreshold = 0.05f;
+        [Min(0.0f)]
+        public float AutoTcScale = 1.0f;
+        [Min(0.0f)]
+        public float AutoReactiveScale = 5.0f;
+        [Range(0.0f, 1.0f)]
+        public float AutoReactiveMax = 0.9f;
     }
 
     [Serializable]

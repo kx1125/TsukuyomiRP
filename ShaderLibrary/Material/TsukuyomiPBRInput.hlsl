@@ -23,6 +23,8 @@ half _IndirectSpecularFGDStrength;
 half _IndirectDiffuseIntensity;
 half _IndirectSpecularIntensity;
 half _HorizonOcclusionPower;
+half _Fsr3ReactiveScale;
+half _Fsr3CompositionScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 CBUFFER_END
 
@@ -44,6 +46,8 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float, _IndirectDiffuseIntensity)
     UNITY_DOTS_INSTANCED_PROP(float, _IndirectSpecularIntensity)
     UNITY_DOTS_INSTANCED_PROP(float, _HorizonOcclusionPower)
+    UNITY_DOTS_INSTANCED_PROP(float, _Fsr3ReactiveScale)
+    UNITY_DOTS_INSTANCED_PROP(float, _Fsr3CompositionScale)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
 static float4 unity_DOTS_Sampled_BaseColor;
@@ -61,6 +65,8 @@ static float unity_DOTS_Sampled_IndirectSpecularFGDStrength;
 static float unity_DOTS_Sampled_IndirectDiffuseIntensity;
 static float unity_DOTS_Sampled_IndirectSpecularIntensity;
 static float unity_DOTS_Sampled_HorizonOcclusionPower;
+static float unity_DOTS_Sampled_Fsr3ReactiveScale;
+static float unity_DOTS_Sampled_Fsr3CompositionScale;
 
 void SetupDOTSTsukuyomiPBRMaterialPropertyCaches()
 {
@@ -79,6 +85,8 @@ void SetupDOTSTsukuyomiPBRMaterialPropertyCaches()
     unity_DOTS_Sampled_IndirectDiffuseIntensity = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float, _IndirectDiffuseIntensity);
     unity_DOTS_Sampled_IndirectSpecularIntensity = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float, _IndirectSpecularIntensity);
     unity_DOTS_Sampled_HorizonOcclusionPower = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float, _HorizonOcclusionPower);
+    unity_DOTS_Sampled_Fsr3ReactiveScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float, _Fsr3ReactiveScale);
+    unity_DOTS_Sampled_Fsr3CompositionScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float, _Fsr3CompositionScale);
 }
 
 #undef UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES
@@ -99,6 +107,8 @@ void SetupDOTSTsukuyomiPBRMaterialPropertyCaches()
 #define _IndirectDiffuseIntensity unity_DOTS_Sampled_IndirectDiffuseIntensity
 #define _IndirectSpecularIntensity unity_DOTS_Sampled_IndirectSpecularIntensity
 #define _HorizonOcclusionPower unity_DOTS_Sampled_HorizonOcclusionPower
+#define _Fsr3ReactiveScale unity_DOTS_Sampled_Fsr3ReactiveScale
+#define _Fsr3CompositionScale unity_DOTS_Sampled_Fsr3CompositionScale
 
 #endif
 

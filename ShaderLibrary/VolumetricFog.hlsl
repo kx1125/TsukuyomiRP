@@ -104,9 +104,6 @@ half3 GetProbeVolumeEvaluation(float2 uv, float3 posWS, half density)
         float3 diffuseLighting;
         EvaluateAdaptiveProbeVolume(posWS, uv * _ScreenSize.xy, diffuseLighting);
         diffuseGI = half3(diffuseLighting) * half(_ProbeVolumeContributionWeight) * density;
-    #else
-        // From IllusionRP PRTGI
-        diffuseGI = SampleProbeVolume(posWS, 0, 0) * half(_ProbeVolumeContributionWeight) * density;
     #endif
 #endif
  

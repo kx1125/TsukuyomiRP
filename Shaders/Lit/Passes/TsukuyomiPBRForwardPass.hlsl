@@ -32,7 +32,10 @@ struct TsukuyomiPBRVaryings
     half fogFactor : TEXCOORD5;
 #endif
 
+#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
     float4 shadowCoord : TEXCOORD6;
+#endif
+
     TSUKUYOMI_DECLARE_LIGHTMAP_OR_SH(staticLightmapUV, vertexSH, 8);
 
 #ifdef DYNAMICLIGHTMAP_ON
@@ -68,7 +71,13 @@ void TsukuyomiPBRInitializeInputData(TsukuyomiPBRVaryings input, half3 normalTS,
 
     inputData.normalWS = NormalizeNormalPerPixel(inputData.normalWS);
     inputData.viewDirectionWS = viewDirWS;
+#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
     inputData.shadowCoord = input.shadowCoord;
+#elif defined(MAIN_LIGHT_CALCULATE_SHADOWS)
+    inputData.shadowCoord = TransformWorldToShadowCoord(inputData.positionWS);
+#else
+    inputData.shadowCoord = float4(0, 0, 0, 0);
+#endif
 
 #ifdef _ADDITIONAL_LIGHTS_VERTEX
     inputData.fogCoord = InitializeInputDataFog(float4(input.positionWS, 1.0), input.fogFactorAndVertexLight.x);
@@ -160,7 +169,10 @@ TsukuyomiPBRVaryings TsukuyomiPBRForwardVertex(TsukuyomiPBRAttributes input)
     real sign = input.tangentOS.w * GetOddNegativeScale();
     output.tangentWS = half4(normalInput.tangentWS.xyz, sign);
 
+#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
     output.shadowCoord = GetShadowCoord(vertexInput);
+#endif
+
     TSUKUYOMI_OUTPUT_LIGHTMAP_UV(input.staticLightmapUV, unity_LightmapST, output.staticLightmapUV);
 
 #ifdef DYNAMICLIGHTMAP_ON

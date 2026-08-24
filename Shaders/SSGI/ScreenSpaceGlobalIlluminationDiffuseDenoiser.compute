@@ -1,0 +1,54 @@
+#pragma only_renderers d3d11 vulkan metal
+#pragma kernel SpatialDenoise
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+
+#define SSGI_TILE_SIZE 8
+
+Texture2D<float4> _InputIndirectDiffuseTexture;
+Texture2D<float> _CameraDepthTexture;
+RWTexture2D<float4> _OutputIndirectDiffuseTextureRW;
+
+float4 _FullResolution;
+float4 _InputResolution;
+float4 _OutputResolution;
+float _DenoiserRadius;
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void SpatialDenoise(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    if (any(coord >= (uint2)_OutputResolution.xy))
+        return;
+
+    float2 uv = (coord + 0.5) * _OutputResolution.zw;
+    uint2 fullCoord = min((uint2)(uv * _FullResolution.xy), (uint2)_FullResolution.xy - 1);
+    float centerDepth = LinearEyeDepth(_CameraDepthTexture.Load(int3(fullCoord, 0)), _ZBufferParams);
+    float3 centerNormal = normalize(LoadSceneNormals(fullCoord));
+    float3 colorSum = 0.0;
+    float weightSum = 0.0;
+    float radius = max(0.0001, _DenoiserRadius);
+
+    [unroll]
+    for (int y = -2; y <= 2; y++)
+    {
+        [unroll]
+        for (int x = -2; x <= 2; x++)
+        {
+            float2 offset = float2(x, y) * radius;
+            float2 sampleUv = saturate(uv + offset * _OutputResolution.zw);
+            uint2 sampleFullCoord = min((uint2)(sampleUv * _FullResolution.xy), (uint2)_FullResolution.xy - 1);
+            float sampleDepth = LinearEyeDepth(_CameraDepthTexture.Load(int3(sampleFullCoord, 0)), _ZBufferParams);
+            float3 sampleNormal = normalize(LoadSceneNormals(sampleFullCoord));
+            float spatialWeight = exp2(-dot(offset, offset) / max(1.0, radius * radius * 2.0));
+            float depthWeight = exp2(-abs(sampleDepth - centerDepth) / max(0.02, centerDepth * 0.02));
+            float normalWeight = pow(saturate(dot(centerNormal, sampleNormal)), 16.0);
+            float weight = spatialWeight * depthWeight * normalWeight;
+            colorSum += _InputIndirectDiffuseTexture.SampleLevel(sampler_LinearClamp, sampleUv, 0).rgb * weight;
+            weightSum += weight;
+        }
+    }
+
+    _OutputIndirectDiffuseTextureRW[coord] = float4(colorSum / max(weightSum, 0.0001), 1.0);
+}

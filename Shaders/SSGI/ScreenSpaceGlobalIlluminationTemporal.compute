@@ -1,0 +1,115 @@
+// Temporal validation and accumulation for TsukuyomiRP SSGI.
+
+#pragma only_renderers d3d11 vulkan metal
+#pragma kernel CopyNormals
+#pragma kernel ValidateHistory
+#pragma kernel TemporalAccumulation
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+
+#define SSGI_TILE_SIZE 8
+
+Texture2D<float> _CameraDepthTexture;
+Texture2D<float> _HistoryDepthTexture;
+Texture2D<float4> _MotionVectorTexture;
+Texture2D<float4> _HistoryNormalTexture;
+Texture2D<float4> _InputIndirectDiffuseTexture;
+Texture2D<float4> _HistoryIndirectDiffuseTexture;
+Texture2D<uint> _HistoryValidationTexture;
+
+RWTexture2D<float4> _OutputNormalHistoryRW;
+RWTexture2D<uint> _HistoryValidationTextureRW;
+RWTexture2D<float4> _OutputIndirectDiffuseHistoryRW;
+
+float4 _FullResolution;
+float4 _SignalResolution;
+float4x4 _SsgiInverseViewProjection;
+float4x4 _SsgiPreviousInverseViewProjection;
+float2 _SsgiJitterDelta;
+int _HistoryValid;
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void CopyNormals(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    if (any(coord >= (uint2)_FullResolution.xy))
+        return;
+    _OutputNormalHistoryRW[coord] = float4(normalize(LoadSceneNormals(coord)), 1.0);
+}
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void ValidateHistory(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    if (any(coord >= (uint2)_FullResolution.xy))
+        return;
+
+    uint valid = _HistoryValid != 0 ? 1u : 0u;
+    float2 uv = (coord + 0.5) * _FullResolution.zw;
+    float currentDepth = _CameraDepthTexture.Load(int3(coord, 0));
+    float2 motion = _MotionVectorTexture.Load(int3(coord, 0)).xy;
+    float2 previousUv = uv - motion + _SsgiJitterDelta;
+    if (currentDepth == UNITY_RAW_FAR_CLIP_VALUE || any(previousUv < 0.0) || any(previousUv > 1.0))
+        valid = 0u;
+
+    if (valid != 0u)
+    {
+        float previousDepth = _HistoryDepthTexture.SampleLevel(sampler_PointClamp, previousUv, 0);
+        float3 currentNormal = normalize(LoadSceneNormals(coord));
+        float3 previousNormal = normalize(_HistoryNormalTexture.SampleLevel(sampler_PointClamp, previousUv, 0).xyz);
+        float3 currentPosition = ComputeWorldSpacePosition(uv, currentDepth, _SsgiInverseViewProjection);
+        float3 previousPosition = ComputeWorldSpacePosition(previousUv, previousDepth, _SsgiPreviousInverseViewProjection);
+        float currentLinearDepth = LinearEyeDepth(currentDepth, _ZBufferParams);
+        float positionTolerance = max(0.02, currentLinearDepth * 0.025);
+        if (dot(currentNormal, previousNormal) < 0.7 || distance(currentPosition, previousPosition) > positionTolerance)
+            valid = 0u;
+    }
+
+    _HistoryValidationTextureRW[coord] = valid;
+}
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void TemporalAccumulation(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    if (any(coord >= (uint2)_SignalResolution.xy))
+        return;
+
+    float2 uv = (coord + 0.5) * _SignalResolution.zw;
+    uint2 fullCoord = min((uint2)(uv * _FullResolution.xy), (uint2)_FullResolution.xy - 1);
+    float2 motion = _MotionVectorTexture.Load(int3(fullCoord, 0)).xy;
+    float2 previousUv = uv - motion + _SsgiJitterDelta;
+    bool valid = _HistoryValid != 0
+        && _HistoryValidationTexture.Load(int3(fullCoord, 0)) != 0
+        && all(previousUv >= 0.0)
+        && all(previousUv <= 1.0);
+
+    float4 current = _InputIndirectDiffuseTexture.Load(int3(coord, 0));
+    if (!valid)
+    {
+        _OutputIndirectDiffuseHistoryRW[coord] = float4(current.rgb, 1.0);
+        return;
+    }
+
+    // float3 neighborhoodMin = current.rgb;
+    // float3 neighborhoodMax = current.rgb;
+    // int2 signalLimit = (int2)_SignalResolution.xy - 1;
+    // [unroll]
+    // for (int y = -1; y <= 1; y++)
+    // {
+    //     [unroll]
+    //     for (int x = -1; x <= 1; x++)
+    //     {
+    //         float3 sampleColor = _InputIndirectDiffuseTexture.Load(int3(clamp((int2)coord + int2(x, y), 0, signalLimit), 0)).rgb;
+    //         neighborhoodMin = min(neighborhoodMin, sampleColor);
+    //         neighborhoodMax = max(neighborhoodMax, sampleColor);
+    //     }
+    // }
+
+    float4 history = _HistoryIndirectDiffuseTexture.SampleLevel(sampler_LinearClamp, previousUv, 0);
+    //history.rgb = clamp(history.rgb, neighborhoodMin, neighborhoodMax);
+    float sampleCount = min(history.a + 1.0, 32.0);
+    float historyWeight = min(0.95, (sampleCount - 1.0) / sampleCount);
+    _OutputIndirectDiffuseHistoryRW[coord] = float4(lerp(current.rgb, history.rgb, historyWeight), sampleCount);
+}

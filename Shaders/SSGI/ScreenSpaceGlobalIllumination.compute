@@ -1,0 +1,317 @@
+// Derived from IllusionRP's Screen Space Global Illumination implementation.
+// IllusionRP portions are licensed under the Unity Companion License.
+
+#pragma only_renderers d3d11 vulkan metal
+
+#pragma kernel DownsampleHistoryColor
+#pragma kernel TraceGlobalIllumination TRACE_SSGI
+#pragma kernel TraceGlobalIlluminationHalf TRACE_SSGI HALF_RESOLUTION
+#pragma kernel ReprojectGlobalIllumination REPROJECT_SSGI
+#pragma kernel ReprojectGlobalIlluminationHalf REPROJECT_SSGI HALF_RESOLUTION
+
+#pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+#pragma multi_compile _ _CLUSTER_LIGHT_LOOP
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
+
+#define SSGI_TILE_SIZE 8
+#define SSGI_RAY_EPSILON 0.00024414
+
+Texture2D<float> _DepthPyramid;
+StructuredBuffer<int2> _DepthPyramidMipLevelOffsets;
+Texture2D<float4> _MotionVectorTexture;
+Texture2D<float4> _HistoryColorTexture;
+Texture2D<float4> _HistoryColorHalfTexture;
+Texture2D<float> _HistoryDepthTexture;
+Texture2D<float2> _IndirectDiffuseHitPointTexture;
+
+RWTexture2D<float4> _HistoryColorHalfTextureRW;
+RWTexture2D<float2> _IndirectDiffuseHitPointTextureRW;
+RWTexture2D<float4> _IndirectDiffuseTextureRW;
+
+float4 _FullResolution;
+float4 _OutputResolution;
+float4x4 _SsgiViewProjection;
+float4x4 _SsgiInverseViewProjection;
+float2 _SsgiJitterDelta;
+float4 _SsgiAmbientProbeData[7];
+int _RayMarchingSteps;
+float _RayMarchingThicknessScale;
+float _RayMarchingThicknessBias;
+int _RayMarchingReflectsSky;
+int _RayMarchingFallbackHierarchy;
+int _IndirectDiffuseFrameIndex;
+int _SsgiEnableProbeVolumes;
+
+float3 EvaluateSsgiEnvironmentLighting(float3 normalWS)
+{
+    float3 lighting = SampleSH9(_SsgiAmbientProbeData, normalWS);
+    return max(lighting, 0.0);
+}
+
+float Hash01(uint value)
+{
+    value ^= 2747636419u;
+    value *= 2654435769u;
+    value ^= value >> 16;
+    value *= 2654435769u;
+    value ^= value >> 16;
+    return (value & 0x00ffffffu) / 16777216.0;
+}
+
+float2 GetSample(uint2 pixelCoord)
+{
+    uint seed = pixelCoord.x + pixelCoord.y * 4093u + (uint)_IndirectDiffuseFrameIndex * 131071u;
+    return float2(Hash01(seed), Hash01(seed ^ 0x9e3779b9u));
+}
+
+float3 GetSampleDirection(uint2 pixelCoord, float3 normalWS)
+{
+    float2 sample = GetSample(pixelCoord);
+    return SampleHemisphereCosine(sample.x, sample.y, normalWS);
+}
+
+bool RayMarch(
+    float3 positionWS,
+    float3 sampleDirection,
+    uint2 inputCoord,
+    float deviceDepth,
+    bool killRay,
+    out float3 rayPosition)
+{
+    rayPosition = float3(-1.0, -1.0, -1.0);
+    float3 rayOrigin = float3(inputCoord + 0.5, deviceDepth);
+    float3 projected = ComputeNormalizedDeviceCoordinatesWithZ(positionWS + sampleDirection, _SsgiViewProjection);
+    float3 reflectedScreenPosition = float3(projected.xy * _FullResolution.xy, projected.z);
+    float3 rayDirection = reflectedScreenPosition - rayOrigin;
+    float3 reciprocalRayDirection = rcp(rayDirection);
+    int2 rayStep = int2(reciprocalRayDirection.x >= 0.0 ? 1 : 0, reciprocalRayDirection.y >= 0.0 ? 1 : 0);
+    float3 raySign = float3(
+        reciprocalRayDirection.x >= 0.0 ? 1.0 : -1.0,
+        reciprocalRayDirection.y >= 0.0 ? 1.0 : -1.0,
+        reciprocalRayDirection.z >= 0.0 ? 1.0 : -1.0);
+    bool rayTowardsEye = reciprocalRayDirection.z >= 0.0;
+    killRay = killRay || projected.z <= 0.0 || any(isnan(reciprocalRayDirection));
+    if (killRay)
+        return false;
+
+    const float halfTexel = 0.5;
+    float3 bounds;
+    bounds.x = reciprocalRayDirection.x >= 0.0 ? _FullResolution.x - halfTexel : halfTexel;
+    bounds.y = reciprocalRayDirection.y >= 0.0 ? _FullResolution.y - halfTexel : halfTexel;
+    float maxDepth = _RayMarchingReflectsSky != 0 ? -0.00000024 : 0.00000024;
+    bounds.z = reciprocalRayDirection.z >= 0.0 ? 1.0 : maxDepth;
+    float3 distanceToBounds = bounds * reciprocalRayDirection - rayOrigin * reciprocalRayDirection;
+    float maximumDistance = Min3(distanceToBounds.x, distanceToBounds.y, distanceToBounds.z);
+    float2 firstPixelDistance = abs(0.5 * reciprocalRayDirection.xy);
+    float distanceAlongRay = min(firstPixelDistance.x, firstPixelDistance.y);
+
+    int mipLevel = 0;
+    int iteration = 0;
+    bool hit = false;
+    bool miss = false;
+    bool belowMipZero = false;
+
+    while (!hit && !miss && distanceAlongRay <= maximumDistance && iteration < _RayMarchingSteps)
+    {
+        rayPosition = rayOrigin + distanceAlongRay * rayDirection;
+        float2 signedEdgeDistance = round(rayPosition.xy) - rayPosition.xy;
+        float2 saturatedEdgeDistance = clamp(raySign.xy * signedEdgeDistance + SSGI_RAY_EPSILON, 0.0, SSGI_RAY_EPSILON);
+        rayPosition.xy += raySign.xy * saturatedEdgeDistance;
+
+        int2 mipCoord = (int2)rayPosition.xy >> mipLevel;
+        int2 mipOffset = _DepthPyramidMipLevelOffsets[mipLevel];
+        float4 cellBounds;
+        cellBounds.z = _DepthPyramid.Load(int3(mipOffset + mipCoord, 0));
+        cellBounds.xy = (mipCoord + rayStep) << mipLevel;
+        cellBounds.w = cellBounds.z * _RayMarchingThicknessScale + _RayMarchingThicknessBias;
+
+        float4 cellDistances = cellBounds * reciprocalRayDirection.xyzz - rayOrigin.xyzz * reciprocalRayDirection.xyzz;
+        float wallDistance = min(cellDistances.x, cellDistances.y);
+        float floorDistance = cellDistances.z;
+        bool belowFloor = rayPosition.z < cellBounds.z;
+        bool aboveBase = rayPosition.z >= cellBounds.w;
+        bool insideFloor = belowFloor && aboveBase;
+        bool hitFloor = distanceAlongRay <= floorDistance && floorDistance <= wallDistance;
+
+        miss = belowMipZero && insideFloor;
+        hit = mipLevel == 0 && (hitFloor || insideFloor);
+        belowMipZero = mipLevel == 0 && belowFloor;
+        distanceAlongRay = hitFloor ? floorDistance : ((mipLevel != 0 && belowFloor) ? distanceAlongRay : wallDistance);
+        rayPosition.z = cellBounds.z;
+        mipLevel += (hitFloor || belowFloor || rayTowardsEye) ? -1 : 1;
+        mipLevel = clamp(mipLevel, 0, 6);
+        iteration++;
+    }
+
+    miss = miss || (_RayMarchingReflectsSky == 0 && rayPosition.z == UNITY_RAW_FAR_CLIP_VALUE);
+    return hit && !miss;
+}
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void DownsampleHistoryColor(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 outputCoord = dispatchThreadId.xy;
+    if (any(outputCoord >= (uint2)_OutputResolution.xy))
+        return;
+
+    float2 sourceUv = (outputCoord * 2 + 0.5) * _FullResolution.zw;
+    float2 texelSize = _FullResolution.zw;
+    float3 color = 0.0;
+    color += _HistoryColorTexture.SampleLevel(sampler_LinearClamp, sourceUv, 0).rgb;
+    color += _HistoryColorTexture.SampleLevel(sampler_LinearClamp, sourceUv + float2(texelSize.x, 0.0), 0).rgb;
+    color += _HistoryColorTexture.SampleLevel(sampler_LinearClamp, sourceUv + float2(0.0, texelSize.y), 0).rgb;
+    color += _HistoryColorTexture.SampleLevel(sampler_LinearClamp, sourceUv + texelSize, 0).rgb;
+    _HistoryColorHalfTextureRW[outputCoord] = float4(color * 0.25, 1.0);
+}
+
+#if defined(TRACE_SSGI)
+void TraceSsgi(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 outputCoord = dispatchThreadId.xy;
+    if (any(outputCoord >= (uint2)_OutputResolution.xy))
+        return;
+
+    uint2 inputCoord = outputCoord;
+#if defined(HALF_RESOLUTION)
+    inputCoord *= 2;
+#endif
+    inputCoord = min(inputCoord, (uint2)_FullResolution.xy - 1);
+    float deviceDepth = _DepthPyramid.Load(int3(inputCoord, 0));
+    _IndirectDiffuseHitPointTextureRW[outputCoord] = float2(99.0, 0.0);
+    float3 normalWS = normalize(LoadSceneNormals(inputCoord));
+    float3 sampleDirection = GetSampleDirection(outputCoord, normalWS);
+    float2 uv = (inputCoord + 0.5) * _FullResolution.zw;
+    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _SsgiInverseViewProjection);
+    bool killRay = deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
+    float3 rayPosition;
+    if (RayMarch(positionWS, sampleDirection, inputCoord, deviceDepth, killRay, rayPosition))
+    {
+        _IndirectDiffuseHitPointTextureRW[outputCoord] =
+            (floor(rayPosition.xy) + 0.5) * _FullResolution.zw;
+    }
+}
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void TraceGlobalIllumination(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    TraceSsgi(dispatchThreadId);
+}
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void TraceGlobalIlluminationHalf(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    TraceSsgi(dispatchThreadId);
+}
+#endif
+
+float3 EvaluateMissLighting(float3 positionWS, float3 normalWS, float3 sampleDirection, float2 uv)
+{
+    float3 lighting = 0.0;
+#if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+    // APV can be disabled at runtime even when its shader variant is active. In that case,
+    // use Unity's ambient probe instead of sampling unbound probe-volume data.
+    if (_EnableProbeVolumes == 0)
+        return EvaluateSsgiEnvironmentLighting(normalWS);
+
+    if (_SsgiEnableProbeVolumes != 0 && _EnableProbeVolumes != 0)
+    {
+        float3 probeLighting = 0.0;
+        EvaluateAdaptiveProbeVolume(
+            GetAbsolutePositionWS(positionWS),
+            normalWS,
+            GetWorldSpaceNormalizeViewDir(positionWS),
+            uv * _FullResolution.xy,
+            probeLighting);
+        lighting += probeLighting;
+        return lighting;
+    }
+#else
+    // Light Probe Groups are evaluated per renderer and are unavailable to this fullscreen
+    // compute pass. Fall back to the default Environment Lighting ambient probe.
+    return EvaluateSsgiEnvironmentLighting(normalWS);
+#endif
+
+    if ((_RayMarchingFallbackHierarchy & 2) != 0)
+    {
+#if USE_CLUSTER_LIGHT_LOOP && CLUSTER_HAS_REFLECTION_PROBES
+        lighting += CalculateIrradianceFromReflectionProbes(
+            sampleDirection,
+            positionWS,
+            1.0,
+            uv);
+#else
+        float4 encodedEnvironment = SAMPLE_TEXTURECUBE_LOD(
+            _GlossyEnvironmentCubeMap,
+            sampler_GlossyEnvironmentCubeMap,
+            sampleDirection,
+            6.0);
+        lighting += DecodeHDREnvironment(encodedEnvironment, _GlossyEnvironmentCubeMap_HDR);
+#endif
+    }
+    else if ((_RayMarchingFallbackHierarchy & 1) != 0)
+        lighting += EvaluateAmbientProbe(sampleDirection);
+    return lighting;
+}
+
+#if defined(REPROJECT_SSGI)
+void ReprojectSsgi(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 outputCoord = dispatchThreadId.xy;
+    if (any(outputCoord >= (uint2)_OutputResolution.xy))
+        return;
+
+    uint2 inputCoord = outputCoord;
+#if defined(HALF_RESOLUTION)
+    inputCoord *= 2;
+#endif
+    inputCoord = min(inputCoord, (uint2)_FullResolution.xy - 1);
+    float deviceDepth = _DepthPyramid.Load(int3(inputCoord, 0));
+    float2 uv = (inputCoord + 0.5) * _FullResolution.zw;
+    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _SsgiInverseViewProjection);
+    float3 normalWS = normalize(LoadSceneNormals(inputCoord));
+    float3 sampleDirection = GetSampleDirection(outputCoord, normalWS);
+    float2 hitUv = _IndirectDiffuseHitPointTexture.Load(int3(outputCoord, 0));
+    bool invalid = hitUv.x > 1.0 || any(hitUv < 0.0) || any(hitUv > 1.0);
+    float3 color = 0.0;
+
+    if (!invalid)
+    {
+        float hitDepth = _DepthPyramid.Load(int3(min((uint2)(hitUv * _FullResolution.xy), (uint2)_FullResolution.xy - 1), 0));
+        float2 motion = _MotionVectorTexture.SampleLevel(sampler_LinearClamp, hitUv, 0).xy;
+        float2 previousUv = hitUv - motion + _SsgiJitterDelta;
+        invalid = any(previousUv < 0.0) || any(previousUv > 1.0);
+        if (!invalid)
+        {
+            float historyDepth = _HistoryDepthTexture.SampleLevel(sampler_PointClamp, previousUv, 0);
+            float hitLinearDepth = LinearEyeDepth(hitDepth, _ZBufferParams);
+            float historyLinearDepth = LinearEyeDepth(historyDepth, _ZBufferParams);
+            float depthTolerance = max(0.1, hitLinearDepth * 0.03);
+            invalid = abs(historyLinearDepth - hitLinearDepth) > depthTolerance;
+            if (!invalid)
+                color = _HistoryColorHalfTexture.SampleLevel(sampler_LinearClamp, previousUv, 0).rgb;
+        }
+    }
+
+    if (invalid)
+        color = EvaluateMissLighting(positionWS, normalWS, sampleDirection, uv);
+    if (!(dot(color, color) >= 0.0))
+        color = 0.0;
+    _IndirectDiffuseTextureRW[outputCoord] = float4(clamp(color, 0.0, 7.0), 1.0);
+}
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void ReprojectGlobalIllumination(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    ReprojectSsgi(dispatchThreadId);
+}
+
+[numthreads(SSGI_TILE_SIZE, SSGI_TILE_SIZE, 1)]
+void ReprojectGlobalIlluminationHalf(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    ReprojectSsgi(dispatchThreadId);
+}
+#endif

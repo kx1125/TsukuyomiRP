@@ -24,6 +24,9 @@ namespace Tsukuyomi.Rendering
         private PassRegistry _depthPyramidRegistry;
         private PassRegistry _gtaoRegistry;
         private PassRegistry _gtaoRestoreRegistry;
+        private PassRegistry _ssgiRegistry;
+        private PassRegistry _ssgiRestoreRegistry;
+        private PassRegistry _ssgiDebugRegistry;
         private PassRegistry _pcssRegistry;
         private PassRegistry _pcssRestoreRegistry;
         private PassRegistry _planarReflectionRegistry;
@@ -37,6 +40,9 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiBridgePass _depthPyramidBridgePass;
         private TsukuyomiBridgePass _gtaoBridgePass;
         private TsukuyomiBridgePass _gtaoRestoreBridgePass;
+        private TsukuyomiBridgePass _ssgiBridgePass;
+        private TsukuyomiBridgePass _ssgiRestoreBridgePass;
+        private TsukuyomiBridgePass _ssgiDebugBridgePass;
         private TsukuyomiBridgePass _pcssBridgePass;
         private TsukuyomiBridgePass _pcssRestoreBridgePass;
         private TsukuyomiBridgePass _planarReflectionBridgePass;
@@ -48,6 +54,9 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiDepthPyramidPass _depthPyramidPass;
         private TsukuyomiGroundTruthAmbientOcclusionPass _gtaoPass;
         private TsukuyomiGroundTruthAmbientOcclusionRestoreKeywordsPass _gtaoRestorePass;
+        private TsukuyomiScreenSpaceGlobalIlluminationPass _ssgiPass;
+        private TsukuyomiScreenSpaceGlobalIlluminationRestorePass _ssgiRestorePass;
+        private TsukuyomiScreenSpaceGlobalIlluminationDebugPass _ssgiDebugPass;
         private TsukuyomiPcssScreenSpaceShadowPass _pcssPass;
         private TsukuyomiPcssRestoreShadowKeywordsPass _pcssRestorePass;
         private TsukuyomiPlanarReflectionPass _planarReflectionPass;
@@ -65,6 +74,7 @@ namespace Tsukuyomi.Rendering
             TsukuyomiPcssScreenSpaceShadowPass.InitializeKeywords();
             TsukuyomiPcssRestoreShadowKeywordsPass.InitializeKeywords();
             TsukuyomiGroundTruthAmbientOcclusionPass.InitializeKeywords();
+            TsukuyomiScreenSpaceGlobalIlluminationPass.InitializeKeyword();
             TsukuyomiVolumetricFogPass.InitializeKeywords();
         }
 
@@ -76,6 +86,9 @@ namespace Tsukuyomi.Rendering
             _depthPyramidRegistry = new PassRegistry();
             _gtaoRegistry = new PassRegistry();
             _gtaoRestoreRegistry = new PassRegistry();
+            _ssgiRegistry = new PassRegistry();
+            _ssgiRestoreRegistry = new PassRegistry();
+            _ssgiDebugRegistry = new PassRegistry();
             _pcssRegistry = new PassRegistry();
             _pcssRestoreRegistry = new PassRegistry();
             _planarReflectionRegistry = new PassRegistry();
@@ -91,6 +104,9 @@ namespace Tsukuyomi.Rendering
             _depthPyramidPass ??= new TsukuyomiDepthPyramidPass();
             _gtaoPass ??= new TsukuyomiGroundTruthAmbientOcclusionPass();
             _gtaoRestorePass ??= new TsukuyomiGroundTruthAmbientOcclusionRestoreKeywordsPass();
+            _ssgiPass ??= new TsukuyomiScreenSpaceGlobalIlluminationPass();
+            _ssgiRestorePass ??= new TsukuyomiScreenSpaceGlobalIlluminationRestorePass();
+            _ssgiDebugPass ??= new TsukuyomiScreenSpaceGlobalIlluminationDebugPass();
             _pcssPass ??= new TsukuyomiPcssScreenSpaceShadowPass();
             _pcssRestorePass ??= new TsukuyomiPcssRestoreShadowKeywordsPass();
             _planarReflectionPass ??= new TsukuyomiPlanarReflectionPass();
@@ -108,6 +124,9 @@ namespace Tsukuyomi.Rendering
             _depthPyramidPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _gtaoPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _gtaoRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _ssgiPass.InjectionPoint = InjectionPoint.BeforeOpaque;
+            _ssgiRestorePass.InjectionPoint = InjectionPoint.AfterOpaque;
+            _ssgiDebugPass.InjectionPoint = InjectionPoint.BeforePostProcess;
             _pcssPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _pcssRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
             _planarReflectionPass.InjectionPoint = InjectionPoint.BeforeOpaque;
@@ -120,6 +139,9 @@ namespace Tsukuyomi.Rendering
             _depthPyramidRegistry.AddPass(_depthPyramidPass);
             _gtaoRegistry.AddPass(_gtaoPass);
             _gtaoRestoreRegistry.AddPass(_gtaoRestorePass);
+            _ssgiRegistry.AddPass(_ssgiPass);
+            _ssgiRestoreRegistry.AddPass(_ssgiRestorePass);
+            _ssgiDebugRegistry.AddPass(_ssgiDebugPass);
             _pcssRegistry.AddPass(_pcssPass);
             _pcssRestoreRegistry.AddPass(_pcssRestorePass);
             _planarReflectionRegistry.AddPass(_planarReflectionPass);
@@ -146,6 +168,18 @@ namespace Tsukuyomi.Rendering
             _gtaoRestoreBridgePass = new TsukuyomiBridgePass(_gtaoRestoreRegistry, _gtaoRestorePass.InjectionPoint, _resourceHub)
             {
                 renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1
+            };
+            _ssgiBridgePass = new TsukuyomiBridgePass(_ssgiRegistry, _ssgiPass.InjectionPoint, _resourceHub)
+            {
+                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 4
+            };
+            _ssgiRestoreBridgePass = new TsukuyomiBridgePass(_ssgiRestoreRegistry, _ssgiRestorePass.InjectionPoint, _resourceHub)
+            {
+                renderPassEvent = RenderPassEvent.BeforeRenderingTransparents
+            };
+            _ssgiDebugBridgePass = new TsukuyomiBridgePass(_ssgiDebugRegistry, _ssgiDebugPass.InjectionPoint, _resourceHub)
+            {
+                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing
             };
             _pcssBridgePass = new TsukuyomiBridgePass(_pcssRegistry, _pcssPass.InjectionPoint, _resourceHub);
             _pcssRestoreBridgePass = new TsukuyomiBridgePass(_pcssRestoreRegistry, _pcssRestorePass.InjectionPoint, _resourceHub)
@@ -197,6 +231,7 @@ namespace Tsukuyomi.Rendering
                 RestoreMainLightShadowLayerOverride();
                 TsukuyomiPerObjectShadowRenderer.RestoreRenderingLayersForAll();
                 TsukuyomiPlanarReflectionPass.ClearGlobals();
+                TsukuyomiScreenSpaceGlobalIlluminationPass.ClearGlobals();
                 return;
             }
 
@@ -205,6 +240,7 @@ namespace Tsukuyomi.Rendering
             TsukuyomiPerObjectShadowVolume perObjectShadowVolume = volumeStack?.GetComponent<TsukuyomiPerObjectShadowVolume>();
             TsukuyomiContactShadowVolume contactShadowVolume = volumeStack?.GetComponent<TsukuyomiContactShadowVolume>();
             TsukuyomiGroundTruthAmbientOcclusionVolume gtaoVolume = volumeStack?.GetComponent<TsukuyomiGroundTruthAmbientOcclusionVolume>();
+            TsukuyomiScreenSpaceGlobalIlluminationVolume ssgiVolume = volumeStack?.GetComponent<TsukuyomiScreenSpaceGlobalIlluminationVolume>();
             TsukuyomiVolumeLightVolume volumeLightVolume = volumeStack?.GetComponent<TsukuyomiVolumeLightVolume>();
             TsukuyomiSssSkinVolume sssSkinVolume = volumeStack?.GetComponent<TsukuyomiSssSkinVolume>();
 
@@ -230,8 +266,14 @@ namespace Tsukuyomi.Rendering
                 }
             }
 
+            bool usesDeferredLighting = UsesDeferredLighting(renderer);
             bool gtaoEnabled = _gtaoPass != null && _gtaoPass.Configure(Profile, gtaoVolume);
-            bool depthPyramidEnabled = gtaoEnabled && _depthPyramidPass != null && _depthPyramidPass.Configure();
+            bool ssgiEnabled = !usesDeferredLighting
+                && _ssgiPass != null
+                && _ssgiPass.Configure(Profile, ssgiVolume, ref renderingData);
+            bool depthPyramidEnabled = (gtaoEnabled || ssgiEnabled)
+                && _depthPyramidPass != null
+                && _depthPyramidPass.Configure();
             if (depthPyramidEnabled)
             {
                 EnqueueBridge(renderer, _depthPyramidBridgePass);
@@ -243,7 +285,18 @@ namespace Tsukuyomi.Rendering
                 EnqueueBridge(renderer, _gtaoRestoreBridgePass);
             }
 
-            bool usesDeferredLighting = UsesDeferredLighting(renderer);
+            if (ssgiEnabled && depthPyramidEnabled)
+            {
+                EnqueueBridge(renderer, _ssgiBridgePass);
+                EnqueueBridge(renderer, _ssgiRestoreBridgePass);
+                if (_ssgiPass.DebugOutput && _ssgiDebugPass != null && _ssgiDebugPass.Configure())
+                    EnqueueBridge(renderer, _ssgiDebugBridgePass);
+            }
+            else
+            {
+                TsukuyomiScreenSpaceGlobalIlluminationPass.ClearGlobals();
+            }
+
             bool perObjectShadowsEnabled = _perObjectShadowPass != null && _perObjectShadowPass.Configure(Profile, perObjectShadowVolume, pcssVolume);
             if (perObjectShadowsEnabled)
             {
@@ -283,7 +336,10 @@ namespace Tsukuyomi.Rendering
                 EnqueueBridge(renderer, _postProcessBridgePass);
             }
 
-            bool useSharedDepthNormals = RequiresCameraNormals(contactShadowDenoiseEnabled, gtaoEnabled && depthPyramidEnabled);
+            bool useSharedDepthNormals = RequiresCameraNormals(
+                contactShadowDenoiseEnabled,
+                gtaoEnabled && depthPyramidEnabled,
+                ssgiEnabled && depthPyramidEnabled);
             if (_sssSkinPass != null && _sssSkinPass.Configure(Profile, sssSkinVolume, useSharedDepthNormals))
             {
                 EnqueueBridge(renderer, _sssSkinBridgePass);
@@ -304,10 +360,11 @@ namespace Tsukuyomi.Rendering
             renderer.EnqueuePass(bridge);
         }
 
-        private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled)
+        private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled, bool ssgiEnabled)
         {
             return (contactShadowDenoiseEnabled && PassRegistry.PassRequiresBuiltinTexture(_contactShadowDenoisePass, BuiltinTexture.CameraNormals))
                 || (gtaoEnabled && PassRegistry.PassRequiresBuiltinTexture(_gtaoPass, BuiltinTexture.CameraNormals))
+                || (ssgiEnabled && PassRegistry.PassRequiresBuiltinTexture(_ssgiPass, BuiltinTexture.CameraNormals))
                 || (_registry != null && _registry.RequiresBuiltinTexture(BuiltinTexture.CameraNormals));
         }
         private RenderPassEvent MapInjectionPointToEvent(InjectionPoint point)
@@ -415,6 +472,13 @@ namespace Tsukuyomi.Rendering
             _gtaoBridgePass = null;
             _gtaoRestorePass = null;
             _gtaoRestoreBridgePass = null;
+            _ssgiPass = null;
+            _ssgiBridgePass = null;
+            _ssgiRestorePass = null;
+            _ssgiRestoreBridgePass = null;
+            _ssgiDebugPass?.Dispose();
+            _ssgiDebugPass = null;
+            _ssgiDebugBridgePass = null;
             _pcssPass?.Dispose();
             _pcssPass = null;
             _pcssRestorePass = null;

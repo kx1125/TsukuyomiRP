@@ -239,6 +239,7 @@ namespace Tsukuyomi.Rendering
             if (lightingDepthRendererList.IsValid())
                 context.Builder.UseRendererList(lightingDepthRendererList);
             context.Builder.UseRendererList(lightingRendererList);
+            context.Builder.UseAllGlobalTextures(true);
             context.Builder.AllowGlobalStateModification(true);
             context.Builder.SetGlobalTextureAfterPass(skinMask, SkinMaskTextureId);
             context.Builder.SetGlobalTextureAfterPass(skinLighting, SkinLightingTextureId);

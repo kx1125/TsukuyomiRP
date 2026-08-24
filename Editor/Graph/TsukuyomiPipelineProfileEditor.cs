@@ -14,6 +14,7 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_PerObjectShadowExpanded = true;
         private static bool s_ContactShadowExpanded = true;
         private static bool s_GtaoExpanded = true;
+        private static bool s_SsgiExpanded = true;
         private static bool s_VolumeLightExpanded = true;
         private static bool s_PostProcessingExpanded = true;
         private static bool s_SssSkinExpanded = true;
@@ -73,6 +74,7 @@ namespace Tsukuyomi.Rendering.Editor
             DrawPerObjectShadowSettings();
             DrawContactShadowSettings();
             DrawGtaoSettings();
+            DrawSsgiSettings();
             DrawVolumeLightSettings();
             DrawPostProcessingSettings();
             DrawSssSkinSettings();
@@ -324,6 +326,42 @@ namespace Tsukuyomi.Rendering.Editor
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.GtaoStepCount)));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.GtaoMaximumRadiusInPixels)));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.GtaoDirectionCount)));
+                EditorGUI.indentLevel--;
+            }
+
+            serializedObject.ApplyModifiedProperties();
+            CoreEditorUtils.DrawSplitter();
+        }
+
+        private void DrawSsgiSettings()
+        {
+            SerializedProperty enableSsgi = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableScreenSpaceGlobalIllumination));
+
+            s_SsgiExpanded = CoreEditorUtils.DrawHeaderToggleFoldout(
+                EditorGUIUtility.TrTextContent("Screen Space Global Illumination"),
+                s_SsgiExpanded,
+                enableSsgi,
+                null,
+                null,
+                null,
+                null);
+
+            if (s_SsgiExpanded)
+            {
+                EditorGUI.indentLevel++;
+                using (new EditorGUI.DisabledScope(!enableSsgi.boolValue))
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiHalfResolution)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiDepthBufferThickness)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiMaxRaySteps)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiRayMissFallback)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiEnableProbeVolumes)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiDenoise)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiDenoiserRadius)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiSecondDenoiser)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SsgiHalfResolutionDenoiser)));
+                    EditorGUILayout.HelpBox("Forward and Forward+ base Game cameras are supported. Lightmapped materials keep their baked lightmap GI.", MessageType.Info);
+                }
                 EditorGUI.indentLevel--;
             }
 

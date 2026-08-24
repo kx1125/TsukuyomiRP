@@ -154,6 +154,30 @@ namespace Tsukuyomi.Rendering
         [Range(1, 6)]
         public int GtaoDirectionCount = 2;
 
+        [Header("Screen Space Global Illumination")]
+        public bool EnableScreenSpaceGlobalIllumination;
+
+        public bool SsgiHalfResolution = true;
+
+        [Range(0.0f, 0.5f)]
+        public float SsgiDepthBufferThickness = 0.1f;
+
+        [Range(1, 256)]
+        public int SsgiMaxRaySteps = 64;
+
+        public TsukuyomiSsgiRayMissFallback SsgiRayMissFallback = TsukuyomiSsgiRayMissFallback.ReflectionProbesAndSky;
+
+        public bool SsgiEnableProbeVolumes = true;
+
+        public bool SsgiDenoise = true;
+
+        [Range(0.001f, 10.0f)]
+        public float SsgiDenoiserRadius = 0.6f;
+
+        public bool SsgiSecondDenoiser;
+
+        public bool SsgiHalfResolutionDenoiser = true;
+
         public bool EnableVolumeLight;
 
         [Range(0.0f, 512.0f)]

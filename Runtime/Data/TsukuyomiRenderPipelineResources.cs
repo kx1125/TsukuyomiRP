@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace Tsukuyomi.Rendering
 {
@@ -38,6 +38,22 @@ namespace Tsukuyomi.Rendering
 
         [SerializeField]
         private ComputeShader gtaoBlurAndUpsampleComputeShader;
+
+        [Header("Screen Space Global Illumination")]
+        [SerializeField]
+        private ComputeShader ssgiTraceComputeShader;
+
+        [SerializeField]
+        private ComputeShader ssgiTemporalComputeShader;
+
+        [SerializeField]
+        private ComputeShader ssgiDiffuseDenoiserComputeShader;
+
+        [SerializeField]
+        private ComputeShader ssgiBilateralUpsampleComputeShader;
+
+        [SerializeField]
+        private Shader ssgiDebugOutputShader;
 
         [Header("Volume Light")]
         [SerializeField]
@@ -99,6 +115,11 @@ namespace Tsukuyomi.Rendering
         public ComputeShader GtaoTraceComputeShader => gtaoTraceComputeShader;
         public ComputeShader GtaoSpatialDenoiseComputeShader => gtaoSpatialDenoiseComputeShader;
         public ComputeShader GtaoBlurAndUpsampleComputeShader => gtaoBlurAndUpsampleComputeShader;
+        public ComputeShader SsgiTraceComputeShader => ssgiTraceComputeShader;
+        public ComputeShader SsgiTemporalComputeShader => ssgiTemporalComputeShader;
+        public ComputeShader SsgiDiffuseDenoiserComputeShader => ssgiDiffuseDenoiserComputeShader;
+        public ComputeShader SsgiBilateralUpsampleComputeShader => ssgiBilateralUpsampleComputeShader;
+        public Shader SsgiDebugOutputShader => ssgiDebugOutputShader;
         public Shader VolumetricFogShader => volumetricFogShader;
         public Material VolumetricFogMaterial => volumetricFogMaterial;
         public Shader DownsampleDepthShader => downsampleDepthShader;
@@ -122,6 +143,10 @@ namespace Tsukuyomi.Rendering
         public bool HasGtaoResources => gtaoTraceComputeShader != null
             && gtaoSpatialDenoiseComputeShader != null
             && gtaoBlurAndUpsampleComputeShader != null;
+        public bool HasSsgiResources => ssgiTraceComputeShader != null
+            && ssgiTemporalComputeShader != null
+            && ssgiDiffuseDenoiserComputeShader != null
+            && ssgiBilateralUpsampleComputeShader != null;
         public bool HasVolumeLightResources => (volumetricFogShader != null || volumetricFogMaterial != null)
             && (downsampleDepthShader != null || downsampleDepthMaterial != null);
         public bool HasSssSkinResources => sssSkinBlurShader != null || sssSkinBlurMaterial != null;

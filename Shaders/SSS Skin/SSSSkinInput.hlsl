@@ -10,6 +10,7 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/SurfaceData.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GlobalIllumination.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSGI/TsukuyomiScreenSpaceGlobalIllumination.hlsl"
 
 TEXTURE2D(_BaseMap);
 SAMPLER(sampler_BaseMap);
@@ -201,7 +202,11 @@ InputData BuildSSSSkinInputData(SSSSkinVaryings input, half3 normalWS, half3 vie
 #endif
 
     inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
+#if defined(_TSUKUYOMI_SCREEN_SPACE_GLOBAL_ILLUMINATION)
+    inputData.bakedGI = SampleTsukuyomiScreenSpaceGlobalIllumination(inputData.normalizedScreenSpaceUV);
+#else
     inputData.bakedGI = SampleSH(normalWS);
+#endif
     inputData.shadowMask = half4(1.0h, 1.0h, 1.0h, 1.0h);
     inputData.vertexLighting = half3(0.0h, 0.0h, 0.0h);
     return inputData;

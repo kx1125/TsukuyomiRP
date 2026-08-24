@@ -4,6 +4,19 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-08-25
+
+### Added
+
+- Added Screen Space Global Illumination for Tsukuyomi PBR and SSS shaders, including hierarchical tracing, camera histories, temporal validation, dual-stage denoising, and bilateral upsampling.
+- Added a grouped SSGI Volume inspector and a history-safe full-screen Debug Output for the final SSGI signal.
+- Added a depth-reconstructed Box Volume particle decal shader with HDR emission, angle fading, Custom1 data, GPU-instanced Shuriken projection, and a setup-validating material inspector.
+
+### Fixed
+
+- Fixed black SSGI miss regions when the URP Asset uses Light Probe Groups by falling back to the default Environment Lighting ambient probe.
+- Made Local particle render alignment part of Particle Decal validation and repair, with a targeted warning for World alignment ignoring emitter Transform rotation.
+
 ## [0.1.6] - 2026-08-10
 
 ### Added

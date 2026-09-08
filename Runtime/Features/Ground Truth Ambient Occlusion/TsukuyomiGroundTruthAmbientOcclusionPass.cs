@@ -215,7 +215,9 @@ namespace Tsukuyomi.Rendering
                         graphContext.cmd.SetComputeTextureParam(upsample, upsampleKernel, AOPackedDataId, aoPackedData);
                         graphContext.cmd.SetComputeTextureParam(upsample, upsampleKernel, OcclusionTextureId, finalAO);
                         graphContext.cmd.SetComputeTextureParam(upsample, upsampleKernel, DepthPyramidId, depthPyramid);
-                        graphContext.cmd.DispatchCompute(upsample, upsampleKernel, DivRoundUp(aoWidth, TileSize), DivRoundUp(aoHeight, TileSize), 1);
+                        // Each thread writes 2*p and 2*p-1. Include the final half-grid
+                        // point so the last row/column is covered at every resolution.
+                        graphContext.cmd.DispatchCompute(upsample, upsampleKernel, DivRoundUp(fullWidth / 2 + 1, TileSize), DivRoundUp(fullHeight / 2 + 1, TileSize), 1);
                     }
                     else
                     {

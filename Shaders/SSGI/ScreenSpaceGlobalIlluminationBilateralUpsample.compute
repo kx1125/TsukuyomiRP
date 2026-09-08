@@ -2,6 +2,7 @@
 #pragma kernel BilateralUpsample
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 #define SSGI_TILE_SIZE 8
 
@@ -37,9 +38,8 @@ void BilateralUpsample(uint3 dispatchThreadId : SV_DispatchThreadID)
             float2 sampleUv = (lowCoord + 0.5) * _InputResolution.zw;
             uint2 sampleFullCoord = min((uint2)(sampleUv * _FullResolution.xy), (uint2)_FullResolution.xy - 1);
             float sampleDepth = LinearEyeDepth(_CameraDepthTexture.Load(int3(sampleFullCoord, 0)), _ZBufferParams);
-            float2 bilinearDelta = abs((float2)lowCoord - lowPosition);
-            float bilinearWeight = (1.0 - saturate(bilinearDelta.x)) * (1.0 - saturate(bilinearDelta.y));
-            float depthWeight = exp2(-abs(sampleDepth - centerDepth) / max(0.02, centerDepth * 0.015));
+            float bilinearWeight = DenoiseBilinearWeight((float2)lowCoord - lowPosition);
+            float depthWeight = DenoiseExponentialDepthWeight(centerDepth, sampleDepth, max(0.02, centerDepth * 0.015));
             float weight = max(0.0001, bilinearWeight * depthWeight);
             colorSum += _InputIndirectDiffuseTexture.Load(int3(lowCoord, 0)).rgb * weight;
             weightSum += weight;

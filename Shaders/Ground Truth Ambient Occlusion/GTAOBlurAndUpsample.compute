@@ -24,6 +24,7 @@
 #define PACK_AO_DEPTH 1
 
 #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Ground Truth Ambient Occlusion/GTAOCommon.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 TEXTURE2D_X(_AOPackedData);
 RW_TEXTURE2D_X(float, _OcclusionTexture);
@@ -156,10 +157,8 @@ void BlurVertically(uint topMostIndex)
 // buffer has a lot of small holes in it causing the low-res depth buffer to inaccurately represent it.
 float BilateralUpsample(float HiDepth, float4 LowDepths, float4 LowAO)
 {
-    float4 weights = float4(9, 3, 1, 3) / (abs(HiDepth - LowDepths) + _UpsampleTolerance);
-    float TotalWeight = dot(weights, 1) + _NoiseFilterStrength;
-    float WeightedSum = dot(LowAO, weights) + _NoiseFilterStrength;
-    return WeightedSum / TotalWeight;
+    float4 weights = DenoiseInverseDepthWeights(HiDepth, LowDepths, float4(9, 3, 1, 3), _UpsampleTolerance);
+    return DenoiseResolve4(LowAO, weights, 1.0, _NoiseFilterStrength);
 }
 
 float LoadFullResDepth(int2 coord)
@@ -167,6 +166,14 @@ float LoadFullResDepth(int2 coord)
     int2 maxCoord = int2(_ScreenSize.xy) - 1;
     coord = clamp(coord, int2(0, 0), maxCoord);
     return LOAD_TEXTURE2D_X(_DepthPyramid, coord).r;
+}
+
+// The gathered neighborhood is centered on 2*p and also writes 2*p-1.
+// Keep that phase at the borders; clamp reads, but discard out-of-range writes.
+void StoreOcclusion(int2 coord, float value)
+{
+    if (all(coord >= 0) && all(coord < int2(_ScreenSize.xy)))
+        _OcclusionTexture[COORD_TEXTURE2D_X(coord)] = value;
 }
 
 #if BLUR_AND_UPSAMPLE
@@ -194,10 +201,10 @@ void BlurUpsample(uint3 Gid : SV_GroupID, uint GI : SV_GroupIndex, uint3 GTid : 
 
     int2 OutST = DTid.xy << 1;
 
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(0, -1))]   = saturate(BilateralUpsample(LoadFullResDepth(OutST + int2(0, -1)), LowDepth.zwxy, LoSSAOs.zwxy));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST)]                 = saturate(BilateralUpsample(LoadFullResDepth(OutST), LowDepth.yzwx, LoSSAOs.yzwx));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(-1, -1))]  = saturate(BilateralUpsample(LoadFullResDepth(OutST + int2(-1, -1)), LowDepth.wxyz, LoSSAOs.wxyz));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(-1, 0))]   = saturate(BilateralUpsample(LoadFullResDepth(OutST + int2(-1, 0)), LowDepth.xyzw, LoSSAOs.xyzw));
+    StoreOcclusion(OutST + int2(0, -1), saturate(BilateralUpsample(LoadFullResDepth(OutST + int2(0, -1)), LowDepth.zwxy, LoSSAOs.zwxy)));
+    StoreOcclusion(OutST, saturate(BilateralUpsample(LoadFullResDepth(OutST), LowDepth.yzwx, LoSSAOs.yzwx)));
+    StoreOcclusion(OutST + int2(-1, -1), saturate(BilateralUpsample(LoadFullResDepth(OutST + int2(-1, -1)), LowDepth.wxyz, LoSSAOs.wxyz)));
+    StoreOcclusion(OutST + int2(-1, 0), saturate(BilateralUpsample(LoadFullResDepth(OutST + int2(-1, 0)), LowDepth.xyzw, LoSSAOs.xyzw)));
 }
 
 #elif UPSAMPLE_ONLY
@@ -214,16 +221,16 @@ void UPSAMPLE_KERNEL(uint3 DTid : SV_DispatchThreadID)
     int2 OutST = DTid.xy << 1;
 
 #ifdef BOX
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(0, -1))] = OutputFinalAO(dot(0.25, UnpackedAOs));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST)] = OutputFinalAO(dot(0.25, UnpackedAOs));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(-1, -1))] = OutputFinalAO(dot(0.25, UnpackedAOs));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(-1, 0))] = OutputFinalAO(dot(0.25, UnpackedAOs));
+    StoreOcclusion(OutST + int2(0, -1), OutputFinalAO(dot(0.25, UnpackedAOs)));
+    StoreOcclusion(OutST, OutputFinalAO(dot(0.25, UnpackedAOs)));
+    StoreOcclusion(OutST + int2(-1, -1), OutputFinalAO(dot(0.25, UnpackedAOs)));
+    StoreOcclusion(OutST + int2(-1, 0), OutputFinalAO(dot(0.25, UnpackedAOs)));
 #else
     float4 highDepth = GATHER_TEXTURE2D_X(_DepthPyramid, sampler_PointClamp, UV1);
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(0, -1))] = OutputFinalAO(BilateralUpsample(highDepth.z, UnpackedDepths.zwxy, UnpackedAOs.zwxy));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST)] = OutputFinalAO(BilateralUpsample(highDepth.y, UnpackedDepths.yzwx, UnpackedAOs.yzwx));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(-1, -1))] = OutputFinalAO(BilateralUpsample(highDepth.w, UnpackedDepths.wxyz, UnpackedAOs.wxyz));
-    _OcclusionTexture[COORD_TEXTURE2D_X(OutST + int2(-1, 0))] = OutputFinalAO(BilateralUpsample(highDepth.x, UnpackedDepths.xyzw, UnpackedAOs.xyzw));
+    StoreOcclusion(OutST + int2(0, -1), OutputFinalAO(BilateralUpsample(highDepth.z, UnpackedDepths.zwxy, UnpackedAOs.zwxy)));
+    StoreOcclusion(OutST, OutputFinalAO(BilateralUpsample(highDepth.y, UnpackedDepths.yzwx, UnpackedAOs.yzwx)));
+    StoreOcclusion(OutST + int2(-1, -1), OutputFinalAO(BilateralUpsample(highDepth.w, UnpackedDepths.wxyz, UnpackedAOs.wxyz)));
+    StoreOcclusion(OutST + int2(-1, 0), OutputFinalAO(BilateralUpsample(highDepth.x, UnpackedDepths.xyzw, UnpackedAOs.xyzw)));
 #endif
 }
 
@@ -250,9 +257,10 @@ void BLUR_KERNEL_NAME(uint3 Gid : SV_GroupID, uint GI : SV_GroupIndex, uint3 GTi
     float LoSSAO = dot(0.25, LoSSAOs);
 
 #ifdef FULL_RES
-    _OcclusionTexture[COORD_TEXTURE2D_X(dispatchID.xy)] = OutputFinalAO(LoSSAO);
+    StoreOcclusion(int2(dispatchID.xy), OutputFinalAO(LoSSAO));
 #else
-    _AOPackedBlurred[COORD_TEXTURE2D_X(dispatchID.xy)] = PackAOOutput(LoSSAO, 1.0f / DepthCache[Idx0 + 16]);
+    if (all(dispatchID.xy < (uint2)_AOBufferSize.xy))
+        _AOPackedBlurred[COORD_TEXTURE2D_X(dispatchID.xy)] = PackAOOutput(LoSSAO, 1.0f / DepthCache[Idx0 + 16]);
 #endif
 
 }

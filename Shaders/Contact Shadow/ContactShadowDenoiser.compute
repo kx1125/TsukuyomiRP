@@ -28,6 +28,9 @@ float _RaytracingLightAngle;
 void BILATERAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
 {
     int2 centerCoord = groupId * SHADOW_DENOISER_TILE_SIZE + groupThreadId;
+    if (any(centerCoord >= int2(_ScreenSize.xy)))
+        return;
+
     const BilateralData center = TapBilateralData(centerCoord);
 
 #if defined(DISTANCE_BASED_DENOISER)
@@ -65,7 +68,7 @@ void BILATERAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupT
             continue;
 
         const BilateralData tapData = TapBilateralData(tapCoord);
-        float w = r ? gaussian(r, sigma) * ComputeBilateralWeight(center, tapData) : 1.0;
+        float w = r ? DenoiseGaussianWeight(r / sigma) * ComputeBilateralWeight(center, tapData) : 1.0;
 
 #if SINGLE_CHANNEL
         colorSum += LOAD_TEXTURE2D_X(_DenoiseInputTexture, tapCoord).x * w;

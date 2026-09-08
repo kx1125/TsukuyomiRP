@@ -4,6 +4,7 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DeclareDownsampledDepthTexture.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/ProjectionUtils.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 #define KERNEL_RADIUS 4
 #define BLUR_DEPTH_FALLOFF 0.5
@@ -34,7 +35,7 @@ float4 DepthAwareGaussianBlur(float2 uv, float2 dir, TEXTURE2D_X(textureToBlur),
         float linearEyeDepth = LinearEyeDepthConsiderProjection(depth);
         float depthDiff = abs(centerLinearEyeDepth - linearEyeDepth);
         float r2 = BLUR_DEPTH_FALLOFF * depthDiff;
-        float g = exp(-r2 * r2);
+        float g = DenoiseGaussianWeight(r2);
         float weight = g * KernelWeights[-i];
 
         float3 rgb = SAMPLE_TEXTURE2D_X(textureToBlur, sampler_TextureToBlur, uvSample).rgb;
@@ -52,7 +53,7 @@ float4 DepthAwareGaussianBlur(float2 uv, float2 dir, TEXTURE2D_X(textureToBlur),
         float linearEyeDepth = LinearEyeDepthConsiderProjection(depth);
         float depthDiff = abs(centerLinearEyeDepth - linearEyeDepth);
         float r2 = BLUR_DEPTH_FALLOFF * depthDiff;
-        float g = exp(-r2 * r2);
+        float g = DenoiseGaussianWeight(r2);
         float weight = g * KernelWeights[i];
 
         float3 rgb = SAMPLE_TEXTURE2D_X(textureToBlur, sampler_TextureToBlur, uvSample).rgb;

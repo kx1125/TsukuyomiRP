@@ -2,6 +2,7 @@
 #define ILLUSION_BILATERAL_UPSAMPLE_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 #define _UpsampleTolerance          1e-5f
 #define _NoiseFilterStrength        0.99999999f
@@ -19,58 +20,36 @@ static const int2 IndexToLocalOffsetCoords[9] = {int2(-1, -1), int2(0, -1),  int
 // The bilateral upscale function (2x2 neighborhood, color3 version), uniform weight version
 float3 BilUpColor3_Uniform(float HiDepth, float4 LowDepths, float3 lowValue0, float3 lowValue1, float3 lowValue2, float3 lowValue3)
 {
-    float4 weights = float4(3, 3, 3, 3) / (abs(HiDepth - LowDepths) + _UpsampleTolerance);
-    float TotalWeight = dot(weights, 1) + _NoiseFilterStrength;
-    float3 WeightedSum = lowValue0 * weights.x
-                        + lowValue1 * weights.y
-                        + lowValue2 * weights.z
-                        + lowValue3 * weights.w
-                        + _NoiseFilterStrength;
-    return WeightedSum / TotalWeight;
+    float4 weights = DenoiseInverseDepthWeights(HiDepth, LowDepths, float4(3, 3, 3, 3), _UpsampleTolerance);
+    return DenoiseResolve4(lowValue0, lowValue1, lowValue2, lowValue3, weights, float3(1, 1, 1), _NoiseFilterStrength);
 }
 
 // THe bilateral upscale function (2x2 neighborhood, color3 version)
 float3 BilUpColor3(float HiDepth, float4 LowDepths, float3 lowValue0, float3 lowValue1, float3 lowValue2, float3 lowValue3)
 {
-    float4 weights = float4(9, 3, 1, 3) / (abs(HiDepth - LowDepths) + _UpsampleTolerance);
-    float TotalWeight = dot(weights, 1) + _NoiseFilterStrength;
-    float3 WeightedSum = lowValue0 * weights.x
-                        + lowValue1 * weights.y
-                        + lowValue2 * weights.z
-                        + lowValue3 * weights.w
-                        + _NoiseFilterStrength;
-    return WeightedSum / TotalWeight;
+    float4 weights = DenoiseInverseDepthWeights(HiDepth, LowDepths, float4(9, 3, 1, 3), _UpsampleTolerance);
+    return DenoiseResolve4(lowValue0, lowValue1, lowValue2, lowValue3, weights, float3(1, 1, 1), _NoiseFilterStrength);
 }
 
 // The bilateral upscale function (2x2 neighborhood, color4 version)
 float4 BilUpColor(float HiDepth, float4 LowDepths, float4 lowValue0, float4 lowValue1, float4 lowValue2, float4 lowValue3)
 {
-    float4 weights = float4(9, 3, 1, 3) / (abs(HiDepth - LowDepths) + _UpsampleTolerance);
-    float TotalWeight = dot(weights, 1) + _NoiseFilterStrength;
-    float4 WeightedSum = lowValue0 * weights.x
-                        + lowValue1 * weights.y
-                        + lowValue2 * weights.z
-                        + lowValue3 * weights.w
-                        + _NoiseFilterStrength;
-    return WeightedSum / TotalWeight;
+    float4 weights = DenoiseInverseDepthWeights(HiDepth, LowDepths, float4(9, 3, 1, 3), _UpsampleTolerance);
+    return DenoiseResolve4(lowValue0, lowValue1, lowValue2, lowValue3, weights, float4(1, 1, 1, 1), _NoiseFilterStrength);
 }
 
 // The bilateral upscale function (2x2 neighborhood) (single channel version)
 float BilUpSingle(float HiDepth, float4 LowDepths, float4 lowValue)
 {
-    float4 weights = float4(9, 3, 1, 3) / (abs(HiDepth - LowDepths) + _UpsampleTolerance);
-    float TotalWeight = dot(weights, 1) + _NoiseFilterStrength;
-    float WeightedSum = dot(lowValue, weights) + _NoiseFilterStrength;
-    return WeightedSum / TotalWeight;
+    float4 weights = DenoiseInverseDepthWeights(HiDepth, LowDepths, float4(9, 3, 1, 3), _UpsampleTolerance);
+    return DenoiseResolve4(lowValue, weights, 1.0, _NoiseFilterStrength);
 }
 
 // The bilateral upscale function (2x2 neighborhood) (single channel version), uniform version
 float BilUpSingle_Uniform(float HiDepth, float4 LowDepths, float4 lowValue)
 {
-    float4 weights = float4(3, 3, 3, 3) / (abs(HiDepth - LowDepths) + _UpsampleTolerance);
-    float TotalWeight = dot(weights, 1) + _NoiseFilterStrength;
-    float WeightedSum = dot(lowValue, weights) + _NoiseFilterStrength;
-    return WeightedSum / TotalWeight;
+    float4 weights = DenoiseInverseDepthWeights(HiDepth, LowDepths, float4(3, 3, 3, 3), _UpsampleTolerance);
+    return DenoiseResolve4(lowValue, weights, 1.0, _NoiseFilterStrength);
 }
 
 // Due to compiler issues, it is not possible to use arrays to store the neighborhood values, we then store
@@ -159,8 +138,8 @@ void OverrideMaskValues(float highDepth, inout NeighborhoodUpsampleData3x3 data,
 // The bilateral upscale function (3x3 neighborhood)
 float4 BilUpColor3x3(float highDepth, in NeighborhoodUpsampleData3x3 data)
 {
-    float4 combinedWeightsA = data.lowWeightA / (abs(highDepth - data.lowDepthA) + _UpsampleTolerance);
-    float4 combinedWeightsB = data.lowWeightB / (abs(highDepth - data.lowDepthB) + _UpsampleTolerance);
+    float4 combinedWeightsA = DenoiseInverseDepthWeights(highDepth, data.lowDepthA, data.lowWeightA, _UpsampleTolerance);
+    float4 combinedWeightsB = DenoiseInverseDepthWeights(highDepth, data.lowDepthB, data.lowWeightB, _UpsampleTolerance);
     float combinedWeightsC = data.lowWeightC / (abs(highDepth - data.lowDepthC) + _UpsampleTolerance);
 
     float TotalWeight = combinedWeightsA.x + combinedWeightsA.y + combinedWeightsA.z + combinedWeightsA.w
@@ -200,14 +179,8 @@ struct NeighborhoodUpsampleData2x2_RGB
 // The bilateral upscale function (3x3 neighborhood)
 float3 BilUpColor2x2_RGB(float highDepth, in NeighborhoodUpsampleData2x2_RGB data)
 {
-    float4 combinedWeights = data.lowWeight / (abs(highDepth - data.lowDepth) + _UpsampleTolerance);
-    float TotalWeight = combinedWeights.x + combinedWeights.y + combinedWeights.z + combinedWeights.w + _NoiseFilterStrength;
-    float3 WeightedSum = data.lowValue0.xyz * combinedWeights.x
-                        + data.lowValue1.xyz * combinedWeights.y
-                        + data.lowValue2.xyz * combinedWeights.z
-                        + data.lowValue3.xyz * combinedWeights.w
-                        + _NoiseFilterStrength;
-    return WeightedSum / TotalWeight;
+    float4 weights = DenoiseInverseDepthWeights(highDepth, data.lowDepth, data.lowWeight, _UpsampleTolerance);
+    return DenoiseResolve4(data.lowValue0, data.lowValue1, data.lowValue2, data.lowValue3, weights, float3(1, 1, 1), _NoiseFilterStrength);
 }
 
 // Due to compiler issues, it is not possible to use arrays to store the neighborhood values, we then store them in this structure
@@ -229,13 +202,7 @@ struct NeighborhoodUpsampleData2x2_RGBA
 // The bilateral upscale function (3x3 neighborhood)
 float4 BilUpColor2x2_RGBA(float highDepth, in NeighborhoodUpsampleData2x2_RGBA data)
 {
-    float4 combinedWeights = data.lowWeight / (abs(highDepth - data.lowDepth) + _UpsampleTolerance);
-    float TotalWeight = combinedWeights.x + combinedWeights.y + combinedWeights.z + combinedWeights.w + _NoiseFilterStrength;
-    float4 WeightedSum = data.lowValue0.xyzw * combinedWeights.x
-                        + data.lowValue1.xyzw * combinedWeights.y
-                        + data.lowValue2.xyzw * combinedWeights.z
-                        + data.lowValue3.xyzw * combinedWeights.w
-                        + _NoiseFilterStrength;
-    return WeightedSum / TotalWeight;
+    float4 weights = DenoiseInverseDepthWeights(highDepth, data.lowDepth, data.lowWeight, _UpsampleTolerance);
+    return DenoiseResolve4(data.lowValue0, data.lowValue1, data.lowValue2, data.lowValue3, weights, float4(1, 1, 1, 1), _NoiseFilterStrength);
 }
 #endif

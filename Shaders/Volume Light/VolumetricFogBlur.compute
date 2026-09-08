@@ -11,6 +11,7 @@
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/ShaderVariablesVolumetricFog.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DeclareDownsampledDepthTexture.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/ProjectionUtils.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 //--------------------------------------------------------------------------------------------------
 // Definitions
@@ -142,7 +143,7 @@ float4 PerformSeparableBlur(uint2 groupThreadId)
             // Compute depth-aware bilateral weight
             float depthDiff = abs(centerDepth - currentDepth);
             float r2 = BLUR_DEPTH_FALLOFF * depthDiff;
-            float depthWeight = exp(-r2 * r2);
+            float depthWeight = DenoiseGaussianWeight(r2);
             
             // Compute spatial gaussian weight
             float spatialDistance = length(float2(idx, idx2));

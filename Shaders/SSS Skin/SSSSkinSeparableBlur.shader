@@ -20,6 +20,7 @@ Shader "Hidden/SSSSkin/SeparableBlur"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
             #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
             TEXTURE2D_X_FLOAT(_SSSSkinDepthTexture);
             TEXTURE2D_X(_SSSSkinNormalsTexture);
@@ -37,11 +38,6 @@ Shader "Hidden/SSSSkin/SeparableBlur"
             float DitherScale;
             float DitherIntensity;
             int _SSSSkinSampleCount;
-
-            float3 Pow2(float3 value)
-            {
-                return value * value;
-            }
 
             float2 RandN2(float2 pos, float2 random)
             {
@@ -152,7 +148,7 @@ Shader "Hidden/SSSSkin/SeparableBlur"
                     float edgeForward = EdgeWeight(centerDepth, depthForward, centerNormal, normalForward, maskForward);
                     float edgeBackward = EdgeWeight(centerDepth, depthBackward, centerNormal, normalBackward, maskBackward);
 
-                    float3 weight = exp(-Pow2(stepValue / sssColor));
+                    float3 weight = DenoiseGaussianWeight(stepValue / sssColor);
                     float3 weightForward = weight * edgeForward;
                     float3 weightBackward = weight * edgeBackward;
 

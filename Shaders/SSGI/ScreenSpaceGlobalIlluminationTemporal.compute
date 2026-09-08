@@ -7,6 +7,7 @@
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 #define SSGI_TILE_SIZE 8
 
@@ -62,7 +63,7 @@ void ValidateHistory(uint3 dispatchThreadId : SV_DispatchThreadID)
         float3 previousPosition = ComputeWorldSpacePosition(previousUv, previousDepth, _SsgiPreviousInverseViewProjection);
         float currentLinearDepth = LinearEyeDepth(currentDepth, _ZBufferParams);
         float positionTolerance = max(0.02, currentLinearDepth * 0.025);
-        if (dot(currentNormal, previousNormal) < 0.7 || distance(currentPosition, previousPosition) > positionTolerance)
+        if (!DenoiseHistoryGeometryValid(currentPosition, previousPosition, currentNormal, previousNormal, positionTolerance, 0.7))
             valid = 0u;
     }
 
@@ -109,7 +110,7 @@ void TemporalAccumulation(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float4 history = _HistoryIndirectDiffuseTexture.SampleLevel(sampler_LinearClamp, previousUv, 0);
     //history.rgb = clamp(history.rgb, neighborhoodMin, neighborhoodMax);
-    float sampleCount = min(history.a + 1.0, 32.0);
-    float historyWeight = min(0.95, (sampleCount - 1.0) / sampleCount);
+    float sampleCount;
+    float historyWeight = DenoiseTemporalHistoryWeight(history.a, 32.0, 0.95, sampleCount);
     _OutputIndirectDiffuseHistoryRW[coord] = float4(lerp(current.rgb, history.rgb, historyWeight), sampleCount);
 }

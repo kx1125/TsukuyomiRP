@@ -8,6 +8,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Input.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 #ifndef _DEFERRED_RENDERING_PATH
     #define _DEFERRED_RENDERING_PATH 0
@@ -18,16 +19,6 @@ TEXTURE2D(_DepthTexture);
 #if !_DEFERRED_RENDERING_PATH && defined(BILATERAL_ROUGHNESS)
     TEXTURE2D_HALF(_ForwardGBuffer);
 #endif
-
-float sqr(float value)
-{
-    return value * value;
-}
-
-float gaussian(float radius, float sigma)
-{
-    return exp(-sqr(radius / sigma));
-}
 
 #define NORMAL_WEIGHT 1.0
 #define PLANE_WEIGHT 1.0
@@ -113,23 +104,17 @@ float ComputeBilateralWeight(BilateralData center, BilateralData tap)
 
     if (DEPTH_WEIGHT > 0.0)
     {
-        depthWeight = max(0.0, 1.0 - abs(tap.z01 - center.z01) * DEPTH_WEIGHT);
+        depthWeight = DenoiseLinearDepthWeight(center.z01, tap.z01, DEPTH_WEIGHT, 0.0);
     }
 
     if (NORMAL_WEIGHT > 0.0)
     {
-        const float normalCloseness = sqr(sqr(max(0.0, dot(tap.normal, center.normal))));
-        const float normalError = 1.0 - normalCloseness;
-        normalWeight = max(0.0, 1.0 - normalError * NORMAL_WEIGHT);
+        normalWeight = DenoiseNormalErrorWeight(center.normal, tap.normal, NORMAL_WEIGHT);
     }
 
     if (PLANE_WEIGHT > 0.0)
     {
-        const float3 dq = center.position - tap.position;
-        const float distance2 = dot(dq, dq);
-        const float planeError = max(abs(dot(dq, tap.normal)), abs(dot(dq, center.normal)));
-        planeWeight = distance2 < 0.0001 ? 1.0 :
-            pow(max(0.0, 1.0 - 2.0 * PLANE_WEIGHT * planeError / sqrt(distance2)), 2.0);
+        planeWeight = DenoisePlaneWeight(center.position, tap.position, center.normal, tap.normal, PLANE_WEIGHT);
     }
 
     return depthWeight * normalWeight * planeWeight;

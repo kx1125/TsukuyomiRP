@@ -3,6 +3,7 @@
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 #define SSGI_TILE_SIZE 8
 
@@ -41,9 +42,9 @@ void SpatialDenoise(uint3 dispatchThreadId : SV_DispatchThreadID)
             uint2 sampleFullCoord = min((uint2)(sampleUv * _FullResolution.xy), (uint2)_FullResolution.xy - 1);
             float sampleDepth = LinearEyeDepth(_CameraDepthTexture.Load(int3(sampleFullCoord, 0)), _ZBufferParams);
             float3 sampleNormal = normalize(LoadSceneNormals(sampleFullCoord));
-            float spatialWeight = exp2(-dot(offset, offset) / max(1.0, radius * radius * 2.0));
-            float depthWeight = exp2(-abs(sampleDepth - centerDepth) / max(0.02, centerDepth * 0.02));
-            float normalWeight = pow(saturate(dot(centerNormal, sampleNormal)), 16.0);
+            float spatialWeight = DenoiseSpatialWeight(offset, max(1.0, radius * radius * 2.0));
+            float depthWeight = DenoiseExponentialDepthWeight(centerDepth, sampleDepth, max(0.02, centerDepth * 0.02));
+            float normalWeight = DenoiseNormalWeight(centerNormal, sampleNormal, 16.0);
             float weight = spatialWeight * depthWeight * normalWeight;
             colorSum += _InputIndirectDiffuseTexture.SampleLevel(sampler_LinearClamp, sampleUv, 0).rgb * weight;
             weightSum += weight;

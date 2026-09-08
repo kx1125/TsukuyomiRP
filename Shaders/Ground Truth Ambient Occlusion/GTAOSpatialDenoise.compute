@@ -9,6 +9,7 @@
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Ground Truth Ambient Occlusion/GTAOCommon.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/DenoiseUtils.hlsl"
 
 TEXTURE2D_X(_AOPackedData);
 RW_TEXTURE2D_X(float, _OcclusionTexture);
@@ -20,10 +21,7 @@ RW_TEXTURE2D_X(float, _OcclusionTexture);
 float BilateralWeight(float sampleDepth, float linearCentralDepth)
 {
     float linearSample = LinearEyeDepth(sampleDepth, _ZBufferParams);
-    float delta = abs(linearSample - linearCentralDepth);
-    float w = saturate(1.0f - (_AOSpatialBilateralAggressiveness * delta + BILATERAL_EPSILON));
-
-    return w;
+    return DenoiseLinearDepthWeight(linearCentralDepth, linearSample, _AOSpatialBilateralAggressiveness, BILATERAL_EPSILON);
 }
 
 float Blur(float2 centralPos, out float centralDepth, out float centralAO)
@@ -127,6 +125,9 @@ float Blur(float2 centralPos, out float centralDepth, out float centralAO)
 [numthreads(8, 8, 1)]
 void SpatialDenoise(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
+    if (any(dispatchThreadId.xy >= (uint2)_AOBufferSize.xy))
+        return;
+
     float centralDepth, centralAO;
     float final = Blur(dispatchThreadId.xy, centralDepth, centralAO);
 

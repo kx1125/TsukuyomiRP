@@ -30,6 +30,11 @@ namespace Tsukuyomi.Rendering
         // protected override TextureSlot DestinationSlot => destination;
         protected override string OutputName => "PostProcessTestOutput";
 
+        public override bool IsActive(in FrameContext frame)
+        {
+            return base.IsActive(frame) && material != null;
+        }
+
         public override void Render(in PostPassContext context, TextureHandle source, TextureHandle destination)
         {
             if (material == null)
@@ -45,7 +50,7 @@ namespace Tsukuyomi.Rendering
 
             context.PassData.material = material;
 
-            context.SetRenderFunc((TsukuyomiPassData data, RasterGraphContext ctx) =>
+            context.SetRenderFunc(static (TsukuyomiPassData data, RasterGraphContext ctx) =>
             {
                 data.material.SetTexture(_BlitTextureID, data.source);
                 Blitter.BlitTexture(ctx.cmd, data.source, new Vector4(1, 1, 0, 0), data.material, 0);

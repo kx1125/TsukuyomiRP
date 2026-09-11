@@ -9,6 +9,8 @@ namespace Tsukuyomi.Rendering
         private readonly UniversalResourceData _resourceData;
         private readonly TsukuyomiFrameResourceRegistry _registry;
 
+        public bool IsActiveTargetBackBuffer => _resourceData != null && _resourceData.isActiveTargetBackBuffer;
+
         public TextureHandle ActiveColor;
         public TextureHandle ActiveDepth;
         public TextureHandle CameraColorAttachment;
@@ -23,12 +25,13 @@ namespace Tsukuyomi.Rendering
 
         public FrameResources()
         {
+            _registry = new TsukuyomiFrameResourceRegistry();
         }
 
         public FrameResources(UniversalResourceData resourceData, TsukuyomiFrameResourceRegistry registry = null)
         {
             _resourceData = resourceData;
-            _registry = registry;
+            _registry = registry ?? new TsukuyomiFrameResourceRegistry();
 
             ActiveColor = resourceData.activeColorTexture;
             ActiveDepth = resourceData.activeDepthTexture;
@@ -64,24 +67,30 @@ namespace Tsukuyomi.Rendering
 
         public TextureHandle GetOrCreate(RenderGraph rg, string name, TextureDesc desc)
         {
-            if (_registry != null)
-                return _registry.GetOrCreateTexture(rg, name, desc);
-
-            desc.name = name;
-            return rg.CreateTexture(desc);
+            return _registry.GetOrCreateTexture(rg, name, desc);
         }
 
         public BufferHandle GetOrCreate(RenderGraph rg, string name, BufferDesc desc)
         {
-            if (_registry != null)
-                return _registry.GetOrCreateBuffer(rg, name, desc);
+            return _registry.GetOrCreateBuffer(rg, name, desc);
+        }
 
-            desc.name = name;
-            return rg.CreateBuffer(desc);
+        public TextureHandle GetTexture(string name, TextureDesc? expectedDesc = null)
+        {
+            return _registry.GetTexture(name, expectedDesc);
+        }
+
+        public BufferHandle GetBuffer(string name, BufferDesc? expectedDesc = null)
+        {
+            return _registry.GetBuffer(name, expectedDesc);
         }
 
         public void SetActiveColor(TextureHandle handle)
         {
+            if (!handle.IsValid())
+                throw new System.ArgumentException("Active color must be a valid texture.", nameof(handle));
+            if (IsActiveTargetBackBuffer && handle != ActiveColor)
+                throw new System.InvalidOperationException("Cannot replace the backbuffer with cameraColor. Request an intermediate texture and record before the final blit.");
             ActiveColor = handle;
             CameraColorAttachment = handle;
             CameraColorTexture = handle;
@@ -98,5 +107,4 @@ namespace Tsukuyomi.Rendering
         }
     }
 }
-
 

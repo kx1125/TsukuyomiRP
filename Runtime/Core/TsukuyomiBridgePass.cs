@@ -1,9 +1,9 @@
 ﻿using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule.Util;
+using UnityEngine;
 
 using UnityEngine.Rendering;
-using System.Collections.Generic;
-using System.Reflection;
 
 namespace Tsukuyomi.Rendering
 {
@@ -21,54 +21,67 @@ namespace Tsukuyomi.Rendering
             _resourceHub = resourceHub;
         }
 
-        public void ConfigureInputFromTextureSlots()
+        public bool ConfigureInputFromTextureSlots(FrameContext frame = null)
         {
             ScriptableRenderPassInput inputs = ScriptableRenderPassInput.None;
+            bool hasPasses = false;
+            requiresIntermediateTexture = false;
 
-            foreach (var pass in _registry.GetPasses(_injectionPoint))
+            var passes = _registry.GetPasses(_injectionPoint);
+            for (int i = 0; i < passes.Count; i++)
             {
-                foreach (TextureSlot slot in EnumerateTextureSlots(pass))
+                RenderPassBase pass = passes[i];
+                if (frame != null && !pass.IsActive(frame))
+                    continue;
+                hasPasses = true;
+                foreach (TextureSlot slot in TextureSlotMetadata.Enumerate(pass))
                 {
                     inputs |= ToRenderPassInput(slot);
+                    requiresIntermediateTexture |= slot.RequiresIntermediateColor;
                 }
             }
 
             ConfigureInput(inputs);
+            return hasPasses;
         }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             var passes = _registry.GetPasses(_injectionPoint);
-            var frameContext = new FrameContext(frameData, _resourceHub);
+            var cameraData = frameData.Get<UniversalCameraData>();
+            ResourceHub cameraResources = cameraData.camera ? _resourceHub?.ForCamera(cameraData.camera) : _resourceHub;
+            var frameContext = new FrameContext(frameData, cameraResources);
             var resourceData = frameData.Get<UniversalResourceData>();
             var registry = frameData.GetOrCreate<TsukuyomiFrameResourceRegistry>();
             var frameResources = new FrameResources(resourceData, registry);
+            TextureHandle originalColor = frameResources.ActiveColor;
 
-            var cameraData = frameData.Get<UniversalCameraData>();
             var lightData = frameData.Get<UniversalLightData>();
 
-            foreach (var pass in passes)
+            for (int i = 0; i < passes.Count; i++)
             {
+                RenderPassBase pass = passes[i];
                 if (!pass.IsActive(frameContext)) continue;
+                if (frameResources.IsActiveTargetBackBuffer && SamplesCameraColor(pass)) continue;
 
                 pass.Setup(frameContext);
 
                 if (pass is RasterPass rasterPass)
                 {
                     using var builder = renderGraph.AddRasterRenderPass(pass.Name, out TsukuyomiPassData data);
-                    var context = new RasterPassContext(renderGraph, builder, frameData, cameraData, lightData, frameResources, data, _resourceHub);
+                    var context = new RasterPassContext(renderGraph, builder, frameData, cameraData, lightData, frameResources, data, cameraResources);
                     rasterPass.Record(context);
                 }
                 else if (pass is ComputePass computePass)
                 {
                     using var builder = renderGraph.AddComputePass(pass.Name, out TsukuyomiPassData data);
-                    var context = new ComputePassContext(renderGraph, builder, frameData, cameraData, lightData, frameResources, data, _resourceHub);
+                    var context = new ComputePassContext(renderGraph, builder, frameData, cameraData, lightData, frameResources, data, cameraResources);
                     computePass.Record(context);
                 }
                 else if (pass is UnsafePass unsafePass)
                 {
                     using var builder = renderGraph.AddUnsafePass(pass.Name, out TsukuyomiPassData data);
-                    var context = new UnsafePassContext(renderGraph, builder, frameData, cameraData, lightData, frameResources, data, _resourceHub);
+                    var context = new UnsafePassContext(renderGraph, builder, frameData, cameraData, lightData, frameResources, data, cameraResources);
                     unsafePass.Record(context);
                 }
                 else if (pass is PostPass postPass)
@@ -76,7 +89,7 @@ namespace Tsukuyomi.Rendering
                     if (frameResources.ActiveColor.IsValid())
                     {
                         using var builder = renderGraph.AddRasterRenderPass(pass.Name, out TsukuyomiPassData data);
-                        var context = new PostPassContext(renderGraph, builder, frameData, cameraData, frameResources, data, _resourceHub);
+                        var context = new PostPassContext(renderGraph, builder, frameData, cameraData, frameResources, data, cameraResources);
                         var newColor = postPass.RecordPost(context, frameResources.ActiveColor);
 
                         if (newColor.IsValid() && newColor != frameResources.ActiveColor)
@@ -86,26 +99,22 @@ namespace Tsukuyomi.Rendering
                     }
                 }
             }
+            // The next camera imports URP's persistent stack target, not our transient replacement.
+            if (!cameraData.resolveFinalTarget && originalColor.IsValid()
+                && frameResources.ActiveColor != originalColor)
+            {
+                renderGraph.AddBlitPass(frameResources.ActiveColor, originalColor, Vector2.one, Vector2.zero,
+                    passName: "Tsukuyomi Preserve Camera Stack Color");
+                frameResources.SetActiveColor(originalColor);
+            }
         }
 
-        private static IEnumerable<TextureSlot> EnumerateTextureSlots(RenderPassBase pass)
+        private static bool SamplesCameraColor(RenderPassBase pass)
         {
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            var type = pass.GetType();
-
-            foreach (var field in type.GetFields(flags))
-            {
-                if (field.FieldType == typeof(TextureSlot))
-                    yield return (TextureSlot)field.GetValue(pass);
-            }
-
-            foreach (var property in type.GetProperties(flags))
-            {
-                if (property.PropertyType != typeof(TextureSlot) || property.GetIndexParameters().Length > 0)
-                    continue;
-
-                yield return (TextureSlot)property.GetValue(pass);
-            }
+            foreach (TextureSlot slot in TextureSlotMetadata.Enumerate(pass))
+                if (slot.RequiresIntermediateColor)
+                    return true;
+            return false;
         }
 
         private static ScriptableRenderPassInput ToRenderPassInput(TextureSlot slot)
@@ -118,11 +127,9 @@ namespace Tsukuyomi.Rendering
                 BuiltinTexture.CameraDepthTexture or BuiltinTexture.CameraDepthAttachment or BuiltinTexture.ActiveDepth => ScriptableRenderPassInput.Depth,
                 BuiltinTexture.CameraNormals => ScriptableRenderPassInput.Normal,
                 BuiltinTexture.MotionVectorColor or BuiltinTexture.MotionVectorDepth => ScriptableRenderPassInput.Motion,
-                BuiltinTexture.OpaqueTexture or BuiltinTexture.CameraColorTexture => ScriptableRenderPassInput.Color,
+                BuiltinTexture.OpaqueTexture => ScriptableRenderPassInput.Color,
                 _ => ScriptableRenderPassInput.None
             };
         }
     }
 }
-
-

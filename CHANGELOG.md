@@ -4,6 +4,14 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Declared GTAO and per-object shadow texture dependencies through their lighting consumers.
+- Kept camera color unchanged when a PostPass fails to record, and fixed depth attachment and fullscreen blit builder handling.
+- Requested intermediate color targets for color sampling and preserved persistent targets between stacked cameras.
+- Reallocated persistent resources when descriptors change, isolated camera histories, and rejected incompatible named frame resources.
+- Synchronized Profile pass changes at runtime and skipped empty or inactive bridges, with cached pass ordering and texture-slot metadata.
+
 ## [0.1.7] - 2026-08-25
 
 ### Added

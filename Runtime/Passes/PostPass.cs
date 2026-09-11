@@ -17,9 +17,14 @@ namespace Tsukuyomi.Rendering
 
         public TextureHandle RecordPost(in PostPassContext context, TextureHandle activeColor)
         {
+            if (!activeColor.IsValid() || context.Resources.IsActiveTargetBackBuffer)
+                return activeColor;
+
             var source = context.GetTexture(SourceSlot);
-            if (!source.IsValid())
+            if (!source.IsValid() && SourceSlot.Builtin == BuiltinTexture.ActiveColor)
                 source = activeColor;
+            if (!source.IsValid())
+                return activeColor;
 
             var destination = context.CreateTextureLike(activeColor, OutputName, ClearOutput);
             if (!source.IsValid() || !destination.IsValid())
@@ -33,7 +38,9 @@ namespace Tsukuyomi.Rendering
             context.PassData.destination = destination;
 
             Render(context, source, destination);
-            return destination;
+            // Render implementations can decline to record (e.g. missing material).
+            // An unwritten destination must never become the next pass's camera color.
+            return context.PassData.HasRenderFunction ? context.PassData.destination : activeColor;
         }
 
         public abstract void Render(

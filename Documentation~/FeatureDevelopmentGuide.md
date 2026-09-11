@@ -220,6 +220,10 @@ TextureHandle cameraColor = context.GetTexture(color);
 
 ## 跨 Pass 资源
 
+命名资源由生产者通过 `Write` / `ReadWrite` slot 创建，消费者通过 `Read` slot 查询。生产者没有运行时，查询返回无效 Handle，消费者应在绑定资源前退出；读取不会隐式创建纹理或 Buffer。同名资源描述符不兼容时抛出异常，包括尺寸模式、缩放、格式、采样、清除及 Buffer usage 等设置。
+
+全局纹理必须在生产者 Builder 上使用 `SetGlobalTextureAfterPass` 发布，并由消费者通过 `UseGlobalTexture` 或显式 Handle 声明读取。仅在执行函数里调用 `SetGlobalTexture` 不会建立依赖；`AllowGlobalStateModification` 和禁止裁剪也不会延长资源生命周期。对 URP 自带输入（例如 AO），同时更新相应的 `UniversalResourceData` 字段。
+
 同一帧跨 pass 共享资源时，以相同 name 作为标记，由 TsukuyomiRP 的 frame resource registry 管理。适合 Contact Shadow 这类先生成、后消费的纹理。
 
 跨帧持久资源使用 `ResourceHub`：
@@ -234,6 +238,20 @@ GraphicsBuffer buffer = context.ResourceHub.GetOrCreateBuffer("MyFeatureBuffer",
 - 临时中间纹理优先放在当前 RenderGraph pass 内。
 - 同帧跨 pass 共享使用稳定 name。
 - 跨帧 history/buffer 使用 `ResourceHub`，并依赖 `TsukuyomiFeature.Dispose()` 统一释放。
+
+Bridge 提供的 `context.ResourceHub` / `FrameContext.Resources` 已按相机隔离。直接使用根 Hub 时先调用 `ForCamera(camera)`；根 Hub 的直接资源接口用于显式共享资源。纹理使用完整的 `RenderTextureDescriptor`，尺寸或配置变化时重建；Buffer 的 count/stride 变化时也会重建。`GetOrCreateHistoryTexture(..., out bool reallocated)` 用于识别新历史，首次使用前必须初始化；`HistoryTextureHelper.ImportHistoryTexture` 会为新分配的历史安排首次清除。相机切换视角或发生时间不连续时调用该相机 Hub 的 `ResetHistory()`。
+
+### PostPass 与附件约定
+
+- `Read(ActiveColor)` / `Read(CameraColorTexture)` 自动请求中间颜色纹理；`Read(OpaqueTexture)` 才请求 URP 的 opaque copy。
+- 深度附件使用 `SetRenderAttachmentDepth`，不会占用颜色附件索引。只读深度附件同样支持。需要覆盖默认推断时，使用 `TextureSlot.WithBinding(TextureBinding.DepthAttachment / ColorAttachment / Texture)`。
+- 通过 `context.SetRenderFunc(...)` 提交执行函数，可直接传静态委托。Context 会重置池化 PassData，并为提前退出提供可裁剪的空回调；PostPass 只有实际提交了执行函数才交接新颜色。缺少材质等可提前判断的条件应放入 `IsActive`。
+- `FullscreenBlit.BlitAndSwap(context, ...)` 在当前 PostPass 的附件上录制一次 blit。`PassRecorder.AddBlitAndSwapColorPass(...)` 则添加完整的独立 Pass，必须在没有打开 Builder 时调用；该方法现在返回 `void` 并负责释放 Builder。
+- 对尚未完成 resolve 的相机，Bridge 将临时颜色输出写回 URP 的持久相机栈目标。Backbuffer 不能作为普通颜色输入采样；到达最终 Backbuffer 后不会继续运行声明了颜色采样需求的 Pass。
+- `IsActive` 会在入队前及录图时检查，入队检查应基于相机/配置，不应要求此时尚未生成的 RenderGraph 纹理。
+- Profile 列表的增加、删除及重排会在下一次 `AddRenderPasses` 同步，Enabled / Priority / InjectionPoint 的变化也会更新调度缓存。
+
+`context.SetRenderFunc` 的参数使用 Unity 原生 `BaseRenderFunc<TsukuyomiPassData, TContext>`，避免每次录图包装委托。现有 lambda 和方法组调用无需调整；显式声明为 `Action<...>` 的变量需改为对应的 `BaseRenderFunc<...>`。PostPass 应通过 `context.SetRenderFunc` 提交回调，使框架能判断输出是否有效。
 
 ## 接入 TsukuyomiFeature
 
@@ -283,8 +301,7 @@ TsukuyomiMyFeatureVolume myFeatureVolume = volumeStack?.GetComponent<TsukuyomiMy
 
 if (_myFeaturePass != null && _myFeaturePass.Configure(Profile, myFeatureVolume))
 {
-    _myFeatureBridgePass.ConfigureInputFromTextureSlots();
-    renderer.EnqueuePass(_myFeatureBridgePass);
+    EnqueueBridge(renderer, _myFeatureBridgePass);
 }
 ```
 

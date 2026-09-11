@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace Tsukuyomi.Rendering
@@ -22,18 +23,30 @@ namespace Tsukuyomi.Rendering
             string destinationName,
             string passName)
         {
-            var destination = CreateDestination(context, source, destinationName);
-            if (!source.IsValid() || !destination.IsValid() || material == null)
+            if (!source.IsValid() || material == null || context.Resources.IsActiveTargetBackBuffer)
                 return source;
 
-            PassRecorder.AddBlitAndSwapColorPass(
-                context.RenderGraph,
-                context.Resources,
-                source,
-                destination,
-                material,
-                passIndex,
-                passName);
+            // PostPass already owns the open raster builder and its attachments.
+            // Reuse that destination instead of nesting another RenderGraph pass.
+            TextureHandle destination = context.PassData.destination;
+            if (!destination.IsValid())
+            {
+                destination = CreateDestination(context, source, destinationName);
+                context.Builder.UseTexture(source, AccessFlags.Read);
+                context.Builder.SetRenderAttachment(destination, 0, AccessFlags.WriteAll);
+            }
+            else if (context.PassData.source != source)
+            {
+                throw new System.InvalidOperationException("A PostPass blit must use its declared source. Record additional stages as separate graph passes.");
+            }
+
+            context.PassData.source = source;
+            context.PassData.destination = destination;
+            context.PassData.material = material;
+            context.PassData.passIndex = passIndex;
+            context.SetRenderFunc(static (data, graphContext) =>
+                Blitter.BlitTexture(graphContext.cmd, data.source, new Vector4(1, 1, 0, 0), data.material, data.passIndex));
+            PassRecorder.SwapActiveColor(context.Resources, destination);
 
             return destination;
         }

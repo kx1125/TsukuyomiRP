@@ -214,7 +214,8 @@ namespace Tsukuyomi.Rendering
             bool enablePcss = _settings.Enabled;
             bool useOfficialScreenSpaceShadows = !enablePcss && useMainLightShadow && screenSpaceShadowsMaterial != null && baseScreenShadow.IsValid();
             bool enableContactShadows = _contactShadowsEnabled && contactShadowMap.IsValid();
-            bool enablePerObjectShadows = _perObjectShadowsEnabled;
+            TextureHandle perObjectShadowMap = context.FrameData.GetOrCreate<TsukuyomiPerObjectShadowResources>().Shadowmap;
+            bool enablePerObjectShadows = _perObjectShadowsEnabled && perObjectShadowMap.IsValid();
             ProfilingSampler pcssPenumbraSampler = _pcssPenumbraSampler;
             ProfilingSampler screenSpaceShadowSampler = _screenSpaceShadowSampler;
 
@@ -229,6 +230,8 @@ namespace Tsukuyomi.Rendering
             context.Builder.UseTexture(activeColorTexture, AccessFlags.Read);
             if (contactShadowMap.IsValid())
                 context.Builder.UseTexture(contactShadowMap, AccessFlags.Read);
+            if (enablePerObjectShadows)
+                context.Builder.UseTexture(perObjectShadowMap, AccessFlags.Read);
             context.Builder.AllowGlobalStateModification(true);
             context.Builder.SetGlobalTextureAfterPass(penumbraMask, PenumbraMaskTexId);
             context.Builder.SetGlobalTextureAfterPass(screenShadow, ScreenSpaceShadowmapTextureId);
@@ -416,5 +419,4 @@ namespace Tsukuyomi.Rendering
         }
     }
 }
-
 

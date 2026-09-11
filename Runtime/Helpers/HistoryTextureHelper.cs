@@ -15,8 +15,12 @@ namespace Tsukuyomi.Rendering
             if (resourceHub == null)
                 return TextureHandle.nullHandle;
 
-            var history = resourceHub.GetOrCreateHistoryTexture(key, descriptor);
-            return renderGraph.ImportTexture(history);
+            var history = resourceHub.GetOrCreateHistoryTexture(key, descriptor, out bool reallocated);
+            return renderGraph.ImportTexture(history, new ImportResourceParams
+            {
+                clearOnFirstUse = reallocated,
+                clearColor = Color.clear
+            });
         }
     }
 }

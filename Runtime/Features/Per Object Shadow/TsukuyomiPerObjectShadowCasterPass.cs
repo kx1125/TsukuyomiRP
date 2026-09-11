@@ -75,6 +75,8 @@ namespace Tsukuyomi.Rendering
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
+            var sharedShadows = frameData.GetOrCreate<TsukuyomiPerObjectShadowResources>();
+            sharedShadows.Shadowmap = TextureHandle.nullHandle;
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
             UniversalLightData lightData = frameData.Get<UniversalLightData>();
@@ -119,6 +121,7 @@ namespace Tsukuyomi.Rendering
                 InitPassData(passData, lightData, shadowData);
                 passData.ShadowmapTexture = shadowTexture;
                 builder.UseTexture(shadowTexture, AccessFlags.Read);
+                builder.SetGlobalTextureAfterPass(shadowTexture, ShadowMapId);
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
                 builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
@@ -126,6 +129,8 @@ namespace Tsukuyomi.Rendering
                     SetupShadowGlobalVariables(context.cmd, data);
                 });
             }
+
+            sharedShadows.Shadowmap = shadowTexture;
 
             if (cameraData.renderer is UniversalRenderer renderer)
             {
@@ -362,7 +367,6 @@ namespace Tsukuyomi.Rendering
 
     }
 }
-
 
 
 

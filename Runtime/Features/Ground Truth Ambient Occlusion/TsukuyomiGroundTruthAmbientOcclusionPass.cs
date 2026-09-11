@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.Universal;
 
 namespace Tsukuyomi.Rendering
 {
@@ -188,6 +189,8 @@ namespace Tsukuyomi.Rendering
             context.Builder.UseTexture(depthPyramid, AccessFlags.Read);
             context.Builder.UseTexture(aoPackedData, AccessFlags.ReadWrite);
             context.Builder.UseTexture(finalAO, AccessFlags.ReadWrite);
+            context.Builder.SetGlobalTextureAfterPass(finalAO, ScreenSpaceOcclusionTextureId);
+            context.FrameData.Get<UniversalResourceData>().ssaoTexture = finalAO;
             context.Builder.AllowPassCulling(false);
             context.Builder.AllowGlobalStateModification(true);
 
@@ -228,7 +231,6 @@ namespace Tsukuyomi.Rendering
                     }
 
                     graphContext.cmd.SetGlobalVector(AmbientOcclusionParamId, ambientOcclusionParam);
-                    graphContext.cmd.SetGlobalTexture(ScreenSpaceOcclusionTextureId, finalAO);
                 }
             });
         }

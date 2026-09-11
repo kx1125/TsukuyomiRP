@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -21,7 +22,7 @@ namespace Tsukuyomi.Rendering
             if (_textures.TryGetValue(name, out TextureEntry entry))
             {
                 if (!IsCompatible(entry.Desc, desc))
-                    Debug.LogError($"Tsukuyomi texture resource '{name}' was requested with an incompatible descriptor.");
+                    throw new InvalidOperationException($"Tsukuyomi texture resource '{name}' was requested with an incompatible descriptor.");
 
                 return entry.Handle;
             }
@@ -43,7 +44,7 @@ namespace Tsukuyomi.Rendering
             if (_buffers.TryGetValue(name, out BufferEntry entry))
             {
                 if (!IsCompatible(entry.Desc, desc))
-                    Debug.LogError($"Tsukuyomi buffer resource '{name}' was requested with an incompatible descriptor.");
+                    throw new InvalidOperationException($"Tsukuyomi buffer resource '{name}' was requested with an incompatible descriptor.");
 
                 return entry.Handle;
             }
@@ -54,6 +55,25 @@ namespace Tsukuyomi.Rendering
             return handle;
         }
 
+        // Reads must not create resources when a producer was skipped or ordered incorrectly.
+        public TextureHandle GetTexture(string name, TextureDesc? expectedDesc = null)
+        {
+            if (string.IsNullOrEmpty(name) || !_textures.TryGetValue(name, out TextureEntry entry))
+                return TextureHandle.nullHandle;
+            if (expectedDesc.HasValue && !IsCompatible(entry.Desc, expectedDesc.Value))
+                throw new InvalidOperationException($"Tsukuyomi texture resource '{name}' was requested with an incompatible descriptor.");
+            return entry.Handle;
+        }
+
+        public BufferHandle GetBuffer(string name, BufferDesc? expectedDesc = null)
+        {
+            if (string.IsNullOrEmpty(name) || !_buffers.TryGetValue(name, out BufferEntry entry))
+                return BufferHandle.nullHandle;
+            if (expectedDesc.HasValue && !IsCompatible(entry.Desc, expectedDesc.Value))
+                throw new InvalidOperationException($"Tsukuyomi buffer resource '{name}' was requested with an incompatible descriptor.");
+            return entry.Handle;
+        }
+
         public override void Reset()
         {
             _textures.Clear();
@@ -62,23 +82,45 @@ namespace Tsukuyomi.Rendering
 
         private static bool IsCompatible(TextureDesc a, TextureDesc b)
         {
-            return a.width == b.width
+            return a.sizeMode == b.sizeMode
+                && a.scale.Equals(b.scale)
+                && a.func == b.func
+                && a.width == b.width
                 && a.height == b.height
                 && a.slices == b.slices
-                && a.depthBufferBits == b.depthBufferBits
-                && a.colorFormat == b.colorFormat
+                && a.format == b.format
                 && a.dimension == b.dimension
                 && a.enableRandomWrite == b.enableRandomWrite
                 && a.msaaSamples == b.msaaSamples
                 && a.useMipMap == b.useMipMap
-                && a.autoGenerateMips == b.autoGenerateMips;
+                && a.autoGenerateMips == b.autoGenerateMips
+                && a.filterMode == b.filterMode
+                && a.wrapMode == b.wrapMode
+                && a.isShadowMap == b.isShadowMap
+                && a.anisoLevel == b.anisoLevel
+                && a.mipMapBias.Equals(b.mipMapBias)
+                && a.bindTextureMS == b.bindTextureMS
+                && a.useDynamicScale == b.useDynamicScale
+                && a.useDynamicScaleExplicit == b.useDynamicScaleExplicit
+                && a.memoryless == b.memoryless
+                && a.vrUsage == b.vrUsage
+                && a.enableShadingRate == b.enableShadingRate
+                && a.fastMemoryDesc.inFastMemory == b.fastMemoryDesc.inFastMemory
+                && a.fastMemoryDesc.flags == b.fastMemoryDesc.flags
+                && a.fastMemoryDesc.residencyFraction.Equals(b.fastMemoryDesc.residencyFraction)
+                && a.fallBackToBlackTexture == b.fallBackToBlackTexture
+                && a.disableFallBackToImportedTexture == b.disableFallBackToImportedTexture
+                && a.clearBuffer == b.clearBuffer
+                && a.clearColor.Equals(b.clearColor)
+                && a.discardBuffer == b.discardBuffer;
         }
 
         private static bool IsCompatible(BufferDesc a, BufferDesc b)
         {
             return a.count == b.count
                 && a.stride == b.stride
-                && a.target == b.target;
+                && a.target == b.target
+                && a.usageFlags == b.usageFlags;
         }
 
         private readonly struct TextureEntry

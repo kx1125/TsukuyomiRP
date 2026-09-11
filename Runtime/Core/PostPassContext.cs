@@ -31,11 +31,17 @@ namespace Tsukuyomi.Rendering
             Resources = resources;
             ResourceHub = resourceHub;
             PassData = passData;
+            PassData.Reset();
+            // Optional passes may return before setting up work. Keep the graph valid and cullable.
+            Builder.SetRenderFunc<TsukuyomiPassData>(static (_, _) => { });
         }
 
-        public void SetRenderFunc(Action<TsukuyomiPassData, RasterGraphContext> renderFunc)
+        public void SetRenderFunc(BaseRenderFunc<TsukuyomiPassData, RasterGraphContext> renderFunc)
         {
-            Builder.SetRenderFunc<TsukuyomiPassData>(new BaseRenderFunc<TsukuyomiPassData, RasterGraphContext>(renderFunc));
+            if (renderFunc == null)
+                throw new ArgumentNullException(nameof(renderFunc));
+            Builder.SetRenderFunc(renderFunc);
+            PassData.HasRenderFunction = true;
         }
 
         public TextureHandle GetTexture(in TextureSlot slot)

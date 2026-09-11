@@ -34,6 +34,7 @@ namespace Tsukuyomi.Rendering
         private PassRegistry _sssSkinRegistry;
         private PassRegistry _postProcessRegistry;
         private ResourceHub _resourceHub;
+        private FrameContext _enqueueFrame;
         private readonly List<TsukuyomiBridgePass> _bridgePasses = new();
         private TsukuyomiBridgePass _contactShadowBridgePass;
         private TsukuyomiBridgePass _contactShadowDenoiseBridgePass;
@@ -221,6 +222,11 @@ namespace Tsukuyomi.Rendering
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            _registry.Synchronize(Profile != null ? Profile.Passes : null);
+            _resourceHub.ReleaseDestroyedCameras();
+            Camera camera = renderingData.cameraData.camera;
+            _enqueueFrame = new FrameContext(renderingData.frameData,
+                camera ? _resourceHub.ForCamera(camera) : _resourceHub);
 #if ENABLE_UPSCALER_FRAMEWORK
             _fsr3ManualMaskPass.Configure(Profile);
             renderer.EnqueuePass(_fsr3OpaqueOnlyCapturePass);
@@ -356,8 +362,8 @@ namespace Tsukuyomi.Rendering
             if (renderer == null || bridge == null)
                 return;
 
-            bridge.ConfigureInputFromTextureSlots();
-            renderer.EnqueuePass(bridge);
+            if (bridge.ConfigureInputFromTextureSlots(_enqueueFrame))
+                renderer.EnqueuePass(bridge);
         }
 
         private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled, bool ssgiEnabled)
@@ -505,7 +511,6 @@ namespace Tsukuyomi.Rendering
         }
     }
 }
-
 
 
 

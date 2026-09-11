@@ -5,7 +5,7 @@ namespace Tsukuyomi.Rendering
 {
     /// <summary>
     /// Unified data class for all Tsukuyomi RenderGraph passes.
-    /// Used to pass resource handles and parameters from Setup to Execute phase without GC allocations.
+    /// Pooled by RenderGraph; reset before recording so skipped passes cannot reuse stale data.
     /// </summary>
     public class TsukuyomiPassData
     {
@@ -17,5 +17,18 @@ namespace Tsukuyomi.Rendering
         public Material material;
         public int passIndex;
         public Vector4 parameters;
+
+        public bool HasRenderFunction { get; internal set; }
+
+        internal void Reset()
+        {
+            source = destination = default;
+            buffer = default;
+            rendererList = default;
+            material = null;
+            passIndex = 0;
+            parameters = default;
+            HasRenderFunction = false;
+        }
     }
 }

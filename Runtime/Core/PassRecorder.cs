@@ -23,6 +23,10 @@ namespace Tsukuyomi.Rendering
             {
                 return frameResources.GetBuiltin(slot.Builtin);
             }
+            else if (slot.Access == ResourceAccess.Read)
+            {
+                return frameResources.GetTexture(slot.Name, slot.CustomDesc);
+            }
             else if (slot.CustomDesc.HasValue)
             {
                 return frameResources.GetOrCreate(rg, slot.Name, slot.CustomDesc.Value);
@@ -36,6 +40,8 @@ namespace Tsukuyomi.Rendering
             in BufferSlot slot,
             FrameResources frameResources)
         {
+            if (slot.Access == ResourceAccess.Read)
+                return frameResources.GetBuffer(slot.Name, slot.CustomDesc);
             if (slot.CustomDesc.HasValue)
             {
                 return frameResources.GetOrCreate(rg, slot.Name, slot.CustomDesc.Value);
@@ -72,7 +78,11 @@ namespace Tsukuyomi.Rendering
 
             AccessFlags flags = ToAccessFlags(slot.Access);
 
-            if (slot.IsAttachment)
+            if (slot.IsDepthAttachment)
+            {
+                builder.SetRenderAttachmentDepth(handle, flags);
+            }
+            else if (slot.IsAttachment)
             {
                 builder.SetRenderAttachment(handle, attachmentIndex, flags);
                 attachmentIndex++;
@@ -93,15 +103,8 @@ namespace Tsukuyomi.Rendering
 
             AccessFlags flags = ToAccessFlags(slot.Access);
 
-            if (slot.IsAttachment)
-            {
-                builder.SetRenderAttachment(handle, attachmentIndex, flags);
-                attachmentIndex++;
-            }
-            else
-            {
-                builder.UseTexture(handle, flags);
-            }
+            // Unsafe passes own their render targets; this declares the dependency only.
+            builder.UseTexture(handle, flags);
         }
 
         public static void BindTexture(
@@ -136,7 +139,8 @@ namespace Tsukuyomi.Rendering
                 resources.SetActiveColor(handle);
         }
 
-        public static IBaseRenderGraphBuilder AddBlitAndSwapColorPass(
+        /// <summary>Add a complete blit pass. Call only when no other pass builder is open.</summary>
+        public static void AddBlitAndSwapColorPass(
             RenderGraph renderGraph,
             FrameResources resources,
             TextureHandle source,
@@ -146,9 +150,8 @@ namespace Tsukuyomi.Rendering
             string passName)
         {
             var parameters = new RenderGraphUtils.BlitMaterialParameters(source, destination, material, passIndex);
-            var builder = renderGraph.AddBlitPass(parameters, passName: passName, returnBuilder: true);
+            renderGraph.AddBlitPass(parameters, passName: passName);
             SwapActiveColor(resources, destination);
-            return builder;
         }
 
         public static AccessFlags ToAccessFlags(ResourceAccess access)

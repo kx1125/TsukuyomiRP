@@ -60,13 +60,7 @@ namespace Tsukuyomi.Rendering
         private Shader volumetricFogShader;
 
         [SerializeField]
-        private Material volumetricFogMaterial;
-
-        [SerializeField]
         private Shader downsampleDepthShader;
-
-        [SerializeField]
-        private Material downsampleDepthMaterial;
 
         [SerializeField]
         private ComputeShader volumetricFogRaymarchComputeShader;
@@ -121,9 +115,7 @@ namespace Tsukuyomi.Rendering
         public ComputeShader SsgiBilateralUpsampleComputeShader => ssgiBilateralUpsampleComputeShader;
         public Shader SsgiDebugOutputShader => ssgiDebugOutputShader;
         public Shader VolumetricFogShader => volumetricFogShader;
-        public Material VolumetricFogMaterial => volumetricFogMaterial;
         public Shader DownsampleDepthShader => downsampleDepthShader;
-        public Material DownsampleDepthMaterial => downsampleDepthMaterial;
         public ComputeShader VolumetricFogRaymarchComputeShader => volumetricFogRaymarchComputeShader;
         public ComputeShader VolumetricFogBlurComputeShader => volumetricFogBlurComputeShader;
         public ComputeShader VolumetricFogUpsampleComputeShader => volumetricFogUpsampleComputeShader;
@@ -147,14 +139,12 @@ namespace Tsukuyomi.Rendering
             && ssgiTemporalComputeShader != null
             && ssgiDiffuseDenoiserComputeShader != null
             && ssgiBilateralUpsampleComputeShader != null;
-        public bool HasVolumeLightResources => (volumetricFogShader != null || volumetricFogMaterial != null)
-            && (downsampleDepthShader != null || downsampleDepthMaterial != null);
+        public bool HasVolumeLightResources => volumetricFogShader != null && downsampleDepthShader != null;
         public bool HasSssSkinResources => sssSkinBlurShader != null || sssSkinBlurMaterial != null;
         public bool HasPostProcessResources => postProcessUberShader != null || postProcessUberMaterial != null;
         public bool HasFsr3Resources => fsr3Shaders != null && fsr3Shaders.IsValid;
     }
 }
-
 
 
 

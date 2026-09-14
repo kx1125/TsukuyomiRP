@@ -49,9 +49,7 @@ namespace Tsukuyomi.Rendering.Editor
                 ref s_ShowVolumeLight,
                 "Volume Light",
                 "volumetricFogShader",
-                "volumetricFogMaterial",
                 "downsampleDepthShader",
-                "downsampleDepthMaterial",
                 "volumetricFogRaymarchComputeShader",
                 "volumetricFogBlurComputeShader",
                 "volumetricFogUpsampleComputeShader");

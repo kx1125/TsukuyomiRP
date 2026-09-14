@@ -53,8 +53,6 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiVolumeLightResolvedSettings _settings;
         private Material _volumetricFogMaterial;
         private Material _downsampleDepthMaterial;
-        private bool _ownsVolumetricFogMaterial;
-        private bool _ownsDownsampleDepthMaterial;
 
         private readonly ProfilingSampler _downsampleDepthSampler = new("Downsample Depth");
         private readonly ProfilingSampler _raymarchSampler = new("Raymarch");
@@ -85,22 +83,17 @@ namespace Tsukuyomi.Rendering
             if (!_settings.IsActive)
                 return false;
 
-            if (_volumetricFogMaterial != null && _downsampleDepthMaterial != null)
-                return true;
-
             if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources))
                 return false;
 
             _volumetricFogMaterial = ResolveMaterial(
-                resources.VolumetricFogMaterial,
+                _volumetricFogMaterial,
                 resources.VolumetricFogShader,
-                "Tsukuyomi Volume Light requires a VolumetricFog shader or material in TsukuyomiRenderPipelineResources.",
-                ref _ownsVolumetricFogMaterial);
+                "Tsukuyomi Volume Light requires a VolumetricFog shader in TsukuyomiRenderPipelineResources.");
             _downsampleDepthMaterial = ResolveMaterial(
-                resources.DownsampleDepthMaterial,
+                _downsampleDepthMaterial,
                 resources.DownsampleDepthShader,
-                "Tsukuyomi Volume Light requires a DownsampleDepth shader or material in TsukuyomiRenderPipelineResources.",
-                ref _ownsDownsampleDepthMaterial);
+                "Tsukuyomi Volume Light requires a DownsampleDepth shader in TsukuyomiRenderPipelineResources.");
 
             return _volumetricFogMaterial != null && _downsampleDepthMaterial != null;
         }
@@ -112,15 +105,11 @@ namespace Tsukuyomi.Rendering
 
         public void Dispose()
         {
-            if (_ownsVolumetricFogMaterial)
-                CoreUtils.Destroy(_volumetricFogMaterial);
-            if (_ownsDownsampleDepthMaterial)
-                CoreUtils.Destroy(_downsampleDepthMaterial);
+            CoreUtils.Destroy(_volumetricFogMaterial);
+            CoreUtils.Destroy(_downsampleDepthMaterial);
 
             _volumetricFogMaterial = null;
             _downsampleDepthMaterial = null;
-            _ownsVolumetricFogMaterial = false;
-            _ownsDownsampleDepthMaterial = false;
         }
 
         public override void Record(in UnsafePassContext context)
@@ -220,11 +209,13 @@ namespace Tsukuyomi.Rendering
             });
         }
 
-        private static Material ResolveMaterial(Material material, Shader shader, string errorMessage, ref bool ownsMaterial)
+        private static Material ResolveMaterial(Material material, Shader shader, string errorMessage)
         {
-            ownsMaterial = false;
-            if (material != null)
+            if (material != null && material.shader == shader)
                 return material;
+
+            // Each pass owns its materials. Recreate only when the preloaded shader changes.
+            CoreUtils.Destroy(material);
 
             if (shader == null)
             {
@@ -232,7 +223,6 @@ namespace Tsukuyomi.Rendering
                 return null;
             }
 
-            ownsMaterial = true;
             return CoreUtils.CreateEngineMaterial(shader);
         }
 

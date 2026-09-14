@@ -28,9 +28,7 @@ MonoBehaviour:
   ssgiBilateralUpsampleComputeShader: {fileID: 7200000, guid: b5952b438d4a433eb9c271dfcb3f2e87, type: 3}
   ssgiDebugOutputShader: {fileID: 4800000, guid: c8f89178f87342a798dace7b2302f7ef, type: 3}
   volumetricFogShader: {fileID: 4800000, guid: 136e3fcb6a401f1418ca18a6c16e2af4, type: 3}
-  volumetricFogMaterial: {fileID: 2100000, guid: f5e7b774f9b94e14a8f7c3dc208e4bd8, type: 2}
   downsampleDepthShader: {fileID: 4800000, guid: 79732377618306e4c9d240230536cbac, type: 3}
-  downsampleDepthMaterial: {fileID: 2100000, guid: 96c66f9e5e2043f9b3ff0435cdfbe3d0, type: 2}
   volumetricFogRaymarchComputeShader: {fileID: 7200000, guid: 8e4b7a6d46cc5cd41924a54c8b59cbfa, type: 3}
   volumetricFogBlurComputeShader: {fileID: 7200000, guid: 438193fc3e24c1f4da7e99525c007eee, type: 3}
   volumetricFogUpsampleComputeShader: {fileID: 7200000, guid: 7f09899e19697cf4fb572d64e783bf8d, type: 3}

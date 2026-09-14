@@ -4,6 +4,14 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Create and cache volumetric fog and depth-downsampling materials from preloaded shader references, removing the bundled material assets and their resource settings.
+
+### Fixed
+
+- Keep volumetric material state private to each pass, release replaced materials when shaders change, and reuse valid materials when another shader is missing.
+
 ## [0.1.8] - 2026-09-13
 
 ### Added

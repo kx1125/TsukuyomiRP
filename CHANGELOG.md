@@ -4,8 +4,20 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-13
+
+### Added
+
+- Added Character Common, Face and Hair shaders with shared URP lighting and supporting passes.
+
+### Changed
+
+- Extracted shared spatial, depth, normal, bilateral upsampling and temporal weighting functions into `ShaderLibrary/DenoiseUtils.hlsl`, reused by Contact Shadows, GTAO, SSGI, SSS and volumetric fog.
+
 ### Fixed
 
+- Fixed GTAO blur/upsample dispatch coverage so the final row and column are written at every resolution without shifting the filter footprint.
+- Guarded out-of-range writes and dispatch threads in GTAO and Contact Shadow denoising.
 - Declared GTAO and per-object shadow texture dependencies through their lighting consumers.
 - Kept camera color unchanged when a PostPass fails to record, and fixed depth attachment and fullscreen blit builder handling.
 - Requested intermediate color targets for color sampling and preserved persistent targets between stacked cameras.

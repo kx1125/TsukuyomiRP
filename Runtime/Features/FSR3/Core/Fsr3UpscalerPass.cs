@@ -455,7 +455,7 @@ namespace Tsukuyomi.Rendering.FSR3
         }
     }
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if UNITY_EDITOR || DEBUG || UNITY_ENABLE_CHECKS || UNITY_INCLUDE_INSTRUMENTATION
     internal class Fsr3UpscalerDebugViewPass : Fsr3UpscalerPass
     {
         public Fsr3UpscalerDebugViewPass(Fsr3Upscaler.ContextDescription contextDescription, Fsr3UpscalerResources resources, ComputeBuffer constants)
@@ -483,4 +483,3 @@ namespace Tsukuyomi.Rendering.FSR3
     }
 #endif
 }
-

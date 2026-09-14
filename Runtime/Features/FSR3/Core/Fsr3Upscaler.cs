@@ -40,7 +40,7 @@ namespace Tsukuyomi.Rendering.FSR3
             else
                 flags &= ~InitializationFlags.EnableDepthInverted;
             
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if UNITY_EDITOR || DEBUG || UNITY_ENABLE_CHECKS || UNITY_INCLUDE_INSTRUMENTATION
             flags |= InitializationFlags.EnableDebugChecking;
 #endif
             
@@ -312,4 +312,3 @@ namespace Tsukuyomi.Rendering.FSR3
         }
     }
 }
-

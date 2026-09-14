@@ -1,4 +1,7 @@
 #if ENABLE_UPSCALER_FRAMEWORK
+#if UNITY_6000_6_OR_NEWER
+#define TSUKUYOMI_UPSCALER_API_6000_6
+#endif
 using System.Collections.Generic;
 using Tsukuyomi.Rendering.FSR3;
 using UnityEngine;
@@ -28,11 +31,35 @@ namespace Tsukuyomi.Rendering
             Instances.Add(this);
         }
 
+        // The property contract and EntityId camera IDs are shared by Unity 6000.5 and 6000.6.
         public override string name => UpscalerName;
         public override bool isTemporal => true;
         public override bool supportsSharpening => true;
         public override bool supportsXR => false;
 
+#if TSUKUYOMI_UPSCALER_API_6000_6
+        public override IUpscalerContext CreateContext(UpscalerOptions options, Vector2Int displayResolution)
+        {
+            // The FSR3 implementation owns its native history per camera because it also
+            // tracks render size, HDR and shader changes. URP still requires a framework
+            // context for temporal upscalers, so provide a lightweight lifecycle bridge.
+            return new Fsr3FrameworkContext(displayResolution);
+        }
+#endif
+
+#if TSUKUYOMI_UPSCALER_API_6000_6
+        public override void CalculateJitter(int frameIndex, float upscaleRatio, out Vector2 jitter, out bool allowScaling)
+        {
+            float safeUpscaleRatio = upscaleRatio > 0.0f && !float.IsNaN(upscaleRatio) && !float.IsInfinity(upscaleRatio)
+                ? upscaleRatio
+                : 1.0f;
+            int jitterPhaseCount = Mathf.Max(1, (int)(8.0f * safeUpscaleRatio * safeUpscaleRatio));
+
+            Fsr3Upscaler.GetJitterOffset(out float jitterX, out float jitterY, frameIndex, jitterPhaseCount);
+            jitter = new Vector2(jitterX, jitterY);
+            allowScaling = false;
+        }
+#else
         public override void CalculateJitter(int frameIndex, out Vector2 jitter, out bool allowScaling)
         {
             ResolutionContext resolution = GetCurrentResolutionContext();
@@ -44,6 +71,7 @@ namespace Tsukuyomi.Rendering
             jitter = new Vector2(jitterX, jitterY);
             allowScaling = false;
         }
+#endif
 
         public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
         {
@@ -381,6 +409,28 @@ namespace Tsukuyomi.Rendering
             public Fsr3Upscaler.QualityMode QualityMode;
             public int LastFrame = -1;
         }
+
+#if TSUKUYOMI_UPSCALER_API_6000_6
+        private sealed class Fsr3FrameworkContext : IUpscalerContext
+        {
+            public Vector2Int createdForDisplayResolution { get; }
+            public int lastUsedFrame { get; set; }
+
+            public Fsr3FrameworkContext(Vector2Int displayResolution)
+            {
+                createdForDisplayResolution = new Vector2Int(
+                    Mathf.Max(1, displayResolution.x),
+                    Mathf.Max(1, displayResolution.y));
+            }
+
+            public bool IsValidForOptions(UpscalerOptions options) => true;
+
+            public void Cleanup(CommandBuffer cmd)
+            {
+                // FSR3 resources are owned and released by TsukuyomiFsr3Upscaler.
+            }
+        }
+#endif
 
         private sealed class ResolutionContext
         {

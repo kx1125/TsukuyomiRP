@@ -24,3 +24,6 @@
 Samples~/**/*.png filter=lfs diff=lfs merge=lfs -text
 Samples~/**/*.fbx filter=lfs diff=lfs merge=lfs -text
 Samples~/**/*.bytes filter=lfs diff=lfs merge=lfs -text
+
+# Native upscaling runtime dependencies.
+Plugins/**/*.dll filter=lfs diff=lfs merge=lfs -text

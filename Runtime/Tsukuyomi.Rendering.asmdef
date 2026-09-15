@@ -1,7 +1,7 @@
 {
     "name": "Tsukuyomi.Rendering",
     "rootNamespace": "",
-    "references": [
+    "references": ["UnityRhi.Runtime",
         "Unity.RenderPipelines.Core.Runtime",
         "Unity.RenderPipelines.Universal.Runtime"
     ],

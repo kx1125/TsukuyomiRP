@@ -51,3 +51,5 @@ MonoBehaviour:
   defaultWhiteTexture: {fileID: 0}
   defaultBlackTexture: {fileID: 0}
   defaultNormalTexture: {fileID: 0}
+  dlssPrepareInputsShader: {fileID: 4800000, guid: 3a8c5e1d9b7f4062a4e0c6d8f1b24973, type: 3}
+  dlssNrPrepareInputsShader: {fileID: 4800000, guid: fa83229e14a546d882f6994fe630c564, type: 3}

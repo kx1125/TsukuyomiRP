@@ -1,0 +1,67 @@
+﻿[
+    {
+        "Path":  "Plugins/x86_64/D3D12HeapHook.dll",
+        "Bytes":  30208,
+        "SHA256":  "7E9A2862125BAEC53A4254801B50EF1BAEAF1DCCCE4D3CFA1E23A71207251328"
+    },
+    {
+        "Path":  "Plugins/x86_64/dxcompiler.dll",
+        "Bytes":  17951808,
+        "SHA256":  "B86A738ECE4C05DBE2D9BBB29668A2CCB28A0740773C9B027CDC61E8D07B4D75"
+    },
+    {
+        "Path":  "Plugins/x86_64/dxil.dll",
+        "Bytes":  1503304,
+        "SHA256":  "058F2F52A680C38B223A5615B7DF969DEF21F77E577562E5099D971DEDE992DE"
+    },
+    {
+        "Path":  "Plugins/x86_64/NRD.dll",
+        "Bytes":  2860544,
+        "SHA256":  "4FA477EA5FAD434018EFFFCF75B02C68C3FCD561BBE3975B7085CF4D3417F82D"
+    },
+    {
+        "Path":  "Plugins/x86_64/NRI.dll",
+        "Bytes":  397312,
+        "SHA256":  "FD41BF7507B304EC891446614AD287BD93D5F83EBF43A17C068D8181D1033E7E"
+    },
+    {
+        "Path":  "Plugins/x86_64/NRIPlugin.dll",
+        "Bytes":  92672,
+        "SHA256":  "0956DB2B39BE9F402BC363BD119B65992211242E2C123F882EFEC52A5E22CAD6"
+    },
+    {
+        "Path":  "Plugins/x86_64/nvngx_dlss.dll",
+        "Bytes":  54779504,
+        "SHA256":  "8707E53B26C68C606B98BF31C223485FF30D310A261B1A36D48B2EAABC1507EC"
+    },
+    {
+        "Path":  "Plugins/x86_64/nvngx_dlssd.dll",
+        "Bytes":  28596848,
+        "SHA256":  "E1D1B8D8D07E7210B5FEAFC42F118FE3BF0144B9E7F2768E44C6F652FAA6D7B8"
+    },
+    {
+        "Path":  "Plugins/x86_64/nvngx_dlssg.dll",
+        "Bytes":  7518320,
+        "SHA256":  "DDF098C04C22A058893A05F442D8836439603280A27BCF254B9B218EE640A126"
+    },
+    {
+        "Path":  "Plugins/x86_64/nvngx_dlssnr.dll",
+        "Bytes":  165840496,
+        "SHA256":  "8270B350CD82DE5CE89806872CDD6B6A9249B80836B91BBEB3573470744CC206"
+    },
+    {
+        "Path":  "Plugins/x86_64/UnityRHI.dll",
+        "Bytes":  532480,
+        "SHA256":  "7D1A96856F922D7F882640A7B07BCC704D0CF0A97EC6A2F6FF53EF78E2C05F07"
+    },
+    {
+        "Path":  "Plugins/x86_64/D3D12/D3D12Core.dll",
+        "Bytes":  5015624,
+        "SHA256":  "021B47FF5A0C33F03D84C51B1CE730C717798D3190658A27DA92C637A1FE93B5"
+    },
+    {
+        "Path":  "Plugins/x86_64/D3D12/d3d12SDKLayers.dll",
+        "Bytes":  4959776,
+        "SHA256":  "213EE0105B64314A8BC45C28E935F72D8371DC9DC2B6B5731C8837F92B460E00"
+    }
+]

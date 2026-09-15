@@ -27,16 +27,16 @@ namespace Tsukuyomi.Rendering
     {
         public static bool IsEnabled(UniversalCameraData cameraData, bool requireManual = false)
         {
-            TsukuyomiFsr3Settings settings = TsukuyomiRenderPipelineProjectSettings.Current.Fsr3Settings;
+            TsukuyomiFsr3Settings settings = TsukuyomiUpscaling.ActiveFsr3Settings;
             if (settings == null || !settings.Enabled || settings.ReactiveMaskMode == TsukuyomiFsr3ReactiveMaskMode.Disabled)
                 return false;
-            if (UniversalRenderPipeline.asset == null || UniversalRenderPipeline.asset.upscalerName != TsukuyomiFsr3Upscaler.UpscalerName)
+            if (TsukuyomiUpscaling.Active == null || TsukuyomiUpscaling.Active.ActualBackend != UpscalerBackend.FSR3)
                 return false;
             if (requireManual && settings.ReactiveMaskMode != TsukuyomiFsr3ReactiveMaskMode.AutoAndManual)
                 return false;
             if (cameraData == null || cameraData.camera == null || cameraData.cameraType != CameraType.Game)
                 return false;
-            return !cameraData.isPreviewCamera && !cameraData.xr.enabled && cameraData.renderType != CameraRenderType.Overlay;
+            return TsukuyomiUpscaling.IsSupportedCamera(cameraData.camera, out _);
         }
     }
 

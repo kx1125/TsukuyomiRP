@@ -127,6 +127,10 @@ namespace Tsukuyomi.Rendering
         public Texture2D DefaultBlackTexture => defaultBlackTexture;
         public Texture2D DefaultNormalTexture => defaultNormalTexture;
         public TsukuyomiFsr3Shaders Fsr3Shaders => fsr3Shaders;
+        [SerializeField] private Shader dlssPrepareInputsShader;
+        [SerializeField] private Shader dlssNrPrepareInputsShader;
+        public Shader DlssPrepareInputsShader => dlssPrepareInputsShader;
+        public Shader DlssNrPrepareInputsShader => dlssNrPrepareInputsShader;
 
         public bool HasPcssResources => screenSpacePcssShadowsShader != null || screenSpacePcssShadowsMaterial != null;
         public bool HasContactShadowResources => contactShadowsComputeShader != null;

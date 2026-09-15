@@ -26,8 +26,10 @@ namespace Tsukuyomi.Rendering
         private readonly Dictionary<ulong, ResolutionContext> _resolutionContexts = new();
         private readonly HashSet<ulong> _loggedTaaConflictCameras = new();
 
-        public TsukuyomiFsr3Upscaler()
+        private readonly TsukuyomiFsr3Settings _settings;
+        public TsukuyomiFsr3Upscaler(TsukuyomiFsr3Settings settings)
         {
+            _settings = settings;
             Instances.Add(this);
         }
 
@@ -78,7 +80,7 @@ namespace Tsukuyomi.Rendering
             if (!TryGetValidResources(out TsukuyomiRenderPipelineResources resources))
                 return;
 
-            TsukuyomiFsr3Settings settings = TsukuyomiRenderPipelineProjectSettings.Current.Fsr3Settings;
+            TsukuyomiFsr3Settings settings = _settings;
             Fsr3Upscaler.GetRenderResolutionFromQualityMode(
                 out int renderWidth,
                 out int renderHeight,
@@ -118,14 +120,14 @@ namespace Tsukuyomi.Rendering
                 io.postUpscaleResolution,
                 io.preUpscaleResolution,
                 isHdr,
-                TsukuyomiRenderPipelineProjectSettings.Current.Fsr3Settings.EnableAutoExposure,
-                TsukuyomiRenderPipelineProjectSettings.Current.Fsr3Settings.QualityMode,
+                _settings.EnableAutoExposure,
+                _settings.QualityMode,
                 resources.Fsr3Shaders);
 
             bool resetAccumulation = contextRecreated || io.resetHistory || cameraContext.LastFrame != io.frameIndex - 1;
             cameraContext.LastFrame = io.frameIndex;
             Fsr3UpscalerContext fsrContext = cameraContext.Context;
-            TsukuyomiFsr3Settings settings = TsukuyomiRenderPipelineProjectSettings.Current.Fsr3Settings;
+            TsukuyomiFsr3Settings settings = _settings;
             Vector2 jitterOffset = CalculateJitter(io.frameIndex, io.preUpscaleResolution, io.postUpscaleResolution);
             Vector2Int renderSize = io.preUpscaleResolution;
             Vector2Int displaySize = io.postUpscaleResolution;
@@ -162,6 +164,10 @@ namespace Tsukuyomi.Rendering
                 passData.CompositionMask = compositionMask;
                 passData.Output = output;
                 passData.JitterOffset = jitterOffset;
+                float motionSign = io.motionVectorDirection == UpscalingIO.MotionVectorDirection.PreviousFrameToCurrentFrame ? -1f : 1f;
+                passData.MotionVectorScale = motionSign * (io.motionVectorDomain == UpscalingIO.MotionVectorDomain.NDC
+                    ? (Vector2)io.motionVectorTextureSize : Vector2.one);
+                passData.PreExposure = Mathf.Max(0.0001f, io.preExposureValue);
                 passData.RenderSize = renderSize;
                 passData.DisplaySize = displaySize;
                 passData.ResetAccumulation = resetAccumulation;
@@ -198,13 +204,13 @@ namespace Tsukuyomi.Rendering
                             : ResourceView.Unassigned,
                         Output = new ResourceView(data.Output, RenderTextureSubElement.Color),
                         JitterOffset = data.JitterOffset,
-                        MotionVectorScale = new Vector2(-data.RenderSize.x, -data.RenderSize.y),
+                        MotionVectorScale = data.MotionVectorScale,
                         RenderSize = data.RenderSize,
                         UpscaleSize = data.DisplaySize,
                         EnableSharpening = data.EnableSharpening,
                         Sharpness = data.Sharpness,
                         FrameTimeDelta = data.FrameTimeDelta,
-                        PreExposure = 1.0f,
+                        PreExposure = data.PreExposure,
                         Reset = data.ResetAccumulation,
                         CameraNear = data.CameraNear,
                         CameraFar = data.CameraFar,
@@ -232,18 +238,21 @@ namespace Tsukuyomi.Rendering
             io.cameraColor = output;
         }
 
+        public void ResetHistory() { foreach (var context in _cameraContexts.Values) context.LastFrame = -1; }
+        public void Dispose() { DestroyAllContexts(); Instances.Remove(this); }
+
         public static void DestroyAllInstances()
         {
             for (int i = 0; i < Instances.Count; i++)
                 Instances[i]?.DestroyAllContexts();
         }
 
-        private static bool TryGetValidResources(out TsukuyomiRenderPipelineResources resources)
+        private bool TryGetValidResources(out TsukuyomiRenderPipelineResources resources)
         {
             if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out resources))
                 return false;
 
-            TsukuyomiFsr3Settings settings = TsukuyomiRenderPipelineProjectSettings.Current.Fsr3Settings;
+            TsukuyomiFsr3Settings settings = _settings;
             return settings != null &&
                    settings.Enabled &&
                    resources.Fsr3Shaders != null &&
@@ -331,7 +340,7 @@ namespace Tsukuyomi.Rendering
 
         private ResolutionContext GetCurrentResolutionContext()
         {
-            ulong cameraId = TsukuyomiFsr3UpscalerBootstrap.CurrentCameraId;
+            ulong cameraId = TsukuyomiUpscaling.CurrentCameraId;
             if (cameraId == 0UL)
                 cameraId = ulong.MaxValue;
 
@@ -385,7 +394,8 @@ namespace Tsukuyomi.Rendering
             if (cameraContext.Context == null)
                 return;
 
-            cameraContext.Context.Destroy();
+            var old = cameraContext.Context;
+            TsukuyomiUpscaling.RetireResources(old.Destroy);
             cameraContext.Context = null;
         }
 
@@ -455,6 +465,8 @@ namespace Tsukuyomi.Rendering
             public TextureHandle CompositionMask;
             public TextureHandle Output;
             public Vector2 JitterOffset;
+            public Vector2 MotionVectorScale;
+            public float PreExposure;
             public Vector2Int RenderSize;
             public Vector2Int DisplaySize;
             public bool ResetAccumulation;
@@ -474,173 +486,5 @@ namespace Tsukuyomi.Rendering
         }
     }
 
-#if UNITY_EDITOR
-    [InitializeOnLoad]
-#endif
-    internal static class TsukuyomiFsr3UpscalerBootstrap
-    {
-        private const string FallbackUpscalerName = "Bilinear";
-        private static readonly HashSet<ulong> LoggedTaaConflictCameras = new();
-        private static readonly HashSet<ulong> LoggedCameraStackCameras = new();
-        private static string s_contextPreviousUpscalerName;
-        private static bool s_contextOverrideActive;
-        private static bool s_initialized;
-
-        public static ulong CurrentCameraId { get; private set; }
-
-#if UNITY_EDITOR
-        static TsukuyomiFsr3UpscalerBootstrap()
-        {
-            Initialize();
-        }
-#endif
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void RuntimeInitialize()
-        {
-            Initialize();
-        }
-
-        private static void Initialize()
-        {
-            if (s_initialized)
-                return;
-
-            UpscalerRegistry.Register<TsukuyomiFsr3Upscaler>(TsukuyomiFsr3Upscaler.UpscalerName);
-            RenderPipelineManager.beginContextRendering -= OnBeginContextRendering;
-            RenderPipelineManager.beginContextRendering += OnBeginContextRendering;
-            RenderPipelineManager.endContextRendering -= OnEndContextRendering;
-            RenderPipelineManager.endContextRendering += OnEndContextRendering;
-            RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
-            RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
-            RenderPipelineManager.endCameraRendering -= OnEndCameraRendering;
-            RenderPipelineManager.endCameraRendering += OnEndCameraRendering;
-#if UNITY_EDITOR
-            AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
-            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
-#endif
-            s_initialized = true;
-        }
-
-        private static void OnBeginContextRendering(ScriptableRenderContext context, List<Camera> cameras)
-        {
-            UniversalRenderPipelineAsset asset = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
-            if (asset == null)
-            {
-                TsukuyomiFsr3Upscaler.DestroyAllInstances();
-                return;
-            }
-
-            if (ShouldUseFsr3(cameras))
-            {
-                s_contextPreviousUpscalerName = asset.upscalerName;
-                s_contextOverrideActive = true;
-                asset.upscalerName = TsukuyomiFsr3Upscaler.UpscalerName;
-            }
-            else
-            {
-                s_contextOverrideActive = false;
-                s_contextPreviousUpscalerName = null;
-                TsukuyomiFsr3Upscaler.DestroyAllInstances();
-            }
-        }
-
-        private static void OnEndContextRendering(ScriptableRenderContext context, List<Camera> cameras)
-        {
-            UniversalRenderPipelineAsset asset = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
-            if (asset != null && s_contextOverrideActive)
-            {
-                asset.upscalerName = string.IsNullOrEmpty(s_contextPreviousUpscalerName)
-                    ? FallbackUpscalerName
-                    : s_contextPreviousUpscalerName;
-            }
-
-            s_contextOverrideActive = false;
-            s_contextPreviousUpscalerName = null;
-            CurrentCameraId = 0UL;
-        }
-
-        private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
-        {
-            CurrentCameraId = camera != null ? EntityId.ToULong(camera.GetEntityId()) : 0UL;
-        }
-
-        private static void OnEndCameraRendering(ScriptableRenderContext context, Camera camera)
-        {
-            CurrentCameraId = 0UL;
-        }
-
-#if UNITY_EDITOR
-        private static void OnBeforeAssemblyReload()
-        {
-            TsukuyomiFsr3Upscaler.DestroyAllInstances();
-        }
-#endif
-
-        private static bool ShouldUseFsr3(List<Camera> cameras)
-        {
-            TsukuyomiFsr3Settings settings = TsukuyomiRenderPipelineProjectSettings.Current.Fsr3Settings;
-            if (settings == null ||
-                !settings.Enabled ||
-                !TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources) ||
-                resources.Fsr3Shaders == null ||
-                !resources.Fsr3Shaders.IsValid ||
-                !SystemInfo.supportsComputeShaders)
-            {
-                return false;
-            }
-
-            if (cameras == null)
-                return true;
-
-            bool hasSupportedGameCamera = false;
-            for (int i = 0; i < cameras.Count; i++)
-            {
-                Camera camera = cameras[i];
-                if (camera == null || camera.cameraType == CameraType.Preview)
-                    continue;
-
-                if (!camera.TryGetComponent(out UniversalAdditionalCameraData additionalCameraData))
-                {
-                    if (camera.cameraType == CameraType.Game)
-                        hasSupportedGameCamera = true;
-
-                    continue;
-                }
-
-                ulong cameraId = EntityId.ToULong(camera.GetEntityId());
-                if (additionalCameraData.antialiasing == AntialiasingMode.TemporalAntiAliasing)
-                {
-                    if (LoggedTaaConflictCameras.Add(cameraId))
-                    {
-                        Debug.LogError($"Tsukuyomi FSR3 is enabled on camera '{camera.name}', but Unity Temporal Anti-Aliasing is also enabled. Disable TAA in the camera's Universal Additional Camera Data before using Tsukuyomi FSR3.", camera);
-                    }
-
-                    return false;
-                }
-
-                LoggedTaaConflictCameras.Remove(cameraId);
-
-                if (additionalCameraData.cameraStack != null && additionalCameraData.cameraStack.Count > 0)
-                {
-                    if (LoggedCameraStackCameras.Add(cameraId))
-                    {
-                        Debug.LogWarning($"Tsukuyomi FSR3 is skipped because camera '{camera.name}' uses a camera stack, which is not supported by the current FSR3 integration.", camera);
-                    }
-
-                    return false;
-                }
-
-                LoggedCameraStackCameras.Remove(cameraId);
-
-                if (camera.cameraType == CameraType.Game && additionalCameraData.renderType == CameraRenderType.Base)
-                    hasSupportedGameCamera = true;
-            }
-
-            // URP's IUpscaler path does not reliably execute for Scene View at 100% render scale.
-            // Keep this integration runtime/GameView-only until a dedicated editor preview path exists.
-            return hasSupportedGameCamera;
-        }
-    }
 }
 #endif

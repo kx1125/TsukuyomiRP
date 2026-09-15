@@ -18,6 +18,7 @@ namespace Tsukuyomi.Rendering
         private bool _originalMainLightCustomShadowLayers;
         private uint _originalMainLightShadowRenderingLayers;
 
+        private UnityRhi.Dlss.Urp.DlssNrRenderFeature _neuralRendering;
         private PassRegistry _registry;
         private PassRegistry _contactShadowRegistry;
         private PassRegistry _contactShadowDenoiseRegistry;
@@ -81,6 +82,11 @@ namespace Tsukuyomi.Rendering
 
         public override void Create()
         {
+            ReleaseNeuralRendering();
+            _neuralRendering = CreateInstance<UnityRhi.Dlss.Urp.DlssNrRenderFeature>();
+            _neuralRendering.hideFlags = HideFlags.HideAndDontSave;
+            _neuralRendering.ManagedByTsukuyomi = true;
+            _neuralRendering.Create();
             _registry = new PassRegistry();
             _contactShadowRegistry = new PassRegistry();
             _contactShadowDenoiseRegistry = new PassRegistry();
@@ -222,6 +228,7 @@ namespace Tsukuyomi.Rendering
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            _neuralRendering?.AddRenderPasses(renderer, ref renderingData);
             _registry.Synchronize(Profile != null ? Profile.Passes : null);
             _resourceHub.ReleaseDestroyedCameras();
             Camera camera = renderingData.cameraData.camera;
@@ -462,8 +469,17 @@ namespace Tsukuyomi.Rendering
             _hasMainLightShadowLayerOverride = false;
         }
 
+        private void ReleaseNeuralRendering()
+        {
+            if (!_neuralRendering) return;
+            var old = _neuralRendering;
+            _neuralRendering = null;
+            TsukuyomiUpscaling.RetireResources(() => { old.Dispose(); CoreUtils.Destroy(old); });
+        }
+
         protected override void Dispose(bool disposing)
         {
+            ReleaseNeuralRendering();
             RestoreMainLightShadowLayerOverride();
             TsukuyomiPerObjectShadowRenderer.RestoreRenderingLayersForAll();
             _resourceHub?.Dispose();

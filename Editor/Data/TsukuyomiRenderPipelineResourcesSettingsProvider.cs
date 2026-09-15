@@ -1,4 +1,4 @@
-﻿using UnityEditor;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -37,7 +37,7 @@ namespace Tsukuyomi.Rendering.Editor
         public override void OnGUI(string searchContext)
         {
             EditorGUILayout.Space();
-            DrawFsr3Settings();
+            TsukuyomiUpscalingEditor.DrawSettings();
 
             EditorGUILayout.Space(6.0f);
             EditorGUILayout.LabelField("Default Render Resources", EditorStyles.boldLabel);

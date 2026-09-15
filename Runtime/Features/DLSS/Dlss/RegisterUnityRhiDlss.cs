@@ -1,0 +1,1 @@
+// Registration is owned by TsukuyomiUpscaling; retained path/GUID for migration.

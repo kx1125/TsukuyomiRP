@@ -1,0 +1,17 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 94d46f30dcc557d99a26392d295ed2c0, type: 3}
+  m_Name: OpenPBRResources
+  m_EditorClassIdentifier:
+  dfg: {fileID: 4900000, guid: 7471358b6f685443b889638265d7b646, type: 3}
+  dielectric: {fileID: 4900000, guid: 43f501e358fb53788be93aeceaac6288, type: 3}
+  fuzz: {fileID: 4900000, guid: 1d4980e2cbd053109394dfe67449190b, type: 3}

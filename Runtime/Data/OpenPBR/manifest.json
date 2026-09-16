@@ -1,0 +1,20 @@
+{
+  "referenceCommit": "c91aad1d1ce1693e803f039d7c92c2965c4eb013",
+  "format": "little-endian float16",
+  "dfgSamples": 16384,
+  "dfgVisibility": "separable Smith GGX",
+  "tables": {
+    "DFG": {
+      "bytes": 32768,
+      "sha256": "13a726dfb1ec2fe0dde69df8666f54461b26b4029247109226c66c74662a89d2"
+    },
+    "Dielectric": {
+      "bytes": 65536,
+      "sha256": "25e870f1b4624065e08d4930bfa61ccd073666bce5502dbbb025131d04e0f6cb"
+    },
+    "Fuzz": {
+      "bytes": 8192,
+      "sha256": "a3071ee0b43d68c1c49d2e1a8e8eabfbb2853ffbddb5f5f6c7040e43237aa251"
+    }
+  }
+}

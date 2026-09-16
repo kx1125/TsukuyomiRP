@@ -5,6 +5,10 @@ namespace Tsukuyomi.Rendering
     [CreateAssetMenu(menuName = "TsukuyomiRpP/Render Pipeline Resources", fileName = "TsukuyomiRenderPipelineResources")]
     public sealed class TsukuyomiRenderPipelineResources : ScriptableObject
     {
+        [Header("OpenPBR")]
+        [SerializeField] private TsukuyomiOpenPBRResources openPBRResources;
+        public TsukuyomiOpenPBRResources OpenPBRResources => openPBRResources;
+
         [Header("PCSS Shadow")]
         [SerializeField]
         private Shader screenSpacePcssShadowsShader;

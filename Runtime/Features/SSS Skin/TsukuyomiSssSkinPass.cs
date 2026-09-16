@@ -242,6 +242,7 @@ namespace Tsukuyomi.Rendering
             context.Builder.UseAllGlobalTextures(true);
             context.Builder.AllowGlobalStateModification(true);
             context.Builder.SetGlobalTextureAfterPass(skinMask, SkinMaskTextureId);
+            context.Builder.SetGlobalTextureAfterPass(depthTexture, TsukuyomiSpecularPBRSSSState.DepthId);
             context.Builder.SetGlobalTextureAfterPass(skinLighting, SkinLightingTextureId);
             context.Builder.SetGlobalTextureAfterPass(executeBlur ? skinLightingBlurred : skinLighting, SkinLightingBlurredTextureId);
             context.Builder.SetGlobalTextureAfterPass(executeBlur ? skinLightingBlurred : skinLighting, LightingTexBlurredId);
@@ -295,10 +296,16 @@ namespace Tsukuyomi.Rendering
                 {
                     graphContext.cmd.SetRenderTarget(skinLighting, lightingDepthAttachment);
                     command.SetViewport(lightingViewport);
+                    command.SetGlobalVector(TsukuyomiSpecularPBRSSSState.LightingScaleId,
+                        new Vector4((float)baseDescriptor.width / lightingDescriptor.width,
+                            (float)baseDescriptor.height / lightingDescriptor.height, 0, 0));
                     graphContext.cmd.ClearRenderTarget(false, true, Color.clear);
                     graphContext.cmd.DrawRendererList(lightingRendererList);
                     graphContext.cmd.SetGlobalTexture(SkinLightingTextureId, skinLighting);
                 }
+
+                // Only the new material consumes this flag; legacy SSS behavior is unchanged.
+                graphContext.cmd.SetGlobalFloat(TsukuyomiSpecularPBRSSSState.ReadyId, 1.0f);
 
                 if (passSettings.Iterations <= 0 || passSettings.Radius <= 0.0f)
                 {

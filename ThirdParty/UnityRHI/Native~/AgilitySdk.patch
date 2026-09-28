@@ -1,0 +1,37 @@
+diff --git a/RenderingPlugin/Source/d3d12/AgilitySdk.cpp b/RenderingPlugin/Source/d3d12/AgilitySdk.cpp
+index 8244052..ad5ba75 100644
+--- a/RenderingPlugin/Source/d3d12/AgilitySdk.cpp
++++ b/RenderingPlugin/Source/d3d12/AgilitySdk.cpp
+@@ -185,6 +185,16 @@ void EnableAgilitySdkIfHostDoesNot()
+         return;
+     g_attempted = true;
+ 
++    // Honor the host-runtime setting even when Unity has already created its device.
++    char disabled[8] = {};
++    if (GetEnvironmentVariableA("UNITYRHI_AGILITY_SDK", disabled, sizeof(disabled)) > 0 &&
++        disabled[0] == '0')
++    {
++        LogInfo("[UnityRHI] Agility SDK: disabled by UNITYRHI_AGILITY_SDK=0; "
++                "leaving the host's own selection in place.");
++        return;
++    }
++
+     if (GetModuleHandleW(L"D3D12Core.dll") != nullptr)
+     {
+         // A core runtime is already resolved; neither global configuration path
+@@ -195,15 +205,6 @@ void EnableAgilitySdkIfHostDoesNot()
+         return;
+     }
+ 
+-    char disabled[8] = {};
+-    if (GetEnvironmentVariableA("UNITYRHI_AGILITY_SDK", disabled, sizeof(disabled)) > 0 &&
+-        disabled[0] == '0')
+-    {
+-        LogInfo("[UnityRHI] Agility SDK: disabled by UNITYRHI_AGILITY_SDK=0; "
+-                "leaving the host's own selection in place.");
+-        return;
+-    }
+-
+     HMODULE d3d12 = LoadLibraryW(L"d3d12.dll");
+     if (!d3d12)
+     {

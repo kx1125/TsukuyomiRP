@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/Kuan-Mi/UnityDLSSNR.git",
+  "revision": "b65156c2f6f5e53d814b40777fb440cbe1c19baa",
+  "tag": "v1.0.2",
+  "patches": [
+    "AgilitySdk.patch"
+  ],
+  "cmakeVersion": "3.31.6",
+  "generator": "Visual Studio 17 2022",
+  "architecture": "x64",
+  "toolsetVersion": "14.38.33130",
+  "windowsSdkVersion": "10.0.22621.0",
+  "sourceDirectory": "RenderingPlugin",
+  "configuration": "Release",
+  "target": "UnityRHINative",
+  "output": "_Bin/Release/UnityRHI.dll"
+}

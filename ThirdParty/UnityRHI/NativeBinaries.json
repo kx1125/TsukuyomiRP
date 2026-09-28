@@ -1,4 +1,4 @@
-﻿[
+[
     {
         "Path":  "Plugins/x86_64/D3D12HeapHook.dll",
         "Bytes":  30208,
@@ -51,8 +51,8 @@
     },
     {
         "Path":  "Plugins/x86_64/UnityRHI.dll",
-        "Bytes":  532480,
-        "SHA256":  "7D1A96856F922D7F882640A7B07BCC704D0CF0A97EC6A2F6FF53EF78E2C05F07"
+        "Bytes":  480256,
+        "SHA256":  "275738548DDDED0D91801F7C23FE8FA35D07B798EFFA79D1DE3AA8D8A0E9E7C2"
     },
     {
         "Path":  "Plugins/x86_64/D3D12/D3D12Core.dll",

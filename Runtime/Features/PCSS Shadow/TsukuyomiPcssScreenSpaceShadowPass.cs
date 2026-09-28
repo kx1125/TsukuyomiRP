@@ -52,8 +52,14 @@ namespace Tsukuyomi.Rendering
         private bool _contactShadowsEnabled;
         private bool _contactShadowDenoiseEnabled;
         private bool _perObjectShadowsEnabled;
-        private readonly ProfilingSampler _pcssPenumbraSampler = new("PCSS Penumbra");
-        private readonly ProfilingSampler _screenSpaceShadowSampler = new("Screen Space Shadows");
+        private static readonly ProfilingSampler _pcssPenumbraSampler = new("PCSS Penumbra");
+        private static readonly ProfilingSampler _screenSpaceShadowSampler = new("Screen Space Shadows");
+
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(depth);
+            slots.Add(mainShadowMap);
+        }
 
         public override string Name => "Screen Space Shadows";
 
@@ -166,8 +172,28 @@ namespace Tsukuyomi.Rendering
             _ownsScreenSpaceShadowsMaterial = false;
         }
 
+        private sealed class RenderData
+        {
+            public bool UseMainLightShadow;
+            public TsukuyomiPcssSettings Settings;
+            public TextureHandle PenumbraMask;
+            public TextureHandle PenumbraBlurTemp;
+            public TextureHandle ScreenShadow;
+            public TextureHandle BaseScreenShadow;
+            public TextureHandle CameraDepthTexture;
+            public TextureHandle ContactShadowMap;
+            public Material Material;
+            public Material ScreenSpaceShadowsMaterial;
+            public UniversalCameraData CameraData;
+            public bool EnablePcss;
+            public bool UseOfficialScreenSpaceShadows;
+            public bool EnableContactShadows;
+            public bool EnablePerObjectShadows;
+        }
+
         public override void Record(in UnsafePassContext context)
         {
+            var passData = context.GetOrCreateData<RenderData>();
             if (!s_KeywordsInitialized || _material == null || _profile == null || (!_settings.Enabled && !_contactShadowsEnabled && !_perObjectShadowsEnabled))
                 return;
 
@@ -208,16 +234,14 @@ namespace Tsukuyomi.Rendering
                     contactDesc);
                 contactShadowMap = context.GetTexture(contactSlot);
             }
-            Material material = _material;
+            passData.Material = _material;
             Material screenSpaceShadowsMaterial = _screenSpaceShadowsMaterial;
-            UniversalCameraData cameraData = context.CameraData;
+            passData.CameraData = context.CameraData;
             bool enablePcss = _settings.Enabled;
-            bool useOfficialScreenSpaceShadows = !enablePcss && useMainLightShadow && screenSpaceShadowsMaterial != null && baseScreenShadow.IsValid();
-            bool enableContactShadows = _contactShadowsEnabled && contactShadowMap.IsValid();
+            passData.UseOfficialScreenSpaceShadows = !enablePcss && useMainLightShadow && screenSpaceShadowsMaterial != null && baseScreenShadow.IsValid();
+            passData.EnableContactShadows = _contactShadowsEnabled && contactShadowMap.IsValid();
             TextureHandle perObjectShadowMap = context.FrameData.GetOrCreate<TsukuyomiPerObjectShadowResources>().Shadowmap;
             bool enablePerObjectShadows = _perObjectShadowsEnabled && perObjectShadowMap.IsValid();
-            ProfilingSampler pcssPenumbraSampler = _pcssPenumbraSampler;
-            ProfilingSampler screenSpaceShadowSampler = _screenSpaceShadowSampler;
 
             context.Builder.UseTexture(screenShadow, AccessFlags.WriteAll);
             if (baseScreenShadow.IsValid())
@@ -236,68 +260,80 @@ namespace Tsukuyomi.Rendering
             context.Builder.SetGlobalTextureAfterPass(penumbraMask, PenumbraMaskTexId);
             context.Builder.SetGlobalTextureAfterPass(screenShadow, ScreenSpaceShadowmapTextureId);
 
-            context.SetRenderFunc((data, graphContext) =>
+            passData.UseMainLightShadow = useMainLightShadow;
+            passData.Settings = settings;
+            passData.PenumbraMask = penumbraMask;
+            passData.PenumbraBlurTemp = penumbraBlurTemp;
+            passData.ScreenShadow = screenShadow;
+            passData.BaseScreenShadow = baseScreenShadow;
+            passData.CameraDepthTexture = cameraDepthTexture;
+            passData.ContactShadowMap = contactShadowMap;
+            passData.ScreenSpaceShadowsMaterial = screenSpaceShadowsMaterial;
+            passData.EnablePcss = enablePcss;
+            passData.EnablePerObjectShadows = enablePerObjectShadows;
+
+            context.SetRenderFunc(passData, static (state, graphContext) =>
             {
-                if (enablePcss)
+                if (state.EnablePcss)
                 {
-                    using (new ProfilingScope(graphContext.cmd, pcssPenumbraSampler))
+                    using (new ProfilingScope(graphContext.cmd, _pcssPenumbraSampler))
                     {
-                        SetCommonGlobals(graphContext, settings, cameraDepthTexture, cameraData);
+                        SetCommonGlobals(graphContext, state.Settings, state.CameraDepthTexture, state.CameraData);
 
-                        graphContext.cmd.SetRenderTarget(penumbraMask, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                        graphContext.cmd.SetViewport(settings.PenumbraMaskViewport);
-                        Blitter.BlitTexture(graphContext.cmd, penumbraMask, Vector2.one, material, PenumbraMaskPass);
+                        graphContext.cmd.SetRenderTarget(state.PenumbraMask, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.PenumbraMaskViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.PenumbraMask, Vector2.one, state.Material, PenumbraMaskPass);
 
-                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, penumbraMask);
-                        graphContext.cmd.SetGlobalVector(PenumbraMaskTexelSizeId, settings.PenumbraMaskTexelSize);
-                        graphContext.cmd.SetRenderTarget(penumbraBlurTemp, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                        graphContext.cmd.SetViewport(settings.PenumbraMaskViewport);
-                        Blitter.BlitTexture(graphContext.cmd, penumbraMask, Vector2.one, material, BlurHorizontalPass);
+                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, state.PenumbraMask);
+                        graphContext.cmd.SetGlobalVector(PenumbraMaskTexelSizeId, state.Settings.PenumbraMaskTexelSize);
+                        graphContext.cmd.SetRenderTarget(state.PenumbraBlurTemp, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.PenumbraMaskViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.PenumbraMask, Vector2.one, state.Material, BlurHorizontalPass);
 
-                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, penumbraBlurTemp);
-                        graphContext.cmd.SetGlobalVector(PenumbraMaskTexelSizeId, settings.PenumbraMaskTexelSize);
-                        graphContext.cmd.SetRenderTarget(penumbraMask, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                        graphContext.cmd.SetViewport(settings.PenumbraMaskViewport);
-                        Blitter.BlitTexture(graphContext.cmd, penumbraBlurTemp, Vector2.one, material, BlurVerticalPass);
+                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, state.PenumbraBlurTemp);
+                        graphContext.cmd.SetGlobalVector(PenumbraMaskTexelSizeId, state.Settings.PenumbraMaskTexelSize);
+                        graphContext.cmd.SetRenderTarget(state.PenumbraMask, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.PenumbraMaskViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.PenumbraBlurTemp, Vector2.one, state.Material, BlurVerticalPass);
 
-                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, penumbraMask);
+                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, state.PenumbraMask);
                     }
                 }
 
-                using (new ProfilingScope(graphContext.cmd, screenSpaceShadowSampler))
+                using (new ProfilingScope(graphContext.cmd, _screenSpaceShadowSampler))
                 {
-                    SetCommonGlobals(graphContext, settings, cameraDepthTexture, cameraData);
-                    graphContext.cmd.SetKeyword(ContactShadowsKeyword, enableContactShadows);
-                    graphContext.cmd.SetGlobalFloat(EnableMainLightShadowId, useMainLightShadow ? 1.0f : 0.0f);
-                    graphContext.cmd.SetGlobalFloat("_TsukuyomiEnablePerObjectShadow", enablePerObjectShadows ? 1.0f : 0.0f);
+                    SetCommonGlobals(graphContext, state.Settings, state.CameraDepthTexture, state.CameraData);
+                    graphContext.cmd.SetKeyword(ContactShadowsKeyword, state.EnableContactShadows);
+                    graphContext.cmd.SetGlobalFloat(EnableMainLightShadowId, state.UseMainLightShadow ? 1.0f : 0.0f);
+                    graphContext.cmd.SetGlobalFloat("_TsukuyomiEnablePerObjectShadow", state.EnablePerObjectShadows ? 1.0f : 0.0f);
 
-                    if (enablePcss)
+                    if (state.EnablePcss)
                     {
                         graphContext.cmd.SetGlobalFloat(EnablePcssId, 1.0f);
-                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, penumbraMask);
-                        if (enableContactShadows)
-                            graphContext.cmd.SetGlobalTexture(ContactShadowMapId, contactShadowMap);
+                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, state.PenumbraMask);
+                        if (state.EnableContactShadows)
+                            graphContext.cmd.SetGlobalTexture(ContactShadowMapId, state.ContactShadowMap);
 
-                        graphContext.cmd.SetRenderTarget(screenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                        graphContext.cmd.SetViewport(settings.ColorAttachmentViewport);
-                        Blitter.BlitTexture(graphContext.cmd, screenShadow, Vector2.one, material, ScreenSpaceShadowPass);
+                        graphContext.cmd.SetRenderTarget(state.ScreenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.ColorAttachmentViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.ScreenShadow, Vector2.one, state.Material, ScreenSpaceShadowPass);
                     }
                     else
                     {
-                        if (useOfficialScreenSpaceShadows)
+                        if (state.UseOfficialScreenSpaceShadows)
                         {
-                            graphContext.cmd.SetRenderTarget(baseScreenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                            graphContext.cmd.SetViewport(settings.ColorAttachmentViewport);
-                            Blitter.BlitTexture(graphContext.cmd, baseScreenShadow, Vector2.one, screenSpaceShadowsMaterial, 0);
-                            graphContext.cmd.SetGlobalTexture(BaseScreenSpaceShadowmapTextureId, baseScreenShadow);
+                            graphContext.cmd.SetRenderTarget(state.BaseScreenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                            graphContext.cmd.SetViewport(state.Settings.ColorAttachmentViewport);
+                            Blitter.BlitTexture(graphContext.cmd, state.BaseScreenShadow, Vector2.one, state.ScreenSpaceShadowsMaterial, 0);
+                            graphContext.cmd.SetGlobalTexture(BaseScreenSpaceShadowmapTextureId, state.BaseScreenShadow);
                         }
 
-                        if (enableContactShadows)
-                            graphContext.cmd.SetGlobalTexture(ContactShadowMapId, contactShadowMap);
+                        if (state.EnableContactShadows)
+                            graphContext.cmd.SetGlobalTexture(ContactShadowMapId, state.ContactShadowMap);
 
-                        graphContext.cmd.SetRenderTarget(screenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                        graphContext.cmd.SetViewport(settings.ColorAttachmentViewport);
-                        Blitter.BlitTexture(graphContext.cmd, screenShadow, Vector2.one, material, ContactShadowCompositePass);
+                        graphContext.cmd.SetRenderTarget(state.ScreenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.ColorAttachmentViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.ScreenShadow, Vector2.one, state.Material, ContactShadowCompositePass);
                     }
 
                     graphContext.cmd.SetKeyword(ContactShadowsKeyword, false);

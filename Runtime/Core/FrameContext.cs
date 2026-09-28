@@ -4,13 +4,13 @@ using UnityEngine.Rendering;
 
 namespace Tsukuyomi.Rendering
 {
-    public class FrameContext
+    public readonly struct FrameContext
     {
-        public ContextContainer URPFrameData { get; private set; }
-        public UniversalCameraData CameraData { get; private set; }
-        public UniversalLightData LightData { get; private set; }
-        public UniversalResourceData ResourceData { get; private set; }
-        public ResourceHub Resources { get; private set; }
+        public ContextContainer URPFrameData { get; }
+        public UniversalCameraData CameraData { get; }
+        public UniversalLightData LightData { get; }
+        public UniversalResourceData ResourceData { get; }
+        public ResourceHub Resources { get; }
         
         public FrameContext(ContextContainer frameData, ResourceHub resources = null)
         {

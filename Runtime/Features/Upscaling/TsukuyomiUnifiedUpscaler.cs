@@ -19,6 +19,7 @@ namespace Tsukuyomi.Rendering
         private int _sourceHash, _snapshotRevision = -1, _dlssFirstDispatch = -1;
         private bool _sourceNr;
         private readonly Dictionary<ulong, CameraHistory> _cameras = new();
+        private readonly List<ulong> _deadCameras = new();
         private sealed class CameraHistory
         {
             internal Camera Camera;
@@ -46,6 +47,10 @@ namespace Tsukuyomi.Rendering
         }
         public override string name => TsukuyomiUpscaling.UpscalerName;
 #if !UNITY_6000_6_OR_NEWER
+        public override UpscalerOptions options => _source;
+        public override bool supportsXR => false;
+#endif
+#if UNITY_6000_6_OR_NEWER
         public override UpscalerOptions options => _source;
         public override bool supportsXR => false;
 #endif
@@ -81,6 +86,7 @@ namespace Tsukuyomi.Rendering
         private void ApplySettings()
         {
             if (!_source) { Deactivate(); return; }
+            PruneDeadCameras();
             if (!_snapshot)
             {
                 _snapshot = ScriptableObject.CreateInstance<TsukuyomiUpscalerOptions>();
@@ -130,6 +136,30 @@ namespace Tsukuyomi.Rendering
             }
             if (_revision != TsukuyomiUpscaling.Revision) { _backend?.ResetHistory(); _revision = TsukuyomiUpscaling.Revision; }
         }
+        private void PruneDeadCameras()
+        {
+            _deadCameras.Clear();
+            foreach (var entry in _cameras)
+                if (!entry.Value.Camera)
+                    _deadCameras.Add(entry.Key);
+            foreach (ulong id in _deadCameras)
+            {
+                _backend?.ReleaseCamera(id);
+                _cameras.Remove(id);
+            }
+            _deadCameras.Clear();
+        }
+
+        private CameraHistory TrackCamera(ulong id, Camera camera)
+        {
+            if (_cameras.TryGetValue(id, out var history) && ReferenceEquals(history.Camera, camera))
+                return history;
+            _backend?.ReleaseCamera(id);
+            history = new CameraHistory { Camera = camera, Frame = -1 };
+            _cameras[id] = history;
+            return history;
+        }
+
         private void Deactivate()
         {
             if (_backend != null) { var old = _backend; _backend = null; TsukuyomiUpscaling.RetireResources(old.Dispose); }
@@ -138,15 +168,18 @@ namespace Tsukuyomi.Rendering
             _cameras.Clear();
         }
 #if UNITY_6000_6_OR_NEWER
-        // Kept as the backend contract; the 6.6 framework adapter returns resolution info.
-        public void NegotiatePreUpscaleResolution(ref Vector2Int renderSize, Vector2Int displaySize)
+        public override void NegotiatePreUpscaleResolution(ref Vector2Int renderSize, Vector2Int displaySize)
 #else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int renderSize, Vector2Int displaySize)
 #endif
         {
             renderSize = displaySize;
             bool supported = TsukuyomiUpscaling.IsSupportedCamera(TsukuyomiUpscaling.CurrentCamera, out var cameraReason);
-            if (supported) _backend?.NegotiatePreUpscaleResolution(ref renderSize, displaySize);
+            if (supported && _backend != null)
+            {
+                TrackCamera(TsukuyomiUpscaling.CurrentCameraId, TsukuyomiUpscaling.CurrentCamera);
+                _backend.NegotiatePreUpscaleResolution(ref renderSize, displaySize);
+            }
             TsukuyomiUpscaling.CurrentUpscaleRatio = (float)displaySize.x / Mathf.Max(1, renderSize.x);
             if (TsukuyomiUpscaling.CurrentCamera && TsukuyomiUpscaling.CurrentCamera.cameraType == CameraType.Game)
                 TsukuyomiUpscaling.SetFrameStatus(_snapshot ? _snapshot.backend : UpscalerBackend.Off,
@@ -171,12 +204,8 @@ namespace Tsukuyomi.Rendering
             {
                 var io = frame.Get<UpscalingIO>();
                 var camera = TsukuyomiUpscaling.CurrentCamera;
-                if (!_cameras.TryGetValue(io.cameraInstanceID, out var history))
-                {
-                    history = new CameraHistory { Camera = camera, Frame = -1 };
-                    _cameras[io.cameraInstanceID] = history;
-                    io.resetHistory = true;
-                }
+                var history = TrackCamera(io.cameraInstanceID, camera);
+                io.resetHistory |= history.Frame < 0;
                 io.resetHistory |= history.Frame != io.frameIndex - 1 ||
                     Vector3.Distance(history.Position, camera.transform.position) > 5f ||
                     Quaternion.Angle(history.Rotation, camera.transform.rotation) > 45f ||

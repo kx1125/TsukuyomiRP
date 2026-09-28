@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace Tsukuyomi.Rendering
 {
-    internal sealed class TsukuyomiScreenSpaceGlobalIlluminationHistory : CameraHistoryItem
+    internal sealed class TsukuyomiScreenSpaceGlobalIlluminationHistory : BufferedTextureHistory
     {
         private int _normalId;
         private int _gi0Id;
@@ -98,43 +98,8 @@ namespace Tsukuyomi.Rendering
             PreviousJitterUv = Vector2.zero;
         }
 
-        private bool EnsureAllocated(
-            int id,
-            ref Hash128 descriptorKey,
-            ref RenderTextureDescriptor descriptor,
-            FilterMode filterMode,
-            string name)
-        {
-            Hash128 newKey = Hash128.Compute(ref descriptor);
-            RTHandle current = GetCurrentFrameRT(id);
-            if (current != null && descriptorKey == newKey)
-                return false;
-
-            if (current != null)
-                ReleaseHistoryFrameRT(id);
-
-            AllocHistoryFrameRT(id, 2, ref descriptor, filterMode, name);
-            descriptorKey = newKey;
-            return true;
-        }
-
         private static RenderTextureDescriptor CreateDescriptor(
-            ref RenderTextureDescriptor cameraDescriptor,
-            int width,
-            int height,
-            GraphicsFormat format)
-        {
-            RenderTextureDescriptor descriptor = cameraDescriptor;
-            descriptor.width = Mathf.Max(1, width);
-            descriptor.height = Mathf.Max(1, height);
-            descriptor.msaaSamples = 1;
-            descriptor.depthStencilFormat = GraphicsFormat.None;
-            descriptor.graphicsFormat = format;
-            descriptor.enableRandomWrite = true;
-            descriptor.useMipMap = false;
-            descriptor.autoGenerateMips = false;
-            descriptor.mipCount = 1;
-            return descriptor;
-        }
+            ref RenderTextureDescriptor cameraDescriptor, int width, int height, GraphicsFormat format)
+            => TextureDescriptors.HistoryColor(cameraDescriptor, width, height, format);
     }
 }

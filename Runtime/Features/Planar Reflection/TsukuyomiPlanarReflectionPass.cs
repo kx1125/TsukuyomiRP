@@ -70,8 +70,25 @@ namespace Tsukuyomi.Rendering
             Shader.SetGlobalInt(EnabledId, 0);
         }
 
+        private sealed class RenderData
+        {
+            public Vector3 CameraPosition;
+            public Matrix4x4 ReflectionView;
+            public Matrix4x4 SkyboxProjection;
+            public Matrix4x4 ReflectionProjection;
+            public Vector3 ReflectedCameraPosition;
+            public RendererListHandle RendererList;
+            public RendererListHandle SkyboxRendererList;
+            public Matrix4x4 CameraView;
+            public Matrix4x4 CameraProjection;
+            public Rect ReflectionViewport;
+            public Rect CameraViewport;
+            public Vector4 TexelSize;
+        }
+
         public override void Record(in RasterPassContext context)
         {
+            var passData = context.GetOrCreateData<RenderData>();
             if (!_configured || !_plane)
                 return;
 
@@ -158,28 +175,36 @@ namespace Tsukuyomi.Rendering
             if (resourceData.additionalShadowsTexture.IsValid())
                 context.Builder.UseTexture(resourceData.additionalShadowsTexture, AccessFlags.Read);
 
-            Matrix4x4 cameraView = context.CameraData.GetViewMatrix();
-            Matrix4x4 cameraProjection = context.CameraData.GetProjectionMatrix();
-            Rect reflectionViewport = new(0.0f, 0.0f, width, height);
-            Rect cameraViewport = new(0.0f, 0.0f, cameraDescriptor.width, cameraDescriptor.height);
-            Vector4 texelSize = new(1.0f / width, 1.0f / height, width, height);
+            passData.CameraView = context.CameraData.GetViewMatrix();
+            passData.CameraProjection = context.CameraData.GetProjectionMatrix();
+            passData.ReflectionViewport = new(0.0f, 0.0f, width, height);
+            passData.CameraViewport = new(0.0f, 0.0f, cameraDescriptor.width, cameraDescriptor.height);
+            passData.TexelSize = new(1.0f / width, 1.0f / height, width, height);
 
-            context.SetRenderFunc((data, graphContext) =>
+            passData.CameraPosition = cameraPosition;
+            passData.ReflectionView = reflectionView;
+            passData.SkyboxProjection = skyboxProjection;
+            passData.ReflectionProjection = reflectionProjection;
+            passData.ReflectedCameraPosition = reflectedCameraPosition;
+            passData.RendererList = rendererList;
+            passData.SkyboxRendererList = skyboxRendererList;
+
+            context.SetRenderFunc(passData, static (state, graphContext) =>
             {
-                graphContext.cmd.SetViewport(reflectionViewport);
+                graphContext.cmd.SetViewport(state.ReflectionViewport);
                 graphContext.cmd.ClearRenderTarget(true, true, Color.clear);
-                graphContext.cmd.SetViewProjectionMatrices(reflectionView, skyboxProjection);
-                graphContext.cmd.SetGlobalVector(WorldSpaceCameraPosId, reflectedCameraPosition);
+                graphContext.cmd.SetViewProjectionMatrices(state.ReflectionView, state.SkyboxProjection);
+                graphContext.cmd.SetGlobalVector(WorldSpaceCameraPosId, state.ReflectedCameraPosition);
                 graphContext.cmd.SetInvertCulling(true);
-                graphContext.cmd.DrawRendererList(skyboxRendererList);
-                graphContext.cmd.SetViewProjectionMatrices(reflectionView, reflectionProjection);
-                graphContext.cmd.DrawRendererList(rendererList);
+                graphContext.cmd.DrawRendererList(state.SkyboxRendererList);
+                graphContext.cmd.SetViewProjectionMatrices(state.ReflectionView, state.ReflectionProjection);
+                graphContext.cmd.DrawRendererList(state.RendererList);
                 graphContext.cmd.SetInvertCulling(false);
-                graphContext.cmd.SetGlobalVector(WorldSpaceCameraPosId, cameraPosition);
-                graphContext.cmd.SetViewProjectionMatrices(cameraView, cameraProjection);
-                graphContext.cmd.SetViewport(cameraViewport);
+                graphContext.cmd.SetGlobalVector(WorldSpaceCameraPosId, state.CameraPosition);
+                graphContext.cmd.SetViewProjectionMatrices(state.CameraView, state.CameraProjection);
+                graphContext.cmd.SetViewport(state.CameraViewport);
 
-                graphContext.cmd.SetGlobalVector(TexelSizeId, texelSize);
+                graphContext.cmd.SetGlobalVector(TexelSizeId, state.TexelSize);
                 graphContext.cmd.SetGlobalInt(EnabledId, 1);
             });
         }
@@ -188,7 +213,7 @@ namespace Tsukuyomi.Rendering
         {
             context.Builder.AllowGlobalStateModification(true);
             context.Builder.AllowPassCulling(false);
-            context.SetRenderFunc((data, graphContext) =>
+            context.SetRenderFunc(static (data, graphContext) =>
             {
                 graphContext.cmd.SetGlobalInt(EnabledId, 0);
             });

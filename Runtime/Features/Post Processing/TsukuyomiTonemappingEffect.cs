@@ -32,19 +32,25 @@ namespace Tsukuyomi.Rendering
             DisableKeywords(material);
         }
 
+        private sealed class RenderData : TsukuyomiPostProcessData
+        {
+            public TsukuyomiTonemappingResolvedSettings Settings;
+
+            public override void SetupUber(UnityEngine.Rendering.RenderGraphModule.UnsafeGraphContext graphContext, Material material)
+            {
+                material.SetVector(ToneMapParams0Id, Settings.Params0);
+                material.SetVector(ToneMapParams1Id, Settings.Params1);
+                string keyword = GetKeyword(Settings.Mode);
+                if (!string.IsNullOrEmpty(keyword))
+                    material.EnableKeyword(keyword);
+            }
+        }
+
         public override void Record(in TsukuyomiPostProcessBuildContext context)
         {
-            TsukuyomiTonemappingResolvedSettings settings = _settings;
-
-            context.AddUberSetup((graphContext, uberMaterial) =>
-            {
-                uberMaterial.SetVector(ToneMapParams0Id, settings.Params0);
-                uberMaterial.SetVector(ToneMapParams1Id, settings.Params1);
-
-                string keyword = GetKeyword(settings.Mode);
-                if (!string.IsNullOrEmpty(keyword))
-                    uberMaterial.EnableKeyword(keyword);
-            });
+            var data = context.GetOrCreateData<RenderData>();
+            data.Settings = _settings;
+            context.AddUberSetup(data);
         }
 
         private static void DisableKeywords(Material material)

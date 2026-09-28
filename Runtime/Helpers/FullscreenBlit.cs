@@ -23,7 +23,8 @@ namespace Tsukuyomi.Rendering
             string destinationName,
             string passName)
         {
-            if (!source.IsValid() || material == null || context.Resources.IsActiveTargetBackBuffer)
+            if (!source.IsValid() || material == null || passIndex < 0 || passIndex >= material.passCount
+                || context.Resources.IsActiveTargetBackBuffer)
                 return source;
 
             // PostPass already owns the open raster builder and its attachments.
@@ -32,6 +33,8 @@ namespace Tsukuyomi.Rendering
             if (!destination.IsValid())
             {
                 destination = CreateDestination(context, source, destinationName);
+                if (!destination.IsValid())
+                    return source;
                 context.Builder.UseTexture(source, AccessFlags.Read);
                 context.Builder.SetRenderAttachment(destination, 0, AccessFlags.WriteAll);
             }
@@ -42,10 +45,7 @@ namespace Tsukuyomi.Rendering
 
             context.PassData.source = source;
             context.PassData.destination = destination;
-            context.PassData.material = material;
-            context.PassData.passIndex = passIndex;
-            context.SetRenderFunc(static (data, graphContext) =>
-                Blitter.BlitTexture(graphContext.cmd, data.source, new Vector4(1, 1, 0, 0), data.material, data.passIndex));
+            context.Blit(material, passIndex);
             PassRecorder.SwapActiveColor(context.Resources, destination);
 
             return destination;

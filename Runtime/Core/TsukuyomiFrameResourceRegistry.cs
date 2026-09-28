@@ -8,6 +8,17 @@ namespace Tsukuyomi.Rendering
 {
     public sealed class TsukuyomiFrameResourceRegistry : ContextItem
     {
+        private FrameResources _frameResources;
+
+        internal FrameResources GetFrameResources(UnityEngine.Rendering.Universal.UniversalResourceData data)
+        {
+            if (_frameResources == null)
+                _frameResources = new FrameResources(data, this);
+            else
+                _frameResources.Refresh(data);
+            return _frameResources;
+        }
+
         private readonly Dictionary<string, TextureEntry> _textures = new();
         private readonly Dictionary<string, BufferEntry> _buffers = new();
 

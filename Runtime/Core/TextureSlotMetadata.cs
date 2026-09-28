@@ -9,7 +9,7 @@ namespace Tsukuyomi.Rendering
         private static readonly Dictionary<Type, MemberInfo[]> s_Members = new();
 
         // Cache reflection metadata, but read current slot values (some depend on feature settings).
-        public static IEnumerable<TextureSlot> Enumerate(RenderPassBase pass)
+        public static void Collect(RenderPassBase pass, List<TextureSlot> slots)
         {
             Type type = pass.GetType();
             if (!s_Members.TryGetValue(type, out MemberInfo[] members))
@@ -32,8 +32,8 @@ namespace Tsukuyomi.Rendering
                 s_Members.Add(type, members);
             }
             foreach (MemberInfo member in members)
-                yield return member is FieldInfo field
-                    ? (TextureSlot)field.GetValue(pass) : (TextureSlot)((PropertyInfo)member).GetValue(pass);
+                slots.Add(member is FieldInfo field
+                    ? (TextureSlot)field.GetValue(pass) : (TextureSlot)((PropertyInfo)member).GetValue(pass));
         }
     }
 }

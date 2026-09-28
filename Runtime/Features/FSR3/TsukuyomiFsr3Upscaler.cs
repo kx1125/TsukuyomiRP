@@ -77,7 +77,7 @@ namespace Tsukuyomi.Rendering
 #endif
 
 #if TSUKUYOMI_UPSCALER_API_6000_6
-        public void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
+        public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
 #else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
 #endif
@@ -195,43 +195,42 @@ namespace Tsukuyomi.Rendering
                     if (data.Context == null)
                         return;
 
-                    Fsr3Upscaler.DispatchDescription dispatchDescription = new()
-                    {
-                        Color = new ResourceView(data.Color, RenderTextureSubElement.Color),
-                        Depth = new ResourceView(data.Depth, RenderTextureSubElement.Depth),
-                        MotionVectors = new ResourceView(data.MotionVectors, RenderTextureSubElement.Color),
-                        Exposure = ResourceView.Unassigned,
-                        Reactive = data.ReactiveMask.IsValid()
+                    var dispatchDescription = data.DispatchDescription;
+                    dispatchDescription.Color = new ResourceView(data.Color, RenderTextureSubElement.Color);
+                    dispatchDescription.Depth = new ResourceView(data.Depth, RenderTextureSubElement.Depth);
+                    dispatchDescription.MotionVectors = new ResourceView(data.MotionVectors, RenderTextureSubElement.Color);
+                    dispatchDescription.Exposure = ResourceView.Unassigned;
+                    dispatchDescription.Reactive = data.ReactiveMask.IsValid()
                             ? new ResourceView(data.ReactiveMask, RenderTextureSubElement.Color)
-                            : ResourceView.Unassigned,
-                        TransparencyAndComposition = data.CompositionMask.IsValid()
+                            : ResourceView.Unassigned;
+                    dispatchDescription.TransparencyAndComposition = data.CompositionMask.IsValid()
                             ? new ResourceView(data.CompositionMask, RenderTextureSubElement.Color)
-                            : ResourceView.Unassigned,
-                        Output = new ResourceView(data.Output, RenderTextureSubElement.Color),
-                        JitterOffset = data.JitterOffset,
-                        MotionVectorScale = data.MotionVectorScale,
-                        RenderSize = data.RenderSize,
-                        UpscaleSize = data.DisplaySize,
-                        EnableSharpening = data.EnableSharpening,
-                        Sharpness = data.Sharpness,
-                        FrameTimeDelta = data.FrameTimeDelta,
-                        PreExposure = data.PreExposure,
-                        Reset = data.ResetAccumulation,
-                        CameraNear = data.CameraNear,
-                        CameraFar = data.CameraFar,
-                        CameraFovAngleVertical = data.CameraFovAngleVertical,
-                        ViewSpaceToMetersFactor = 1.0f,
-                        VelocityFactor = data.VelocityFactor,
-                        Flags = data.Flags,
-                        EnableAutoReactive = data.EnableAutoReactive,
-                        ColorOpaqueOnly = data.ColorOpaqueOnly.IsValid()
+                            : ResourceView.Unassigned;
+                    dispatchDescription.Output = new ResourceView(data.Output, RenderTextureSubElement.Color);
+                    dispatchDescription.JitterOffset = data.JitterOffset;
+                    dispatchDescription.MotionVectorScale = data.MotionVectorScale;
+                    dispatchDescription.RenderSize = data.RenderSize;
+                    dispatchDescription.UpscaleSize = data.DisplaySize;
+                    dispatchDescription.EnableSharpening = data.EnableSharpening;
+                    dispatchDescription.Sharpness = data.Sharpness;
+                    dispatchDescription.FrameTimeDelta = data.FrameTimeDelta;
+                    dispatchDescription.PreExposure = data.PreExposure;
+                    dispatchDescription.Reset = data.ResetAccumulation;
+                    dispatchDescription.CameraNear = data.CameraNear;
+                    dispatchDescription.CameraFar = data.CameraFar;
+                    dispatchDescription.CameraFovAngleVertical = data.CameraFovAngleVertical;
+                    dispatchDescription.ViewSpaceToMetersFactor = 1.0f;
+                    dispatchDescription.VelocityFactor = data.VelocityFactor;
+                    dispatchDescription.Flags = data.Flags;
+                    dispatchDescription.EnableAutoReactive = data.EnableAutoReactive;
+                    dispatchDescription.ColorOpaqueOnly = data.ColorOpaqueOnly.IsValid()
                             ? new ResourceView(data.ColorOpaqueOnly, RenderTextureSubElement.Color)
-                            : ResourceView.Unassigned,
-                        AutoTcThreshold = data.AutoTcThreshold,
-                        AutoTcScale = data.AutoTcScale,
-                        AutoReactiveScale = data.AutoReactiveScale,
-                        AutoReactiveMax = data.AutoReactiveMax
-                    };
+                            : ResourceView.Unassigned;
+                    dispatchDescription.AutoTcThreshold = data.AutoTcThreshold;
+                    dispatchDescription.AutoTcScale = data.AutoTcScale;
+                    dispatchDescription.AutoReactiveScale = data.AutoReactiveScale;
+                    dispatchDescription.AutoReactiveMax = data.AutoReactiveMax;
+                    dispatchDescription.UseTextureArrays = false;
 
                     if (SystemInfo.usesReversedZBuffer)
                         (dispatchDescription.CameraNear, dispatchDescription.CameraFar) = (dispatchDescription.CameraFar, dispatchDescription.CameraNear);
@@ -241,6 +240,17 @@ namespace Tsukuyomi.Rendering
             }
 
             io.cameraColor = output;
+        }
+
+        internal void ReleaseCamera(ulong cameraId)
+        {
+            if (_cameraContexts.TryGetValue(cameraId, out var context))
+            {
+                _cameraContexts.Remove(cameraId);
+                DestroyContext(context);
+            }
+            _resolutionContexts.Remove(cameraId);
+            _loggedTaaConflictCameras.Remove(cameraId);
         }
 
         public void ResetHistory() { foreach (var context in _cameraContexts.Values) context.LastFrame = -1; }
@@ -461,6 +471,7 @@ namespace Tsukuyomi.Rendering
 
         private sealed class PassData
         {
+            public readonly Fsr3Upscaler.DispatchDescription DispatchDescription = new();
             public Fsr3UpscalerContext Context;
             public TextureHandle Color;
             public TextureHandle Depth;

@@ -121,6 +121,8 @@ namespace UnityRhi.Dlss.Urp
 
         internal void ResetHistory() => _hasHistory = false;
 
+        private readonly DlssDispatchDesc _dispatchDescription = new();
+
         internal void Record(CommandBuffer commandBuffer, in DispatchParameters parameters)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(DlssCameraContext));
@@ -129,24 +131,22 @@ namespace UnityRhi.Dlss.Urp
             try
             {
                 _commandList.BeginMarker("URP.DLSS");
-                _dlss.Record(_commandList, new DlssDispatchDesc
-                {
-                    Input = _color,
-                    Output = _output,
-                    MotionVectors = _motion,
-                    Depth = _depth,
-                    CameraJitterPixels = parameters.JitterPixels,
-                    RenderWidth = RenderWidth,
-                    RenderHeight = RenderHeight,
-                    OutputWidth = OutputWidth,
-                    OutputHeight = OutputHeight,
-                    MotionVectorScaleX = parameters.MotionScaleX,
-                    MotionVectorScaleY = parameters.MotionScaleY,
-                    Mode = parameters.Mode,
-                    Preset = parameters.Preset,
-                    Reset = parameters.Reset,
-                    DepthInverted = SystemInfo.usesReversedZBuffer,
-                });
+                _dispatchDescription.Input = _color;
+                _dispatchDescription.Output = _output;
+                _dispatchDescription.MotionVectors = _motion;
+                _dispatchDescription.Depth = _depth;
+                _dispatchDescription.CameraJitterPixels = parameters.JitterPixels;
+                _dispatchDescription.RenderWidth = RenderWidth;
+                _dispatchDescription.RenderHeight = RenderHeight;
+                _dispatchDescription.OutputWidth = OutputWidth;
+                _dispatchDescription.OutputHeight = OutputHeight;
+                _dispatchDescription.MotionVectorScaleX = parameters.MotionScaleX;
+                _dispatchDescription.MotionVectorScaleY = parameters.MotionScaleY;
+                _dispatchDescription.Mode = parameters.Mode;
+                _dispatchDescription.Preset = parameters.Preset;
+                _dispatchDescription.Reset = parameters.Reset;
+                _dispatchDescription.DepthInverted = SystemInfo.usesReversedZBuffer;
+                _dlss.Record(_commandList, _dispatchDescription);
                 _commandList.EndMarker();
                 _commandList.Close();
                 _commandList.SubmitAndForget(commandBuffer);

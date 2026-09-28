@@ -16,6 +16,8 @@ namespace Tsukuyomi.Rendering
         public readonly ResourceHub ResourceHub;
         public readonly TsukuyomiPassData PassData;
 
+        public PassResourceBuilder GraphResources => new(RenderGraph, Builder, Resources);
+
         public UnsafePassContext(
             RenderGraph renderGraph,
             IUnsafeRenderGraphBuilder builder,
@@ -46,6 +48,22 @@ namespace Tsukuyomi.Rendering
             Builder.SetRenderFunc(renderFunc);
             PassData.HasRenderFunction = true;
         }
+
+        /// <summary>Gets a snapshot owned by this pooled graph pass. Overwrite all fields used by the callback.</summary>
+        public T GetOrCreateData<T>() where T : class, new() => PassData.GetOrCreateData<T>();
+
+        /// <summary>Registers a typed, preferably static callback and an optional profiling scope.</summary>
+        public void SetRenderFunc<T>(T data, BaseRenderFunc<T, UnsafeGraphContext> renderFunc,
+            ProfilingSampler sampler = null) where T : class, new()
+        {
+            PassRenderFunction<T>.Bind(PassData, data, renderFunc, sampler);
+            SetRenderFunc(PassRenderFunction<T>.Unsafe);
+        }
+
+        public TextureHandle ReadTexture(TextureHandle handle) => GraphResources.ReadTexture(handle);
+        public TextureHandle ReadTexture(in TextureSlot slot) => GraphResources.ReadTexture(slot);
+        public BufferHandle ReadBuffer(BufferHandle handle) => GraphResources.ReadBuffer(handle);
+        public BufferHandle ReadBuffer(in BufferSlot slot) => GraphResources.ReadBuffer(slot);
 
         public TextureHandle GetTexture(in TextureSlot slot)
         {

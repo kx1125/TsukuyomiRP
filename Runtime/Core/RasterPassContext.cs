@@ -16,6 +16,8 @@ namespace Tsukuyomi.Rendering
         public readonly ResourceHub ResourceHub;
         public readonly TsukuyomiPassData PassData;
 
+        public PassResourceBuilder GraphResources => new(RenderGraph, Builder, Resources);
+
         public RasterPassContext(
             RenderGraph renderGraph,
             IRasterRenderGraphBuilder builder,
@@ -46,6 +48,29 @@ namespace Tsukuyomi.Rendering
             Builder.SetRenderFunc(renderFunc);
             PassData.HasRenderFunction = true;
         }
+
+        /// <summary>Gets a snapshot owned by this pooled graph pass. Overwrite all fields used by the callback.</summary>
+        public T GetOrCreateData<T>() where T : class, new() => PassData.GetOrCreateData<T>();
+
+        /// <summary>Registers a typed, preferably static callback and an optional profiling scope.</summary>
+        public void SetRenderFunc<T>(T data, BaseRenderFunc<T, RasterGraphContext> renderFunc,
+            ProfilingSampler sampler = null) where T : class, new()
+        {
+            PassRenderFunction<T>.Bind(PassData, data, renderFunc, sampler);
+            SetRenderFunc(PassRenderFunction<T>.Raster);
+        }
+
+        public TextureHandle ReadTexture(TextureHandle handle) => GraphResources.ReadTexture(handle);
+        public TextureHandle ReadTexture(in TextureSlot slot) => GraphResources.ReadTexture(slot);
+        public BufferHandle ReadBuffer(BufferHandle handle) => GraphResources.ReadBuffer(handle);
+        public BufferHandle ReadBuffer(in BufferSlot slot) => GraphResources.ReadBuffer(slot);
+
+        public TextureHandle ColorAttachment(TextureHandle handle, int index = 0, AccessFlags access = AccessFlags.Write)
+            => GraphResources.ColorAttachment(handle, index, access);
+        public TextureHandle ColorAttachment(in TextureDesc desc, int index = 0, AccessFlags access = AccessFlags.Write)
+            => GraphResources.ColorAttachment(desc, index, access);
+        public TextureHandle DepthAttachment(TextureHandle handle, AccessFlags access = AccessFlags.ReadWrite)
+            => GraphResources.DepthAttachment(handle, access);
 
         public TextureHandle GetTexture(in TextureSlot slot)
         {

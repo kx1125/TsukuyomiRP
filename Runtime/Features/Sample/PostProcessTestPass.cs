@@ -23,7 +23,14 @@ namespace Tsukuyomi.Rendering
         private Material material;
 
         private bool _missingMaterialLogged;
-        private static readonly int _BlitTextureID = Shader.PropertyToID("_BlitTexture");
+
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(SourceSlot);
+            slots.Add(DestinationSlot);
+            slots.Add(source);
+            slots.Add(destination);
+        }
 
         public override string Name => "PostProcessTestPass";
         // protected override TextureSlot SourceSlot => source;
@@ -48,13 +55,7 @@ namespace Tsukuyomi.Rendering
                 return;
             }
 
-            context.PassData.material = material;
-
-            context.SetRenderFunc(static (TsukuyomiPassData data, RasterGraphContext ctx) =>
-            {
-                data.material.SetTexture(_BlitTextureID, data.source);
-                Blitter.BlitTexture(ctx.cmd, data.source, new Vector4(1, 1, 0, 0), data.material, 0);
-            });
+            context.Blit(material);
         }
     }
 }

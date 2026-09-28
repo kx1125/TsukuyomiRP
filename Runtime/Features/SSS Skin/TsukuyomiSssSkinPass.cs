@@ -45,11 +45,11 @@ namespace Tsukuyomi.Rendering
         private readonly List<ShaderTagId> _skinMaskTags = new();
         private readonly List<ShaderTagId> _lightingTags = new();
 
-        private readonly ProfilingSampler _normalsSampler = new("SSSSkin DepthNormals");
-        private readonly ProfilingSampler _maskSampler = new("SSSSkin Mask");
-        private readonly ProfilingSampler _lightingDepthSampler = new("SSSSkin Lighting Depth");
-        private readonly ProfilingSampler _lightingSampler = new("SSSSkin Lighting");
-        private readonly ProfilingSampler _blurSampler = new("SSSSkin Lighting Blur");
+        private static readonly ProfilingSampler _normalsSampler = new("SSSSkin DepthNormals");
+        private static readonly ProfilingSampler _maskSampler = new("SSSSkin Mask");
+        private static readonly ProfilingSampler _lightingDepthSampler = new("SSSSkin Lighting Depth");
+        private static readonly ProfilingSampler _lightingSampler = new("SSSSkin Lighting");
+        private static readonly ProfilingSampler _blurSampler = new("SSSSkin Lighting Blur");
 
         private FilteringSettings _filteringSettings = new(RenderQueueRange.opaque);
         private TsukuyomiPipelineProfile _profile;
@@ -119,8 +119,35 @@ namespace Tsukuyomi.Rendering
             _ownsBlurMaterial = false;
         }
 
+        private sealed class RenderData
+        {
+            public TextureHandle DepthTexture, NormalsTexture, DepthAttachment;
+            public RenderTextureDescriptor BaseDescriptor;
+            public RenderTextureDescriptor LightingDescriptor;
+            public PassSettings PassSettings;
+            public TextureHandle SkinMask;
+            public TextureHandle SkinLighting;
+            public TextureHandle SkinLightingBlurred;
+            public TextureHandle BlurPing;
+            public TextureHandle BlurPong;
+            public bool UseSharedDepthNormals;
+            public TextureHandle SkinDepth;
+            public TextureHandle SkinNormals;
+            public bool LightingUsesSeparateDepth;
+            public TextureHandle LightingDepthAttachment;
+            public TextureHandle LightingDepthMask;
+            public RendererListHandle DepthNormalsRendererList;
+            public RendererListHandle MaskRendererList;
+            public RendererListHandle LightingDepthRendererList;
+            public RendererListHandle LightingRendererList;
+            public Material BlurMaterial;
+            public Texture NoiseTexture;
+            public Rect LightingViewport;
+        }
+
         public override void Record(in UnsafePassContext context)
         {
+            var passData = context.GetOrCreateData<RenderData>();
             if (_profile == null || !_settings.Enabled || _blurMaterial == null || context.CameraData.isPreviewCamera)
                 return;
 
@@ -251,84 +278,101 @@ namespace Tsukuyomi.Rendering
             if (skinNormals.IsValid())
                 context.Builder.SetGlobalTextureAfterPass(skinNormals, SkinNormalsTextureId);
 
-            Material blurMaterial = _blurMaterial;
-            Texture noiseTexture = _settings.NoiseTexture != null ? _settings.NoiseTexture : _defaultNoiseTexture;
-            ProfilingSampler normalsSampler = _normalsSampler;
-            ProfilingSampler maskSampler = _maskSampler;
-            ProfilingSampler lightingDepthSampler = _lightingDepthSampler;
-            ProfilingSampler lightingSampler = _lightingSampler;
-            ProfilingSampler blurSampler = _blurSampler;
-            Rect lightingViewport = new(0.0f, 0.0f, lightingDescriptor.width, lightingDescriptor.height);
+            passData.BlurMaterial = _blurMaterial;
+            passData.NoiseTexture = _settings.NoiseTexture != null ? _settings.NoiseTexture : _defaultNoiseTexture;
+            passData.LightingViewport = new(0.0f, 0.0f, lightingDescriptor.width, lightingDescriptor.height);
 
-            context.SetRenderFunc((data, graphContext) =>
+            passData.BaseDescriptor = baseDescriptor;
+            passData.LightingDescriptor = lightingDescriptor;
+            passData.PassSettings = passSettings;
+            passData.SkinMask = skinMask;
+            passData.SkinLighting = skinLighting;
+            passData.SkinLightingBlurred = skinLightingBlurred;
+            passData.BlurPing = blurPing;
+            passData.BlurPong = blurPong;
+            passData.UseSharedDepthNormals = useSharedDepthNormals;
+            passData.SkinDepth = skinDepth;
+            passData.SkinNormals = skinNormals;
+            passData.LightingUsesSeparateDepth = lightingUsesSeparateDepth;
+            passData.LightingDepthAttachment = lightingDepthAttachment;
+            passData.LightingDepthMask = lightingDepthMask;
+            passData.DepthNormalsRendererList = depthNormalsRendererList;
+            passData.MaskRendererList = maskRendererList;
+            passData.LightingDepthRendererList = lightingDepthRendererList;
+            passData.LightingRendererList = lightingRendererList;
+
+            passData.DepthTexture = depthTexture;
+            passData.NormalsTexture = normalsTexture;
+            passData.DepthAttachment = depthAttachment;
+            context.SetRenderFunc(passData, static (state, graphContext) =>
             {
                 CommandBuffer command = CommandBufferHelpers.GetNativeCommandBuffer(graphContext.cmd);
 
-                if (!useSharedDepthNormals)
+                if (!state.UseSharedDepthNormals)
                 {
-                    using (new ProfilingScope(graphContext.cmd, normalsSampler))
+                    using (new ProfilingScope(graphContext.cmd, _normalsSampler))
                     {
-                        graphContext.cmd.SetRenderTarget(skinNormals, skinDepth);
+                        graphContext.cmd.SetRenderTarget(state.SkinNormals, state.SkinDepth);
                         graphContext.cmd.ClearRenderTarget(true, true, Color.clear);
-                        graphContext.cmd.DrawRendererList(depthNormalsRendererList);
+                        graphContext.cmd.DrawRendererList(state.DepthNormalsRendererList);
                     }
                 }
 
-                using (new ProfilingScope(graphContext.cmd, maskSampler))
+                using (new ProfilingScope(graphContext.cmd, _maskSampler))
                 {
-                    graphContext.cmd.SetRenderTarget(skinMask, depthAttachment);
+                    graphContext.cmd.SetRenderTarget(state.SkinMask, state.DepthAttachment);
                     graphContext.cmd.ClearRenderTarget(false, true, Color.clear);
-                    graphContext.cmd.DrawRendererList(maskRendererList);
+                    graphContext.cmd.DrawRendererList(state.MaskRendererList);
                 }
 
-                if (lightingUsesSeparateDepth)
+                if (state.LightingUsesSeparateDepth)
                 {
-                    using (new ProfilingScope(graphContext.cmd, lightingDepthSampler))
+                    using (new ProfilingScope(graphContext.cmd, _lightingDepthSampler))
                     {
-                        graphContext.cmd.SetRenderTarget(lightingDepthMask, lightingDepthAttachment);
-                        command.SetViewport(lightingViewport);
+                        graphContext.cmd.SetRenderTarget(state.LightingDepthMask, state.LightingDepthAttachment);
+                        command.SetViewport(state.LightingViewport);
                         graphContext.cmd.ClearRenderTarget(true, true, Color.clear);
-                        graphContext.cmd.DrawRendererList(lightingDepthRendererList);
+                        graphContext.cmd.DrawRendererList(state.LightingDepthRendererList);
                     }
                 }
 
-                using (new ProfilingScope(graphContext.cmd, lightingSampler))
+                using (new ProfilingScope(graphContext.cmd, _lightingSampler))
                 {
-                    graphContext.cmd.SetRenderTarget(skinLighting, lightingDepthAttachment);
-                    command.SetViewport(lightingViewport);
+                    graphContext.cmd.SetRenderTarget(state.SkinLighting, state.LightingDepthAttachment);
+                    command.SetViewport(state.LightingViewport);
                     command.SetGlobalVector(TsukuyomiSpecularPBRSSSState.LightingScaleId,
-                        new Vector4((float)baseDescriptor.width / lightingDescriptor.width,
-                            (float)baseDescriptor.height / lightingDescriptor.height, 0, 0));
+                        new Vector4((float)state.BaseDescriptor.width / state.LightingDescriptor.width,
+                            (float)state.BaseDescriptor.height / state.LightingDescriptor.height, 0, 0));
                     graphContext.cmd.ClearRenderTarget(false, true, Color.clear);
-                    graphContext.cmd.DrawRendererList(lightingRendererList);
-                    graphContext.cmd.SetGlobalTexture(SkinLightingTextureId, skinLighting);
+                    graphContext.cmd.DrawRendererList(state.LightingRendererList);
+                    graphContext.cmd.SetGlobalTexture(SkinLightingTextureId, state.SkinLighting);
                 }
 
                 // Only the new material consumes this flag; legacy SSS behavior is unchanged.
                 graphContext.cmd.SetGlobalFloat(TsukuyomiSpecularPBRSSSState.ReadyId, 1.0f);
 
-                if (passSettings.Iterations <= 0 || passSettings.Radius <= 0.0f)
+                if (state.PassSettings.Iterations <= 0 || state.PassSettings.Radius <= 0.0f)
                 {
-                    graphContext.cmd.SetGlobalTexture(SkinLightingBlurredTextureId, skinLighting);
-                    graphContext.cmd.SetGlobalTexture(LightingTexBlurredId, skinLighting);
+                    graphContext.cmd.SetGlobalTexture(SkinLightingBlurredTextureId, state.SkinLighting);
+                    graphContext.cmd.SetGlobalTexture(LightingTexBlurredId, state.SkinLighting);
                     return;
                 }
 
-                using (new ProfilingScope(graphContext.cmd, blurSampler))
+                using (new ProfilingScope(graphContext.cmd, _blurSampler))
                 {
                     ExecuteBlur(
                         graphContext,
-                        passSettings,
-                        blurMaterial,
-                        noiseTexture,
-                        depthTexture,
-                        normalsTexture,
-                        skinMask,
-                        skinLighting,
-                        skinLightingBlurred,
-                        blurPing,
-                        blurPong,
-                        useSharedDepthNormals);
+                        state.PassSettings,
+                        state.BlurMaterial,
+                        state.NoiseTexture,
+                        state.DepthTexture,
+                        state.NormalsTexture,
+                        state.SkinMask,
+                        state.SkinLighting,
+                        state.SkinLightingBlurred,
+                        state.BlurPing,
+                        state.BlurPong,
+                        state.UseSharedDepthNormals);
                 }
             });
         }

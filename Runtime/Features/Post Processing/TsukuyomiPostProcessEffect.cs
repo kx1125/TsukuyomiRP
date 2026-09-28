@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -17,6 +16,10 @@ namespace Tsukuyomi.Rendering
             VolumeStack volumeStack,
             TsukuyomiRenderPipelineResources resources);
 
+        // Called before the Uber builder is opened. Returned resources are copied into its pooled snapshot.
+        public virtual TextureHandle RecordGraph(in FeatureGraphContext graph, TextureHandle source, Material material)
+            => TextureHandle.nullHandle;
+
         public abstract void Record(in TsukuyomiPostProcessBuildContext context);
 
         public virtual void ResetUberMaterial(Material material)
@@ -28,61 +31,36 @@ namespace Tsukuyomi.Rendering
         }
     }
 
+    // Owned by one pooled plan. Effects provide operations; the plan handles their lifetime
+    // and invocation without requiring each effect to cache instance delegates.
+    internal abstract class TsukuyomiPostProcessData
+    {
+        public virtual void SetupUber(UnsafeGraphContext context, Material material) { }
+    }
+
     internal sealed class TsukuyomiPostProcessPlan
     {
-        private readonly List<TsukuyomiPostProcessStage> _stages = new();
-        private readonly List<Action<UnsafeGraphContext, Material>> _uberSetups = new();
+        private readonly TsukuyomiPassData _effectData = new();
 
-        public void AddStage(ProfilingSampler sampler, Action<UnsafeGraphContext> execute)
+        public T GetOrCreateData<T>() where T : class, new() => _effectData.GetOrCreateData<T>();
+
+        public void Clear()
         {
-            if (execute == null)
-                return;
-
-            _stages.Add(new TsukuyomiPostProcessStage(sampler, execute));
+            _uberSetups.Clear();
         }
 
-        public void AddUberSetup(Action<UnsafeGraphContext, Material> setup)
-        {
-            if (setup != null)
-                _uberSetups.Add(setup);
-        }
+        private readonly List<TsukuyomiPostProcessData> _uberSetups = new();
 
-        public void ExecuteStages(UnsafeGraphContext context)
+        public void AddUberSetup(TsukuyomiPostProcessData data)
         {
-            for (int i = 0; i < _stages.Count; i++)
-                _stages[i].Execute(context);
+            if (data != null)
+                _uberSetups.Add(data);
         }
 
         public void SetupUberMaterial(UnsafeGraphContext context, Material material)
         {
             for (int i = 0; i < _uberSetups.Count; i++)
-                _uberSetups[i].Invoke(context, material);
-        }
-    }
-
-    internal readonly struct TsukuyomiPostProcessStage
-    {
-        private readonly ProfilingSampler _sampler;
-        private readonly Action<UnsafeGraphContext> _execute;
-
-        public TsukuyomiPostProcessStage(ProfilingSampler sampler, Action<UnsafeGraphContext> execute)
-        {
-            _sampler = sampler;
-            _execute = execute;
-        }
-
-        public void Execute(UnsafeGraphContext context)
-        {
-            if (_sampler == null)
-            {
-                _execute(context);
-                return;
-            }
-
-            using (new ProfilingScope(context.cmd, _sampler))
-            {
-                _execute(context);
-            }
+                _uberSetups[i].SetupUber(context, material);
         }
     }
 
@@ -96,6 +74,9 @@ namespace Tsukuyomi.Rendering
         public readonly TextureHandle SourceColor;
         public readonly TextureHandle DestinationColor;
         public readonly Material UberMaterial;
+        public readonly TextureHandle EffectOutput;
+
+        public PassResourceBuilder GraphResources => new(RenderGraph, Builder);
 
         public TsukuyomiPostProcessBuildContext(
             RenderGraph renderGraph,
@@ -104,7 +85,8 @@ namespace Tsukuyomi.Rendering
             TextureHandle sourceColor,
             TextureHandle destinationColor,
             Material uberMaterial,
-            TsukuyomiPostProcessPlan plan)
+            TsukuyomiPostProcessPlan plan,
+            TextureHandle effectOutput)
         {
             RenderGraph = renderGraph;
             Builder = builder;
@@ -113,11 +95,19 @@ namespace Tsukuyomi.Rendering
             DestinationColor = destinationColor;
             UberMaterial = uberMaterial;
             _plan = plan;
+            EffectOutput = effectOutput;
         }
+
+        public T GetOrCreateData<T>() where T : class, new() => _plan.GetOrCreateData<T>();
 
         public TextureHandle CreateTexture(TextureDesc desc)
         {
             return RenderGraph.CreateTexture(desc);
+        }
+
+        public TextureHandle CreateTexture(TextureDesc desc, AccessFlags access)
+        {
+            return GraphResources.CreateTexture(desc, access);
         }
 
         public TextureDesc CreateColorDesc(int width, int height, string name, bool clearBuffer = false)
@@ -127,32 +117,18 @@ namespace Tsukuyomi.Rendering
                 ? GraphicsFormat.R16G16B16A16_SFloat
                 : cameraDescriptor.graphicsFormat;
 
-            return new TextureDesc(Mathf.Max(1, width), Mathf.Max(1, height))
-            {
-                name = name,
-                colorFormat = colorFormat,
-                depthBufferBits = DepthBits.None,
-                msaaSamples = MSAASamples.None,
-                clearBuffer = clearBuffer,
-                clearColor = Color.clear,
-                filterMode = FilterMode.Bilinear
-            };
+            return TextureDescriptors.Color2D(Mathf.Max(1, width), Mathf.Max(1, height),
+                colorFormat, name, FilterMode.Bilinear, clearBuffer: clearBuffer);
         }
 
         public void UseTexture(TextureHandle handle, AccessFlags access)
         {
-            if (handle.IsValid())
-                Builder.UseTexture(handle, access);
+            GraphResources.UseTexture(handle, access);
         }
 
-        public void AddStage(ProfilingSampler sampler, Action<UnsafeGraphContext> execute)
+        public void AddUberSetup(TsukuyomiPostProcessData data)
         {
-            _plan.AddStage(sampler, execute);
-        }
-
-        public void AddUberSetup(Action<UnsafeGraphContext, Material> setup)
-        {
-            _plan.AddUberSetup(setup);
+            _plan.AddUberSetup(data);
         }
     }
 }

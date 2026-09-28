@@ -1,4 +1,4 @@
-﻿using UnityEngine.Rendering.Universal;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering.RenderGraphModule;
 
 
@@ -6,7 +6,7 @@ namespace Tsukuyomi.Rendering
 {
     public class FrameResources
     {
-        private readonly UniversalResourceData _resourceData;
+        private UniversalResourceData _resourceData;
         private readonly TsukuyomiFrameResourceRegistry _registry;
 
         public bool IsActiveTargetBackBuffer => _resourceData != null && _resourceData.isActiveTargetBackBuffer;
@@ -30,8 +30,14 @@ namespace Tsukuyomi.Rendering
 
         public FrameResources(UniversalResourceData resourceData, TsukuyomiFrameResourceRegistry registry = null)
         {
-            _resourceData = resourceData;
             _registry = registry ?? new TsukuyomiFrameResourceRegistry();
+            Refresh(resourceData);
+        }
+
+        // URP and earlier bridge passes can replace attachments between injection points.
+        internal void Refresh(UniversalResourceData resourceData)
+        {
+            _resourceData = resourceData;
 
             ActiveColor = resourceData.activeColorTexture;
             ActiveDepth = resourceData.activeDepthTexture;

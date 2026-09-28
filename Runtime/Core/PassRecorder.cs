@@ -11,6 +11,20 @@ namespace Tsukuyomi.Rendering
     /// </summary>
     public static class PassRecorder
     {
+        public static TextureHandle ColorAttachment(IRasterRenderGraphBuilder builder, TextureHandle handle,
+            int index = 0, AccessFlags access = AccessFlags.Write)
+        {
+            if (handle.IsValid()) builder.SetRenderAttachment(handle, index, access);
+            return handle;
+        }
+
+        public static TextureHandle DepthAttachment(IRasterRenderGraphBuilder builder, TextureHandle handle,
+            AccessFlags access = AccessFlags.ReadWrite)
+        {
+            if (handle.IsValid()) builder.SetRenderAttachmentDepth(handle, access);
+            return handle;
+        }
+
         /// <summary>
         /// Resolves a TextureSlot into a TextureHandle from FrameResources or by creating it in RenderGraph.
         /// </summary>

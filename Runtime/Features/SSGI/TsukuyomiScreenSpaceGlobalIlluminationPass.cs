@@ -64,7 +64,7 @@ namespace Tsukuyomi.Rendering
         [Read(BuiltinTexture.MotionVectorColor)]
         public TextureSlot motionVectors = TextureSlot.Read("Motion Vectors", BuiltinTexture.MotionVectorColor);
 
-        private readonly ProfilingSampler _profilingSampler = new("Tsukuyomi Screen Space Global Illumination");
+        private static readonly ProfilingSampler _profilingSampler = new("Tsukuyomi Screen Space Global Illumination");
         private TsukuyomiPipelineProfile _profile;
         private TsukuyomiScreenSpaceGlobalIlluminationResolvedSettings _settings;
         private ComputeShader _traceCompute;
@@ -81,6 +81,13 @@ namespace Tsukuyomi.Rendering
         private int _temporalKernel = -1;
         private int _spatialKernel = -1;
         private int _upsampleKernel = -1;
+
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(depth);
+            slots.Add(normals);
+            slots.Add(motionVectors);
+        }
 
         public override string Name => "Screen Space Global Illumination";
         internal static GlobalKeyword GlobalKeyword => s_GlobalKeyword;
@@ -148,8 +155,74 @@ namespace Tsukuyomi.Rendering
             return base.IsActive(frame) && _profile != null && _settings.IsActive && KernelsAreValid();
         }
 
+        private sealed class RenderData
+        {
+            public TextureHandle CameraDepth;
+            public TextureHandle CameraNormals;
+            public TextureHandle MotionVectorTexture;
+            public TextureHandle DepthPyramid;
+            public BufferHandle DepthPyramidOffsets;
+            public int FullWidth;
+            public int FullHeight;
+            public int TraceWidth;
+            public int TraceHeight;
+            public Matrix4x4 ViewProjection;
+            public Matrix4x4 InverseViewProjection;
+            public bool HistoryValid;
+            public Matrix4x4 PreviousInverseViewProjection;
+            public Vector2 JitterDeltaUv;
+            public TextureHandle HistoryColor;
+            public TextureHandle HistoryDepth;
+            public TextureHandle PreviousNormalHistory;
+            public TextureHandle CurrentNormalHistory;
+            public TextureHandle PreviousGi0;
+            public TextureHandle CurrentGi0;
+            public TextureHandle PreviousGi1;
+            public TextureHandle CurrentGi1;
+            public TextureHandle HistoryColorHalf;
+            public TextureHandle HitPoint;
+            public TextureHandle RawIndirectDiffuse;
+            public TextureHandle HistoryValidation;
+            public TextureHandle Spatial0;
+            public TextureHandle Spatial1;
+            public TextureHandle Signal;
+            public int SignalWidth;
+            public int SignalHeight;
+            public bool RequiresUpsample;
+            public TextureHandle FinalIndirectDiffuse;
+            public ComputeShader TraceCompute;
+            public ComputeShader TemporalCompute;
+            public ComputeShader DenoiserCompute;
+            public ComputeShader UpsampleCompute;
+            public int DownsampleHistoryKernel;
+            public int TraceKernel;
+            public int ReprojectKernel;
+            public int CopyNormalsKernel;
+            public int ValidateHistoryKernel;
+            public int TemporalKernel;
+            public int SpatialKernel;
+            public int UpsampleKernel;
+            public TsukuyomiScreenSpaceGlobalIlluminationResolvedSettings Settings;
+            public Vector4 FullResolution;
+            public Vector4 TraceResolution;
+            public Vector4 SpatialResolution;
+            public Vector4 HalfColorResolution;
+            public readonly Vector4[] AmbientProbeData = new Vector4[7];
+            public float ThicknessScale;
+            public float ThicknessBias;
+            public int FrameIndex;
+        }
+
+        public override void CollectResourceRequirements(in FrameContext frame, in ResourceRequirementCollector requirements)
+        {
+            if (!frame.CameraData.isPreviewCamera && frame.CameraData.historyManager != null)
+                requirements.RequireDepthPyramid();
+        }
+
         public override void Record(in UnsafePassContext context)
         {
+            var passData = context.GetOrCreateData<RenderData>();
+            var graphResources = context.GraphResources;
             if (!_settings.IsActive || context.CameraData.historyManager == null)
                 return;
 
@@ -180,7 +253,7 @@ namespace Tsukuyomi.Rendering
                 context.CameraData.camera.projectionMatrix,
                 true);
             Matrix4x4 viewProjection = jitteredGpuProjection * context.CameraData.GetViewMatrix();
-            Matrix4x4 inverseViewProjection = viewProjection.inverse;
+            passData.InverseViewProjection = viewProjection.inverse;
             Vector2 currentJitterUv = CalculateJitterUv(jitteredGpuProjection, nonJitteredGpuProjection);
             UniversalCameraHistory historyManager = context.CameraData.historyManager;
             RawColorHistory rawColorHistory = historyManager.GetHistoryForRead<RawColorHistory>();
@@ -203,63 +276,66 @@ namespace Tsukuyomi.Rendering
                 currentJitterUv,
                 Time.frameCount);
             historyValid &= previousRawColor != null && previousRawDepth != null;
-            Matrix4x4 previousInverseViewProjection = ssgiHistory.PreviousViewProjection.inverse;
-            Vector2 jitterDeltaUv = ssgiHistory.PreviousJitterUv - currentJitterUv;
+            passData.PreviousInverseViewProjection = ssgiHistory.PreviousViewProjection.inverse;
+            passData.JitterDeltaUv = ssgiHistory.PreviousJitterUv - currentJitterUv;
 
             TextureHandle historyColor = previousRawColor != null
-                ? context.RenderGraph.ImportTexture(previousRawColor)
-                : context.RenderGraph.defaultResources.blackTexture;
+                ? graphResources.ImportTexture(previousRawColor, AccessFlags.Read)
+                : graphResources.UseTexture(context.RenderGraph.defaultResources.blackTexture, AccessFlags.Read);
             TextureHandle historyDepth = previousRawDepth != null
-                ? context.RenderGraph.ImportTexture(previousRawDepth)
-                : cameraDepth;
-            TextureHandle previousNormalHistory = context.RenderGraph.ImportTexture(ssgiHistory.GetPreviousNormal());
-            TextureHandle currentNormalHistory = context.RenderGraph.ImportTexture(ssgiHistory.GetCurrentNormal());
-            TextureHandle previousGi0 = context.RenderGraph.ImportTexture(ssgiHistory.GetPreviousGi0());
-            TextureHandle currentGi0 = context.RenderGraph.ImportTexture(ssgiHistory.GetCurrentGi0());
-            TextureHandle previousGi1 = context.RenderGraph.ImportTexture(ssgiHistory.GetPreviousGi1());
-            TextureHandle currentGi1 = context.RenderGraph.ImportTexture(ssgiHistory.GetCurrentGi1());
+                ? graphResources.ImportTexture(previousRawDepth, AccessFlags.Read)
+                : graphResources.UseTexture(cameraDepth, AccessFlags.Read);
+            var normalHistory = HistoryTextureHelper.ImportPair(graphResources, ssgiHistory.GetPreviousNormal(), ssgiHistory.GetCurrentNormal());
+            TextureHandle previousNormalHistory = normalHistory.Previous;
+            TextureHandle currentNormalHistory = normalHistory.Current;
+            var gi0History = HistoryTextureHelper.ImportPair(graphResources, ssgiHistory.GetPreviousGi0(), ssgiHistory.GetCurrentGi0());
+            TextureHandle previousGi0 = gi0History.Previous;
+            TextureHandle currentGi0 = gi0History.Current;
+            var gi1History = HistoryTextureHelper.ImportPair(graphResources, ssgiHistory.GetPreviousGi1(), ssgiHistory.GetCurrentGi1());
+            TextureHandle previousGi1 = gi1History.Previous;
+            TextureHandle currentGi1 = gi1History.Current;
 
             GraphicsFormat giFormat = SystemInfo.IsFormatSupported(
                 GraphicsFormat.B10G11R11_UFloatPack32,
                 GraphicsFormatUsage.LoadStore)
                 ? GraphicsFormat.B10G11R11_UFloatPack32
                 : GraphicsFormat.R16G16B16A16_SFloat;
-            TextureHandle historyColorHalf = context.RenderGraph.CreateTexture(CreateTextureDesc(
+            TextureHandle historyColorHalf = graphResources.CreateTexture(TextureDescriptors.Color2D(
                 Mathf.Max(1, (fullWidth + 1) / 2),
                 Mathf.Max(1, (fullHeight + 1) / 2),
                 giFormat,
                 "_TsukuyomiSsgiHistoryColorHalf",
-                FilterMode.Bilinear));
-            TextureHandle hitPoint = context.RenderGraph.CreateTexture(CreateTextureDesc(
+                FilterMode.Bilinear, randomWrite: true), AccessFlags.ReadWrite);
+            TextureHandle hitPoint = graphResources.CreateTexture(TextureDescriptors.Color2D(
                 traceWidth,
                 traceHeight,
                 GraphicsFormat.R16G16_SFloat,
                 "_TsukuyomiSsgiHitPoint",
-                FilterMode.Point));
-            TextureHandle rawIndirectDiffuse = context.RenderGraph.CreateTexture(CreateTextureDesc(
+                FilterMode.Point, randomWrite: true), AccessFlags.ReadWrite);
+            TextureHandle rawIndirectDiffuse = graphResources.CreateTexture(TextureDescriptors.Color2D(
                 traceWidth,
                 traceHeight,
                 giFormat,
                 "_TsukuyomiSsgiRawIndirectDiffuse",
-                FilterMode.Bilinear));
-            TextureHandle historyValidation = context.RenderGraph.CreateTexture(CreateTextureDesc(
+                FilterMode.Bilinear, randomWrite: true), AccessFlags.ReadWrite);
+            TextureHandle historyValidation = graphResources.CreateTexture(TextureDescriptors.Color2D(
                 fullWidth,
                 fullHeight,
                 GraphicsFormat.R8_UInt,
                 "_TsukuyomiSsgiHistoryValidation",
-                FilterMode.Point));
-            TextureHandle spatial0 = context.RenderGraph.CreateTexture(CreateTextureDesc(
+                FilterMode.Point, randomWrite: true), AccessFlags.ReadWrite);
+            TextureHandle spatial0 = graphResources.CreateTexture(TextureDescriptors.Color2D(
                 spatialWidth,
                 spatialHeight,
                 giFormat,
                 "_TsukuyomiSsgiSpatial0",
-                FilterMode.Bilinear));
-            TextureHandle spatial1 = context.RenderGraph.CreateTexture(CreateTextureDesc(
+                FilterMode.Bilinear, randomWrite: true), AccessFlags.ReadWrite);
+            TextureHandle spatial1 = graphResources.CreateTexture(TextureDescriptors.Color2D(
                 spatialWidth,
                 spatialHeight,
                 giFormat,
                 "_TsukuyomiSsgiSpatial1",
-                FilterMode.Bilinear));
+                FilterMode.Bilinear, randomWrite: true), AccessFlags.ReadWrite);
 
             TextureHandle signal = rawIndirectDiffuse;
             int signalWidth = traceWidth;
@@ -275,204 +351,217 @@ namespace Tsukuyomi.Rendering
 
             bool requiresUpsample = signalWidth != fullWidth || signalHeight != fullHeight;
             TextureHandle finalIndirectDiffuse = requiresUpsample
-                ? context.RenderGraph.CreateTexture(CreateTextureDesc(
+                ? graphResources.CreateTexture(TextureDescriptors.Color2D(
                     fullWidth,
                     fullHeight,
                     giFormat,
                     "_TsukuyomiScreenSpaceGlobalIlluminationTexture",
-                    FilterMode.Bilinear))
+                    FilterMode.Bilinear, randomWrite: true), AccessFlags.Write)
                 : signal;
 
-            UseTexture(context.Builder, cameraDepth, AccessFlags.Read);
-            UseTexture(context.Builder, cameraNormals, AccessFlags.Read);
-            UseTexture(context.Builder, motionVectorTexture, AccessFlags.Read);
-            UseTexture(context.Builder, depthPyramid, AccessFlags.Read);
-            context.Builder.UseBuffer(depthPyramidOffsets, AccessFlags.Read);
-            UseTexture(context.Builder, historyColor, AccessFlags.Read);
-            UseTexture(context.Builder, historyDepth, AccessFlags.Read);
-            UseTexture(context.Builder, historyColorHalf, AccessFlags.ReadWrite);
-            UseTexture(context.Builder, hitPoint, AccessFlags.ReadWrite);
-            UseTexture(context.Builder, rawIndirectDiffuse, AccessFlags.ReadWrite);
-            UseTexture(context.Builder, previousNormalHistory, AccessFlags.Read);
-            UseTexture(context.Builder, currentNormalHistory, AccessFlags.Write);
-            UseTexture(context.Builder, previousGi0, AccessFlags.Read);
-            UseTexture(context.Builder, currentGi0, AccessFlags.Write);
-            UseTexture(context.Builder, previousGi1, AccessFlags.Read);
-            UseTexture(context.Builder, currentGi1, AccessFlags.Write);
-            UseTexture(context.Builder, historyValidation, AccessFlags.ReadWrite);
-            UseTexture(context.Builder, spatial0, AccessFlags.ReadWrite);
-            UseTexture(context.Builder, spatial1, AccessFlags.ReadWrite);
-            if (requiresUpsample)
-                UseTexture(context.Builder, finalIndirectDiffuse, AccessFlags.Write);
+            graphResources.UseTexture(cameraDepth, AccessFlags.Read);
+            graphResources.UseTexture(cameraNormals, AccessFlags.Read);
+            graphResources.UseTexture(motionVectorTexture, AccessFlags.Read);
+            graphResources.UseTexture(depthPyramid, AccessFlags.Read);
+            graphResources.UseBuffer(depthPyramidOffsets, AccessFlags.Read);
             context.Builder.UseAllGlobalTextures(true);
             context.Builder.AllowPassCulling(false);
             context.Builder.AllowGlobalStateModification(true);
             context.Builder.SetGlobalTextureAfterPass(finalIndirectDiffuse, GlobalTextureId);
 
-            ComputeShader traceCompute = _traceCompute;
-            ComputeShader temporalCompute = _temporalCompute;
-            ComputeShader denoiserCompute = _denoiserCompute;
-            ComputeShader upsampleCompute = _upsampleCompute;
-            int downsampleHistoryKernel = _downsampleHistoryKernel;
-            int traceKernel = _settings.HalfResolution ? _traceHalfKernel : _traceKernel;
-            int reprojectKernel = _settings.HalfResolution ? _reprojectHalfKernel : _reprojectKernel;
-            int copyNormalsKernel = _copyNormalsKernel;
-            int validateHistoryKernel = _validateHistoryKernel;
-            int temporalKernel = _temporalKernel;
-            int spatialKernel = _spatialKernel;
-            int upsampleKernel = _upsampleKernel;
+            passData.TraceCompute = _traceCompute;
+            passData.TemporalCompute = _temporalCompute;
+            passData.DenoiserCompute = _denoiserCompute;
+            passData.UpsampleCompute = _upsampleCompute;
+            passData.DownsampleHistoryKernel = _downsampleHistoryKernel;
+            passData.TraceKernel = _settings.HalfResolution ? _traceHalfKernel : _traceKernel;
+            passData.ReprojectKernel = _settings.HalfResolution ? _reprojectHalfKernel : _reprojectKernel;
+            passData.CopyNormalsKernel = _copyNormalsKernel;
+            passData.ValidateHistoryKernel = _validateHistoryKernel;
+            passData.TemporalKernel = _temporalKernel;
+            passData.SpatialKernel = _spatialKernel;
+            passData.UpsampleKernel = _upsampleKernel;
             TsukuyomiScreenSpaceGlobalIlluminationResolvedSettings settings = _settings;
-            Vector4 fullResolution = ResolutionVector(fullWidth, fullHeight);
-            Vector4 traceResolution = ResolutionVector(traceWidth, traceHeight);
-            Vector4 spatialResolution = ResolutionVector(spatialWidth, spatialHeight);
-            Vector4 halfColorResolution = ResolutionVector(
+            passData.FullResolution = ResolutionVector(fullWidth, fullHeight);
+            passData.TraceResolution = ResolutionVector(traceWidth, traceHeight);
+            passData.SpatialResolution = ResolutionVector(spatialWidth, spatialHeight);
+            passData.HalfColorResolution = ResolutionVector(
                 Mathf.Max(1, (fullWidth + 1) / 2),
                 Mathf.Max(1, (fullHeight + 1) / 2));
-            Vector4[] ambientProbeData = CreateAmbientProbeData(RenderSettings.ambientProbe);
+            FillAmbientProbeData(RenderSettings.ambientProbe, passData.AmbientProbeData);
             float near = context.CameraData.camera.nearClipPlane;
             float far = context.CameraData.camera.farClipPlane;
             float thicknessScale = 1.0f / (1.0f + settings.DepthBufferThickness);
-            float thicknessBias = -near / Mathf.Max(0.0001f, far - near)
+            passData.ThicknessBias = -near / Mathf.Max(0.0001f, far - near)
                 * (settings.DepthBufferThickness * thicknessScale);
-            int frameIndex = Time.frameCount & 15;
-            ProfilingSampler profilingSampler = _profilingSampler;
+            passData.FrameIndex = Time.frameCount & 15;
 
-            context.SetRenderFunc((data, graphContext) =>
+            passData.CameraDepth = cameraDepth;
+            passData.CameraNormals = cameraNormals;
+            passData.MotionVectorTexture = motionVectorTexture;
+            passData.DepthPyramid = depthPyramid;
+            passData.DepthPyramidOffsets = depthPyramidOffsets;
+            passData.FullWidth = fullWidth;
+            passData.FullHeight = fullHeight;
+            passData.TraceWidth = traceWidth;
+            passData.TraceHeight = traceHeight;
+            passData.ViewProjection = viewProjection;
+            passData.HistoryValid = historyValid;
+            passData.HistoryColor = historyColor;
+            passData.HistoryDepth = historyDepth;
+            passData.PreviousNormalHistory = previousNormalHistory;
+            passData.CurrentNormalHistory = currentNormalHistory;
+            passData.PreviousGi0 = previousGi0;
+            passData.CurrentGi0 = currentGi0;
+            passData.PreviousGi1 = previousGi1;
+            passData.CurrentGi1 = currentGi1;
+            passData.HistoryColorHalf = historyColorHalf;
+            passData.HitPoint = hitPoint;
+            passData.RawIndirectDiffuse = rawIndirectDiffuse;
+            passData.HistoryValidation = historyValidation;
+            passData.Spatial0 = spatial0;
+            passData.Spatial1 = spatial1;
+            passData.Signal = signal;
+            passData.SignalWidth = signalWidth;
+            passData.SignalHeight = signalHeight;
+            passData.RequiresUpsample = requiresUpsample;
+            passData.FinalIndirectDiffuse = finalIndirectDiffuse;
+            passData.Settings = settings;
+            passData.ThicknessScale = thicknessScale;
+
+            context.SetRenderFunc(passData, static (state, graphContext) =>
             {
-                using (new ProfilingScope(graphContext.cmd, profilingSampler))
+                graphContext.cmd.SetKeyword(s_GlobalKeyword, true);
+
+                SetResolution(graphContext.cmd, state.TraceCompute, state.FullResolution, state.HalfColorResolution);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.DownsampleHistoryKernel, HistoryColorTextureId, state.HistoryColor);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.DownsampleHistoryKernel, HistoryColorHalfTextureRwId, state.HistoryColorHalf);
+                Dispatch(graphContext.cmd, state.TraceCompute, state.DownsampleHistoryKernel, (int)state.HalfColorResolution.x, (int)state.HalfColorResolution.y);
+
+                SetTraceParameters(
+                    graphContext.cmd,
+                    state.TraceCompute,
+                    state.FullResolution,
+                    state.TraceResolution,
+                    state.ViewProjection,
+                    state.InverseViewProjection,
+                    state.Settings,
+                    state.ThicknessScale,
+                    state.ThicknessBias,
+                    state.JitterDeltaUv,
+                    state.FrameIndex);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.TraceKernel, CameraNormalsTextureId, state.CameraNormals);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.TraceKernel, DepthPyramidId, state.DepthPyramid);
+                graphContext.cmd.SetComputeBufferParam(state.TraceCompute, state.TraceKernel, DepthPyramidMipLevelOffsetsId, state.DepthPyramidOffsets);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.TraceKernel, HitPointTextureRwId, state.HitPoint);
+                Dispatch(graphContext.cmd, state.TraceCompute, state.TraceKernel, state.TraceWidth, state.TraceHeight);
+
+                SetTraceParameters(
+                    graphContext.cmd,
+                    state.TraceCompute,
+                    state.FullResolution,
+                    state.TraceResolution,
+                    state.ViewProjection,
+                    state.InverseViewProjection,
+                    state.Settings,
+                    state.ThicknessScale,
+                    state.ThicknessBias,
+                    state.JitterDeltaUv,
+                    state.FrameIndex);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.ReprojectKernel, CameraNormalsTextureId, state.CameraNormals);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.ReprojectKernel, MotionVectorTextureId, state.MotionVectorTexture);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.ReprojectKernel, DepthPyramidId, state.DepthPyramid);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.ReprojectKernel, HistoryDepthTextureId, state.HistoryDepth);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.ReprojectKernel, HistoryColorHalfTextureId, state.HistoryColorHalf);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.ReprojectKernel, HitPointTextureId, state.HitPoint);
+                graphContext.cmd.SetComputeTextureParam(state.TraceCompute, state.ReprojectKernel, IndirectDiffuseTextureRwId, state.RawIndirectDiffuse);
+                graphContext.cmd.SetComputeVectorArrayParam(state.TraceCompute, AmbientProbeDataId, state.AmbientProbeData);
+                Dispatch(graphContext.cmd, state.TraceCompute, state.ReprojectKernel, state.TraceWidth, state.TraceHeight);
+
+                graphContext.cmd.SetComputeVectorParam(state.TemporalCompute, FullResolutionId, state.FullResolution);
+                graphContext.cmd.SetComputeTextureParam(state.TemporalCompute, state.CopyNormalsKernel, CameraNormalsTextureId, state.CameraNormals);
+                graphContext.cmd.SetComputeTextureParam(state.TemporalCompute, state.CopyNormalsKernel, OutputNormalHistoryRwId, state.CurrentNormalHistory);
+                Dispatch(graphContext.cmd, state.TemporalCompute, state.CopyNormalsKernel, state.FullWidth, state.FullHeight);
+
+                if (state.Settings.Denoise)
                 {
-                    graphContext.cmd.SetKeyword(s_GlobalKeyword, true);
+                    graphContext.cmd.SetComputeVectorParam(state.TemporalCompute, FullResolutionId, state.FullResolution);
+                    graphContext.cmd.SetComputeMatrixParam(state.TemporalCompute, InverseViewProjectionId, state.InverseViewProjection);
+                    graphContext.cmd.SetComputeMatrixParam(state.TemporalCompute, PreviousInverseViewProjectionId, state.PreviousInverseViewProjection);
+                    graphContext.cmd.SetComputeVectorParam(state.TemporalCompute, JitterDeltaId, state.JitterDeltaUv);
+                    graphContext.cmd.SetComputeIntParam(state.TemporalCompute, HistoryValidId, state.HistoryValid ? 1 : 0);
+                    graphContext.cmd.SetComputeTextureParam(state.TemporalCompute, state.ValidateHistoryKernel, CameraDepthTextureId, state.CameraDepth);
+                    graphContext.cmd.SetComputeTextureParam(state.TemporalCompute, state.ValidateHistoryKernel, CameraNormalsTextureId, state.CameraNormals);
+                    graphContext.cmd.SetComputeTextureParam(state.TemporalCompute, state.ValidateHistoryKernel, MotionVectorTextureId, state.MotionVectorTexture);
+                    graphContext.cmd.SetComputeTextureParam(state.TemporalCompute, state.ValidateHistoryKernel, HistoryDepthTextureId, state.HistoryDepth);
+                    graphContext.cmd.SetComputeTextureParam(state.TemporalCompute, state.ValidateHistoryKernel, HistoryNormalTextureId, state.PreviousNormalHistory);
+                    graphContext.cmd.SetComputeTextureParam(state.TemporalCompute, state.ValidateHistoryKernel, HistoryValidationTextureRwId, state.HistoryValidation);
+                    Dispatch(graphContext.cmd, state.TemporalCompute, state.ValidateHistoryKernel, state.FullWidth, state.FullHeight);
 
-                    SetResolution(graphContext.cmd, traceCompute, fullResolution, halfColorResolution);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, downsampleHistoryKernel, HistoryColorTextureId, historyColor);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, downsampleHistoryKernel, HistoryColorHalfTextureRwId, historyColorHalf);
-                    Dispatch(graphContext.cmd, traceCompute, downsampleHistoryKernel, (int)halfColorResolution.x, (int)halfColorResolution.y);
-
-                    SetTraceParameters(
+                    DispatchTemporal(
                         graphContext.cmd,
-                        traceCompute,
-                        fullResolution,
-                        traceResolution,
-                        viewProjection,
-                        inverseViewProjection,
-                        settings,
-                        thicknessScale,
-                        thicknessBias,
-                        jitterDeltaUv,
-                        frameIndex);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, traceKernel, CameraNormalsTextureId, cameraNormals);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, traceKernel, DepthPyramidId, depthPyramid);
-                    graphContext.cmd.SetComputeBufferParam(traceCompute, traceKernel, DepthPyramidMipLevelOffsetsId, depthPyramidOffsets);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, traceKernel, HitPointTextureRwId, hitPoint);
-                    Dispatch(graphContext.cmd, traceCompute, traceKernel, traceWidth, traceHeight);
-
-                    SetTraceParameters(
+                        state.TemporalCompute,
+                        state.TemporalKernel,
+                        state.RawIndirectDiffuse,
+                        state.PreviousGi0,
+                        state.CurrentGi0,
+                        state.HistoryValidation,
+                        state.MotionVectorTexture,
+                        state.FullResolution,
+                        state.TraceResolution,
+                        state.HistoryValid);
+                    DispatchSpatial(
                         graphContext.cmd,
-                        traceCompute,
-                        fullResolution,
-                        traceResolution,
-                        viewProjection,
-                        inverseViewProjection,
-                        settings,
-                        thicknessScale,
-                        thicknessBias,
-                        jitterDeltaUv,
-                        frameIndex);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, reprojectKernel, CameraNormalsTextureId, cameraNormals);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, reprojectKernel, MotionVectorTextureId, motionVectorTexture);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, reprojectKernel, DepthPyramidId, depthPyramid);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, reprojectKernel, HistoryDepthTextureId, historyDepth);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, reprojectKernel, HistoryColorHalfTextureId, historyColorHalf);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, reprojectKernel, HitPointTextureId, hitPoint);
-                    graphContext.cmd.SetComputeTextureParam(traceCompute, reprojectKernel, IndirectDiffuseTextureRwId, rawIndirectDiffuse);
-                    graphContext.cmd.SetComputeVectorArrayParam(traceCompute, AmbientProbeDataId, ambientProbeData);
-                    Dispatch(graphContext.cmd, traceCompute, reprojectKernel, traceWidth, traceHeight);
+                        state.DenoiserCompute,
+                        state.SpatialKernel,
+                        state.CurrentGi0,
+                        state.Spatial0,
+                        state.CameraDepth,
+                        state.CameraNormals,
+                        state.FullResolution,
+                        state.TraceResolution,
+                        state.SpatialResolution,
+                        state.Settings.DenoiserRadius);
 
-                    graphContext.cmd.SetComputeVectorParam(temporalCompute, FullResolutionId, fullResolution);
-                    graphContext.cmd.SetComputeTextureParam(temporalCompute, copyNormalsKernel, CameraNormalsTextureId, cameraNormals);
-                    graphContext.cmd.SetComputeTextureParam(temporalCompute, copyNormalsKernel, OutputNormalHistoryRwId, currentNormalHistory);
-                    Dispatch(graphContext.cmd, temporalCompute, copyNormalsKernel, fullWidth, fullHeight);
-
-                    if (settings.Denoise)
+                    if (state.Settings.SecondDenoiser)
                     {
-                        graphContext.cmd.SetComputeVectorParam(temporalCompute, FullResolutionId, fullResolution);
-                        graphContext.cmd.SetComputeMatrixParam(temporalCompute, InverseViewProjectionId, inverseViewProjection);
-                        graphContext.cmd.SetComputeMatrixParam(temporalCompute, PreviousInverseViewProjectionId, previousInverseViewProjection);
-                        graphContext.cmd.SetComputeVectorParam(temporalCompute, JitterDeltaId, jitterDeltaUv);
-                        graphContext.cmd.SetComputeIntParam(temporalCompute, HistoryValidId, historyValid ? 1 : 0);
-                        graphContext.cmd.SetComputeTextureParam(temporalCompute, validateHistoryKernel, CameraDepthTextureId, cameraDepth);
-                        graphContext.cmd.SetComputeTextureParam(temporalCompute, validateHistoryKernel, CameraNormalsTextureId, cameraNormals);
-                        graphContext.cmd.SetComputeTextureParam(temporalCompute, validateHistoryKernel, MotionVectorTextureId, motionVectorTexture);
-                        graphContext.cmd.SetComputeTextureParam(temporalCompute, validateHistoryKernel, HistoryDepthTextureId, historyDepth);
-                        graphContext.cmd.SetComputeTextureParam(temporalCompute, validateHistoryKernel, HistoryNormalTextureId, previousNormalHistory);
-                        graphContext.cmd.SetComputeTextureParam(temporalCompute, validateHistoryKernel, HistoryValidationTextureRwId, historyValidation);
-                        Dispatch(graphContext.cmd, temporalCompute, validateHistoryKernel, fullWidth, fullHeight);
-
                         DispatchTemporal(
                             graphContext.cmd,
-                            temporalCompute,
-                            temporalKernel,
-                            rawIndirectDiffuse,
-                            previousGi0,
-                            currentGi0,
-                            historyValidation,
-                            motionVectorTexture,
-                            fullResolution,
-                            traceResolution,
-                            historyValid);
+                            state.TemporalCompute,
+                            state.TemporalKernel,
+                            state.Spatial0,
+                            state.PreviousGi1,
+                            state.CurrentGi1,
+                            state.HistoryValidation,
+                            state.MotionVectorTexture,
+                            state.FullResolution,
+                            state.SpatialResolution,
+                            state.HistoryValid);
                         DispatchSpatial(
                             graphContext.cmd,
-                            denoiserCompute,
-                            spatialKernel,
-                            currentGi0,
-                            spatial0,
-                            cameraDepth,
-                            cameraNormals,
-                            fullResolution,
-                            traceResolution,
-                            spatialResolution,
-                            settings.DenoiserRadius);
-
-                        if (settings.SecondDenoiser)
-                        {
-                            DispatchTemporal(
-                                graphContext.cmd,
-                                temporalCompute,
-                                temporalKernel,
-                                spatial0,
-                                previousGi1,
-                                currentGi1,
-                                historyValidation,
-                                motionVectorTexture,
-                                fullResolution,
-                                spatialResolution,
-                                historyValid);
-                            DispatchSpatial(
-                                graphContext.cmd,
-                                denoiserCompute,
-                                spatialKernel,
-                                currentGi1,
-                                spatial1,
-                                cameraDepth,
-                                cameraNormals,
-                                fullResolution,
-                                spatialResolution,
-                                spatialResolution,
-                                settings.DenoiserRadius);
-                        }
-                    }
-
-                    if (requiresUpsample)
-                    {
-                        graphContext.cmd.SetComputeVectorParam(upsampleCompute, FullResolutionId, fullResolution);
-                        graphContext.cmd.SetComputeVectorParam(upsampleCompute, InputResolutionId, ResolutionVector(signalWidth, signalHeight));
-                        graphContext.cmd.SetComputeTextureParam(upsampleCompute, upsampleKernel, InputIndirectDiffuseTextureId, signal);
-                        graphContext.cmd.SetComputeTextureParam(upsampleCompute, upsampleKernel, CameraDepthTextureId, cameraDepth);
-                        graphContext.cmd.SetComputeTextureParam(upsampleCompute, upsampleKernel, OutputIndirectDiffuseTextureRwId, finalIndirectDiffuse);
-                        Dispatch(graphContext.cmd, upsampleCompute, upsampleKernel, fullWidth, fullHeight);
+                            state.DenoiserCompute,
+                            state.SpatialKernel,
+                            state.CurrentGi1,
+                            state.Spatial1,
+                            state.CameraDepth,
+                            state.CameraNormals,
+                            state.FullResolution,
+                            state.SpatialResolution,
+                            state.SpatialResolution,
+                            state.Settings.DenoiserRadius);
                     }
                 }
-            });
+
+                if (state.RequiresUpsample)
+                {
+                    graphContext.cmd.SetComputeVectorParam(state.UpsampleCompute, FullResolutionId, state.FullResolution);
+                    graphContext.cmd.SetComputeVectorParam(state.UpsampleCompute, InputResolutionId, ResolutionVector(state.SignalWidth, state.SignalHeight));
+                    graphContext.cmd.SetComputeTextureParam(state.UpsampleCompute, state.UpsampleKernel, InputIndirectDiffuseTextureId, state.Signal);
+                    graphContext.cmd.SetComputeTextureParam(state.UpsampleCompute, state.UpsampleKernel, CameraDepthTextureId, state.CameraDepth);
+                    graphContext.cmd.SetComputeTextureParam(state.UpsampleCompute, state.UpsampleKernel, OutputIndirectDiffuseTextureRwId, state.FinalIndirectDiffuse);
+                    Dispatch(graphContext.cmd, state.UpsampleCompute, state.UpsampleKernel, state.FullWidth, state.FullHeight);
+                }
+            }, _profilingSampler);
         }
 
         private bool KernelsAreValid()
@@ -505,26 +594,6 @@ namespace Tsukuyomi.Rendering
                 && !camera.stereoEnabled;
         }
 
-        private static TextureDesc CreateTextureDesc(int width, int height, GraphicsFormat format, string name, FilterMode filterMode)
-        {
-            return new TextureDesc(Mathf.Max(1, width), Mathf.Max(1, height))
-            {
-                name = name,
-                colorFormat = format,
-                depthBufferBits = DepthBits.None,
-                msaaSamples = MSAASamples.None,
-                enableRandomWrite = true,
-                clearBuffer = false,
-                filterMode = filterMode
-            };
-        }
-
-        private static void UseTexture(IUnsafeRenderGraphBuilder builder, TextureHandle texture, AccessFlags access)
-        {
-            if (texture.IsValid())
-                builder.UseTexture(texture, access);
-        }
-
         private static Vector4 ResolutionVector(int width, int height)
         {
             return new Vector4(width, height, 1.0f / Mathf.Max(1, width), 1.0f / Mathf.Max(1, height));
@@ -550,18 +619,15 @@ namespace Tsukuyomi.Rendering
             return new Vector2(jitterNdc.x * 0.5f, jitterNdc.y * yScale);
         }
 
-        private static Vector4[] CreateAmbientProbeData(SphericalHarmonicsL2 ambientProbe)
+        private static void FillAmbientProbeData(SphericalHarmonicsL2 ambientProbe, Vector4[] data)
         {
-            return new[]
-            {
-                new Vector4(ambientProbe[0, 3], ambientProbe[0, 1], ambientProbe[0, 2], ambientProbe[0, 0] - ambientProbe[0, 6]),
-                new Vector4(ambientProbe[1, 3], ambientProbe[1, 1], ambientProbe[1, 2], ambientProbe[1, 0] - ambientProbe[1, 6]),
-                new Vector4(ambientProbe[2, 3], ambientProbe[2, 1], ambientProbe[2, 2], ambientProbe[2, 0] - ambientProbe[2, 6]),
-                new Vector4(ambientProbe[0, 4], ambientProbe[0, 5], ambientProbe[0, 6] * 3.0f, ambientProbe[0, 7]),
-                new Vector4(ambientProbe[1, 4], ambientProbe[1, 5], ambientProbe[1, 6] * 3.0f, ambientProbe[1, 7]),
-                new Vector4(ambientProbe[2, 4], ambientProbe[2, 5], ambientProbe[2, 6] * 3.0f, ambientProbe[2, 7]),
-                new Vector4(ambientProbe[0, 8], ambientProbe[1, 8], ambientProbe[2, 8], 1.0f)
-            };
+            data[0] = new Vector4(ambientProbe[0, 3], ambientProbe[0, 1], ambientProbe[0, 2], ambientProbe[0, 0] - ambientProbe[0, 6]);
+            data[1] = new Vector4(ambientProbe[1, 3], ambientProbe[1, 1], ambientProbe[1, 2], ambientProbe[1, 0] - ambientProbe[1, 6]);
+            data[2] = new Vector4(ambientProbe[2, 3], ambientProbe[2, 1], ambientProbe[2, 2], ambientProbe[2, 0] - ambientProbe[2, 6]);
+            data[3] = new Vector4(ambientProbe[0, 4], ambientProbe[0, 5], ambientProbe[0, 6] * 3.0f, ambientProbe[0, 7]);
+            data[4] = new Vector4(ambientProbe[1, 4], ambientProbe[1, 5], ambientProbe[1, 6] * 3.0f, ambientProbe[1, 7]);
+            data[5] = new Vector4(ambientProbe[2, 4], ambientProbe[2, 5], ambientProbe[2, 6] * 3.0f, ambientProbe[2, 7]);
+            data[6] = new Vector4(ambientProbe[0, 8], ambientProbe[1, 8], ambientProbe[2, 8], 1.0f);
         }
 
         private static void SetResolution(UnsafeCommandBuffer cmd, ComputeShader compute, Vector4 fullResolution, Vector4 outputResolution)

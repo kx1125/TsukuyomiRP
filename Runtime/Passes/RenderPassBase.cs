@@ -17,7 +17,15 @@ namespace Tsukuyomi.Rendering
             set => _injectionPoint = value; 
         }
 
+        // Override for allocation-free discovery. Read current values on every call.
+        // Reflection remains a compatibility fallback for third-party passes.
+        public virtual void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+            => TextureSlotMetadata.Collect(this, slots);
+
         public virtual int Priority => 0;
+
+        /// <summary>Declare derived resources after resolving this camera's settings; do not read graph handles here.</summary>
+        public virtual void CollectResourceRequirements(in FrameContext frame, in ResourceRequirementCollector requirements) { }
 
         public virtual bool IsActive(in FrameContext frame) => Enabled;
         public virtual void Setup(in FrameContext frame) { }

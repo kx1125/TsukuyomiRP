@@ -93,6 +93,7 @@ namespace Tsukuyomi.Rendering.Editor
 
         private static string GetPassKind(Type type)
         {
+            if (typeof(GraphFeaturePass).IsAssignableFrom(type)) return "Graph Feature (0..N nodes)";
             if (typeof(PostPass).IsAssignableFrom(type)) return "Post Pass";
             if (typeof(RasterPass).IsAssignableFrom(type)) return "Raster Pass";
             if (typeof(ComputePass).IsAssignableFrom(type)) return "Compute Pass";

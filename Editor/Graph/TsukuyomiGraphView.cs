@@ -240,6 +240,7 @@ namespace Tsukuyomi.Rendering.Editor
         {
             if (typeof(PostPass).IsAssignableFrom(type)) return "Post";
             if (typeof(RasterPass).IsAssignableFrom(type)) return "Raster";
+            if (typeof(GraphFeaturePass).IsAssignableFrom(type)) return "Graph Feature";
             if (typeof(ComputePass).IsAssignableFrom(type)) return "Compute";
             if (typeof(UnsafePass).IsAssignableFrom(type)) return "Unsafe";
             return "Other";

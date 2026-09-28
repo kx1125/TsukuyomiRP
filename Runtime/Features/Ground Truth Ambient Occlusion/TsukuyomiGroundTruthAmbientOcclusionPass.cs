@@ -54,7 +54,7 @@ namespace Tsukuyomi.Rendering
         private readonly Vector4[] _cameraYExtent = new Vector4[2];
         private readonly Vector4[] _cameraZExtent = new Vector4[2];
         private readonly Matrix4x4[] _cameraViewProjections = new Matrix4x4[2];
-        private readonly ProfilingSampler _profilingSampler = new("Ground Truth Ambient Occlusion");
+        private static readonly ProfilingSampler _profilingSampler = new("Ground Truth Ambient Occlusion");
 
         private TsukuyomiPipelineProfile _profile;
         private TsukuyomiGroundTruthAmbientOcclusionResolvedSettings _settings;
@@ -64,6 +64,12 @@ namespace Tsukuyomi.Rendering
         private int _tracingKernel = -1;
         private int _spatialDenoiseKernel = -1;
         private int _upsampleKernel = -1;
+
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(depth);
+            slots.Add(normals);
+        }
 
         public override string Name => "Ground Truth Ambient Occlusion";
 
@@ -143,8 +149,42 @@ namespace Tsukuyomi.Rendering
                 && _upsampleComputeShader != null;
         }
 
+        private sealed class RenderData
+        {
+            public TextureHandle CameraDepth;
+            public TextureHandle CameraNormals;
+            public TextureHandle DepthPyramid;
+            public int AoWidth;
+            public int AoHeight;
+            public TextureHandle AoPackedData;
+            public TextureHandle FinalAO;
+            public PreparedAOParameters AoParameters;
+            public Vector4 AmbientOcclusionParam;
+            public ComputeShader Tracing;
+            public ComputeShader Denoise;
+            public ComputeShader Upsample;
+            public int TracingKernel;
+            public int DenoiseKernel;
+            public int UpsampleKernel;
+            public bool DownSample;
+            public int FullWidth;
+            public int FullHeight;
+            public readonly Vector4[] TopLeftCorner = new Vector4[2];
+            public readonly Vector4[] XExtent = new Vector4[2];
+            public readonly Vector4[] YExtent = new Vector4[2];
+            public readonly Vector4[] ZExtent = new Vector4[2];
+            public readonly Matrix4x4[] ViewProjections = new Matrix4x4[2];
+        }
+
+        public override void CollectResourceRequirements(in FrameContext frame, in ResourceRequirementCollector requirements)
+        {
+            if (!frame.CameraData.isPreviewCamera) requirements.RequireDepthPyramid();
+        }
+
         public override void Record(in UnsafePassContext context)
         {
+            var passData = context.GetOrCreateData<RenderData>();
+            var graphResources = context.GraphResources;
             if (_profile == null || !_settings.IsActive || context.CameraData.isPreviewCamera)
                 return;
 
@@ -163,76 +203,82 @@ namespace Tsukuyomi.Rendering
             int aoWidth = Mathf.Max(1, cameraDescriptor.width / downsampleDivider);
             int aoHeight = Mathf.Max(1, cameraDescriptor.height / downsampleDivider);
 
-            TextureHandle aoPackedData = context.RenderGraph.CreateTexture(CreateAODesc(aoWidth, aoHeight, GraphicsFormat.R32_SFloat, "_GTAOPackedData"));
-            TextureHandle finalAO = context.RenderGraph.CreateTexture(CreateAODesc(cameraDescriptor.width, cameraDescriptor.height, GraphicsFormat.R8_UNorm, "_ScreenSpaceOcclusionTexture"));
-            PreparedAOParameters aoParameters = PrepareVariables(context, aoWidth, aoHeight, downsampleDivider);
-            Vector4 ambientOcclusionParam = new(1.0f, 0.0f, 0.0f, _settings.DirectLightingStrength);
+            TextureHandle aoPackedData = graphResources.CreateTexture(
+                TextureDescriptors.Color2D(aoWidth, aoHeight, GraphicsFormat.R32_SFloat,
+                    "_GTAOPackedData", FilterMode.Bilinear, randomWrite: true, clearColor: Color.white), AccessFlags.ReadWrite);
+            TextureHandle finalAO = graphResources.CreateTexture(
+                TextureDescriptors.Color2D(cameraDescriptor.width, cameraDescriptor.height, GraphicsFormat.R8_UNorm,
+                    "_ScreenSpaceOcclusionTexture", FilterMode.Bilinear, randomWrite: true, clearColor: Color.white), AccessFlags.ReadWrite);
+            passData.AoParameters = PrepareVariables(context, aoWidth, aoHeight, downsampleDivider);
+            passData.AmbientOcclusionParam = new(1.0f, 0.0f, 0.0f, _settings.DirectLightingStrength);
 
-            ComputeShader tracing = _tracingComputeShader;
-            ComputeShader denoise = _spatialDenoiseComputeShader;
-            ComputeShader upsample = _upsampleComputeShader;
-            int tracingKernel = _tracingKernel;
-            int denoiseKernel = _spatialDenoiseKernel;
-            int upsampleKernel = _upsampleKernel;
-            bool downSample = _settings.DownSample;
-            int fullWidth = cameraDescriptor.width;
-            int fullHeight = cameraDescriptor.height;
-            Vector4[] topLeftCorner = CopyArray(_cameraTopLeftCorner);
-            Vector4[] xExtent = CopyArray(_cameraXExtent);
-            Vector4[] yExtent = CopyArray(_cameraYExtent);
-            Vector4[] zExtent = CopyArray(_cameraZExtent);
-            Matrix4x4[] viewProjections = CopyArray(_cameraViewProjections);
-            ProfilingSampler profilingSampler = _profilingSampler;
+            passData.Tracing = _tracingComputeShader;
+            passData.Denoise = _spatialDenoiseComputeShader;
+            passData.Upsample = _upsampleComputeShader;
+            passData.TracingKernel = _tracingKernel;
+            passData.DenoiseKernel = _spatialDenoiseKernel;
+            passData.UpsampleKernel = _upsampleKernel;
+            passData.DownSample = _settings.DownSample;
+            passData.FullWidth = cameraDescriptor.width;
+            passData.FullHeight = cameraDescriptor.height;
+            System.Array.Copy(_cameraTopLeftCorner, passData.TopLeftCorner, 2);
+            System.Array.Copy(_cameraXExtent, passData.XExtent, 2);
+            System.Array.Copy(_cameraYExtent, passData.YExtent, 2);
+            System.Array.Copy(_cameraZExtent, passData.ZExtent, 2);
+            System.Array.Copy(_cameraViewProjections, passData.ViewProjections, 2);
 
             context.Builder.UseTexture(cameraDepth, AccessFlags.Read);
             context.Builder.UseTexture(cameraNormals, AccessFlags.Read);
             context.Builder.UseTexture(depthPyramid, AccessFlags.Read);
-            context.Builder.UseTexture(aoPackedData, AccessFlags.ReadWrite);
-            context.Builder.UseTexture(finalAO, AccessFlags.ReadWrite);
             context.Builder.SetGlobalTextureAfterPass(finalAO, ScreenSpaceOcclusionTextureId);
             context.FrameData.Get<UniversalResourceData>().ssaoTexture = finalAO;
             context.Builder.AllowPassCulling(false);
             context.Builder.AllowGlobalStateModification(true);
 
-            context.SetRenderFunc((data, graphContext) =>
+            passData.CameraDepth = cameraDepth;
+            passData.CameraNormals = cameraNormals;
+            passData.DepthPyramid = depthPyramid;
+            passData.AoWidth = aoWidth;
+            passData.AoHeight = aoHeight;
+            passData.AoPackedData = aoPackedData;
+            passData.FinalAO = finalAO;
+
+            context.SetRenderFunc(passData, static (state, graphContext) =>
             {
-                using (new ProfilingScope(graphContext.cmd, profilingSampler))
+                if (s_KeywordsInitialized)
+                    graphContext.cmd.SetKeyword(ScreenSpaceOcclusionKeyword, true);
+
+                SetKeyword(state.Tracing, HalfResolutionKeyword, state.DownSample);
+                SetKeyword(state.Tracing, FullResolutionKeyword, !state.DownSample);
+                SetKeyword(state.Tracing, PackAODepthKeyword, true);
+
+                PushAOParameters(graphContext.cmd, state.Tracing, state.AoParameters, state.TopLeftCorner, state.XExtent, state.YExtent, state.ZExtent, state.ViewProjections);
+                graphContext.cmd.SetComputeTextureParam(state.Tracing, state.TracingKernel, AOPackedDataId, state.AoPackedData);
+                graphContext.cmd.SetComputeTextureParam(state.Tracing, state.TracingKernel, CameraDepthTextureId, state.CameraDepth);
+                graphContext.cmd.SetComputeTextureParam(state.Tracing, state.TracingKernel, DepthPyramidId, state.DepthPyramid);
+                graphContext.cmd.SetComputeTextureParam(state.Tracing, state.TracingKernel, CameraNormalsTextureId, state.CameraNormals);
+                graphContext.cmd.DispatchCompute(state.Tracing, state.TracingKernel, DivRoundUp(state.AoWidth, TileSize), DivRoundUp(state.AoHeight, TileSize), 1);
+
+                if (state.DownSample)
                 {
-                    if (s_KeywordsInitialized)
-                        graphContext.cmd.SetKeyword(ScreenSpaceOcclusionKeyword, true);
-
-                    SetKeyword(tracing, HalfResolutionKeyword, downSample);
-                    SetKeyword(tracing, FullResolutionKeyword, !downSample);
-                    SetKeyword(tracing, PackAODepthKeyword, true);
-
-                    PushAOParameters(graphContext.cmd, tracing, aoParameters, topLeftCorner, xExtent, yExtent, zExtent, viewProjections);
-                    graphContext.cmd.SetComputeTextureParam(tracing, tracingKernel, AOPackedDataId, aoPackedData);
-                    graphContext.cmd.SetComputeTextureParam(tracing, tracingKernel, CameraDepthTextureId, cameraDepth);
-                    graphContext.cmd.SetComputeTextureParam(tracing, tracingKernel, DepthPyramidId, depthPyramid);
-                    graphContext.cmd.SetComputeTextureParam(tracing, tracingKernel, CameraNormalsTextureId, cameraNormals);
-                    graphContext.cmd.DispatchCompute(tracing, tracingKernel, DivRoundUp(aoWidth, TileSize), DivRoundUp(aoHeight, TileSize), 1);
-
-                    if (downSample)
-                    {
-                        PushAOParameters(graphContext.cmd, upsample, aoParameters, topLeftCorner, xExtent, yExtent, zExtent, viewProjections);
-                        graphContext.cmd.SetComputeTextureParam(upsample, upsampleKernel, AOPackedDataId, aoPackedData);
-                        graphContext.cmd.SetComputeTextureParam(upsample, upsampleKernel, OcclusionTextureId, finalAO);
-                        graphContext.cmd.SetComputeTextureParam(upsample, upsampleKernel, DepthPyramidId, depthPyramid);
-                        // Each thread writes 2*p and 2*p-1. Include the final half-grid
-                        // point so the last row/column is covered at every resolution.
-                        graphContext.cmd.DispatchCompute(upsample, upsampleKernel, DivRoundUp(fullWidth / 2 + 1, TileSize), DivRoundUp(fullHeight / 2 + 1, TileSize), 1);
-                    }
-                    else
-                    {
-                        PushAOParameters(graphContext.cmd, denoise, aoParameters, topLeftCorner, xExtent, yExtent, zExtent, viewProjections);
-                        graphContext.cmd.SetComputeTextureParam(denoise, denoiseKernel, AOPackedDataId, aoPackedData);
-                        graphContext.cmd.SetComputeTextureParam(denoise, denoiseKernel, OcclusionTextureId, finalAO);
-                        graphContext.cmd.DispatchCompute(denoise, denoiseKernel, DivRoundUp(aoWidth, TileSize), DivRoundUp(aoHeight, TileSize), 1);
-                    }
-
-                    graphContext.cmd.SetGlobalVector(AmbientOcclusionParamId, ambientOcclusionParam);
+                    PushAOParameters(graphContext.cmd, state.Upsample, state.AoParameters, state.TopLeftCorner, state.XExtent, state.YExtent, state.ZExtent, state.ViewProjections);
+                    graphContext.cmd.SetComputeTextureParam(state.Upsample, state.UpsampleKernel, AOPackedDataId, state.AoPackedData);
+                    graphContext.cmd.SetComputeTextureParam(state.Upsample, state.UpsampleKernel, OcclusionTextureId, state.FinalAO);
+                    graphContext.cmd.SetComputeTextureParam(state.Upsample, state.UpsampleKernel, DepthPyramidId, state.DepthPyramid);
+                    // Each thread writes 2*p and 2*p-1. Include the final half-grid
+                    // point so the last row/column is covered at every resolution.
+                    graphContext.cmd.DispatchCompute(state.Upsample, state.UpsampleKernel, DivRoundUp(state.FullWidth / 2 + 1, TileSize), DivRoundUp(state.FullHeight / 2 + 1, TileSize), 1);
                 }
-            });
+                else
+                {
+                    PushAOParameters(graphContext.cmd, state.Denoise, state.AoParameters, state.TopLeftCorner, state.XExtent, state.YExtent, state.ZExtent, state.ViewProjections);
+                    graphContext.cmd.SetComputeTextureParam(state.Denoise, state.DenoiseKernel, AOPackedDataId, state.AoPackedData);
+                    graphContext.cmd.SetComputeTextureParam(state.Denoise, state.DenoiseKernel, OcclusionTextureId, state.FinalAO);
+                    graphContext.cmd.DispatchCompute(state.Denoise, state.DenoiseKernel, DivRoundUp(state.AoWidth, TileSize), DivRoundUp(state.AoHeight, TileSize), 1);
+                }
+
+                graphContext.cmd.SetGlobalVector(AmbientOcclusionParamId, state.AmbientOcclusionParam);
+            }, _profilingSampler);
         }
 
         private PreparedAOParameters PrepareVariables(in UnsafePassContext context, int width, int height, int downsampleDivider)
@@ -319,21 +365,6 @@ namespace Tsukuyomi.Rendering
             return new PreparedAOParameters(variables, ssaoUVToView, projectionParams2);
         }
 
-        private static TextureDesc CreateAODesc(int width, int height, GraphicsFormat format, string name)
-        {
-            return new TextureDesc(width, height)
-            {
-                name = name,
-                colorFormat = format,
-                depthBufferBits = DepthBits.None,
-                msaaSamples = MSAASamples.None,
-                enableRandomWrite = true,
-                clearBuffer = false,
-                clearColor = Color.white,
-                filterMode = FilterMode.Bilinear
-            };
-        }
-
         private static void PushAOParameters(
             UnsafeCommandBuffer cmd,
             ComputeShader compute,
@@ -375,18 +406,5 @@ namespace Tsukuyomi.Rendering
             return (value + divisor - 1) / divisor;
         }
 
-        private static Vector4[] CopyArray(Vector4[] source)
-        {
-            Vector4[] result = new Vector4[source.Length];
-            source.CopyTo(result, 0);
-            return result;
-        }
-
-        private static Matrix4x4[] CopyArray(Matrix4x4[] source)
-        {
-            Matrix4x4[] result = new Matrix4x4[source.Length];
-            source.CopyTo(result, 0);
-            return result;
-        }
     }
 }

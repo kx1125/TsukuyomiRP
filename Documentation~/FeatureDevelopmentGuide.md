@@ -8,13 +8,13 @@
 | --- | --- | --- | --- |
 | Planar Reflection | `RasterPass` + 场景组件 | 活动反射平面、额外相机矩阵、Renderer List | 场景组件注册、全局纹理清理、独立绘制视角 |
 | Contact Shadow | `ComputePass` + 可选独立降噪 Pass | Camera Depth；降噪还需要 Camera Normals | Compute 输出、同帧跨 Pass 资源、条件化子 Pass |
-| Depth Pyramid | `ComputePass`，作为 GTAO 的内部依赖 | Camera Depth、Mip 布局 Buffer | 依赖型 Feature、持久 Buffer 与分层深度 |
+| Depth Pyramid | `ComputePass`，按消费者声明共享生产 | Camera Depth、Mip 布局 Buffer | 需求合并、生产顺序检查与分层深度 |
 | GTAO | `UnsafePass` + Restore Pass | Depth Pyramid、Camera Normals、全局 Keyword | Feature 依赖链、全局状态恢复 |
 | PCSS Shadow | `UnsafePass` + Restore Pass | 主光阴影、深度、Contact/Per Object Shadow 状态 | Forward/Deferred 动态排序、多 Feature 协作 |
 | Per Object Shadow | 原生 `ScriptableRenderPass` | 主方向光、Rendering Layers、场景 Renderer 注册 | 不适合 Bridge 抽象时的例外路径、外部状态恢复 |
-| Volume Light | `UnsafePass` + 局部光组件 | Depth、主光/附加光、可选 Probe Volume | 多阶段屏幕效果、场景组件管理 |
+| Volume Light | `GraphFeaturePass` 录制一个强类型 Unsafe 节点 + 局部光组件 | Depth、主光/附加光、可选 Probe Volume | 多阶段屏幕效果、场景组件管理 |
 | SSS Skin | `UnsafePass` | Layer Mask、深度/法线、专用 Shader Pass | 选择性 Renderer 绘制、共享 Depth Normals |
-| Post Processing | 一个 `UnsafePass` 调度多个 `TsukuyomiPostProcessEffect` | Active Color、Volume Stack | 可组合 Effect 链、临时纹理 ping-pong |
+| Post Processing | `GraphFeaturePass` 调度 Effect 节点与 Uber 合成 | Active Color、Volume Stack | 显式 Effect 输出依赖、池化合成参数 |
 | FSR3 | URP `AbstractUpscaler` | Color、Depth、Motion Vectors、跨帧 History | 不经过 `TsukuyomiFeature` 的管线扩展、时域资源生命周期 |
 
 因此新增能力前，先判断它属于：固定管线 Feature、可排序通用 Pass、后处理 Effect、原生 URP Pass，还是 Upscaler。不要默认所有功能都注册成同一种 Bridge Pass。
@@ -26,7 +26,7 @@
 - 固定管线能力放在 `Rendering Features` 中配置；可组合、可排序的通用 Pass 放在 `Passes` list 中。
 - 资源通过 `TsukuyomiRenderPipelineResources` 预加载，不在运行时使用 `Shader.Find`，也不要求用户手动在 RendererFeature 面板上配置 shader。
 - 默认参数来自 `TsukuyomiPipelineProfile`，场景差异通过 Volume Override 覆盖。
-- 优先接入 TsukuyomiRP 的 RenderGraph 封装：`RasterPass`、`ComputePass`、`UnsafePass`、`TextureSlot`、`ResourceHub`。
+- 优先接入 TsukuyomiRP 的 RenderGraph 封装：`GraphFeaturePass`、`RasterPass`、`ComputePass`、`UnsafePass`、`TextureSlot`、`ResourceHub`。
 - Feature 有依赖时显式表达启用条件和队列顺序；不要依赖字段声明顺序或偶然的 enqueue 顺序。
 - 修改全局 keyword、全局纹理、Rendering Layer 或灯光状态的 Feature，关闭、缺少 Profile 和 `Dispose()` 时都必须恢复状态。
 
@@ -160,12 +160,13 @@ if (material == null && resources.MyFeatureShader != null)
 
 优先级建议：
 
+- `GraphFeaturePass`：需要录制零到多个原生节点的 Feature，依次创建并关闭强类型节点的 Builder。
 - `RasterPass`：普通 raster 渲染、fullscreen material pass、renderer list。
 - `ComputePass`：纯 compute dispatch，读写 texture/buffer 明确。
 - `UnsafePass`：需要 `SetRenderTarget`、多阶段 blit、全局关键字、全局纹理，或需要在单个 RenderGraph pass 内维持多个内部绘制阶段。
 - `PostPass`：简单后处理，输入 active color，输出新的 active color。
 
-PCSS 和 Volume Light 使用 `UnsafePass`，因为它们需要在一个 RenderGraph pass 内维持和原始实现一致的多阶段绘制结构。
+PCSS 使用 `UnsafePass`；Volume Light 通过 `GraphFeaturePass` 录制一个 Unsafe 节点，两者目前都保留内部多阶段命令顺序。
 
 Contact Shadow 使用 `ComputePass`，因为它是 compute 生成资源，denoise 也可以独立 compute pass。
 
@@ -179,7 +180,7 @@ Contact Shadow 使用 `ComputePass`，因为它是 compute 生成资源，denois
 
 ### 后处理 Effect 路径
 
-Bloom、Tonemapping 这类只在同一后处理链中按顺序处理 Active Color 的功能，应实现 `TsukuyomiPostProcessEffect`，由 `TsukuyomiPostProcessPass` 统一调度，而不是各自创建 Registry/Bridge。
+Bloom、Tonemapping 这类参与同一后处理链的功能，应实现 `TsukuyomiPostProcessEffect`，由 `TsukuyomiPostProcessPass` 统一调度。Bloom 在独立节点生成辅助纹理，Tonemapping 提供合成参数，最终在 Uber 节点处理 Active Color。
 
 Effect 应负责：
 
@@ -188,7 +189,7 @@ Effect 应负责：
 - 记录自己的 RenderGraph/CommandBuffer 工作，但不持有其他 Effect 的临时纹理；
 - 若拥有运行时创建的 Material 或持久资源，实现释放逻辑并由 PostProcess Pass 统一调用。
 
-这种路径能保证后处理顺序明确，并复用 Active Color 的 ping-pong 纹理。
+这种路径显式声明 Effect 输出与 Uber 合成的依赖，并通过一次 Uber 绘制交接新的 Active Color。
 
 ## TextureSlot 用法
 
@@ -219,6 +220,17 @@ TextureHandle cameraColor = context.GetTexture(color);
 - 跨 pass 共享的同帧资源应使用 `FrameResources`/`TsukuyomiFrameResourceRegistry` 的命名资源机制；跨帧持久资源使用 `ResourceHub`。
 
 ## 跨 Pass 资源
+
+### 每帧分配与参数保存
+
+- 内置 Pass 覆写 `CollectTextureSlots(List<TextureSlot>)`，把当前 slot 值加入调用方提供的列表，避免反射装箱。动态 slot 每次都应重新读取。未覆写的自定义 Pass 继续使用反射回退；派生类新增 slot 时也要更新这个方法。
+- `FrameContext` 是只读结构体，`IsActive(in FrameContext)`、`Setup(in FrameContext)` 的调用方式不变。可选值使用 `FrameContext?`；不要依赖原来的引用类型身份。
+- `FrameResources` 由当前相机的 `ContextContainer` 复用。每个 Bridge 录制前会从 URP 刷新附件；录制过程中替换颜色仍通过 `PassRecorder.SwapActiveColor`。执行回调应保存具体 handle，不要保存这个可变视图。
+- 每个录制操作从 `context.GetOrCreateData<T>()` 获取自己的参数对象，完整赋值后调用 `context.SetRenderFunc(data, static (state, graphContext) => { ... }, sampler)`。框架直接把对应快照传给回调，并负责可选的 profiling scope；回调内不需要再次查找数据。这个对象随 RenderGraph PassData 池化，所有会被回调读取的字段都必须赋值，包括关闭功能时的默认值。
+- 直接给快照字段赋值，避免仅为转存而创建一套同名局部变量。需要多步计算的局部变量可以保留。只在成功声明依赖、准备好参数后注册回调；提前退出时框架保持空回调。不要传入 Feature 实例或静态共享的可变参数对象。
+- `RasterPassContext`、`ComputePassContext`、`UnsafePassContext` 和 `PostPassContext` 均支持上述接口。旧版 `PassData.GetOrCreateData<T>()` 与非泛型 `SetRenderFunc(...)` 仍然可用。单个图 Pass 使用多个数据类型时，缓存继续分别保留每种类型；执行阶段不做字典查询。
+- 固定数组放入上述参数对象，逐次填充；不要把不同相机或尚未执行的 Pass 的数据写到同一个静态数组。全局缓存仅适合不可变内容，并应限制容量。
+- 后处理 Effect 在 `RecordGraph` 中录制自己的节点并返回输出纹理；该方法在 Uber builder 打开前调用。合成参数类型继承 `TsukuyomiPostProcessData` 并覆写 `SetupUber`，在 `Record` 中通过 `context.GetOrCreateData<T>()` 获取快照，再调用 `context.AddUberSetup(data)` 注册。Plan 每次录制会清空合成参数列表，Effect 需要重新添加当前启用的参数。同一 Plan 每种参数类型对应一个对象，需要独立参数的不同操作应使用不同类型。
 
 命名资源由生产者通过 `Write` / `ReadWrite` slot 创建，消费者通过 `Read` slot 查询。生产者没有运行时，查询返回无效 Handle，消费者应在绑定资源前退出；读取不会隐式创建纹理或 Buffer。同名资源描述符不兼容时抛出异常，包括尺寸模式、缩放、格式、采样、清除及 Buffer usage 等设置。
 
@@ -380,6 +392,17 @@ internal sealed class TsukuyomiMyFeaturePass : UnsafePass
 
     public override string Name => "My Feature";
 
+    public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+    {
+        slots.Add(depth);
+    }
+
+    private sealed class RenderData
+    {
+        public Material Material;
+        public TsukuyomiMyFeatureResolvedSettings Settings;
+    }
+
     public bool Configure(TsukuyomiPipelineProfile profile, TsukuyomiMyFeatureVolume volume)
     {
         _profile = profile;
@@ -420,12 +443,13 @@ internal sealed class TsukuyomiMyFeaturePass : UnsafePass
         context.Builder.UseTexture(cameraDepth, AccessFlags.Read);
         context.Builder.AllowGlobalStateModification(true);
 
-        Material material = _material;
-        TsukuyomiMyFeatureResolvedSettings settings = _settings;
+        var recordData = context.GetOrCreateData<RenderData>();
+        recordData.Material = _material;
+        recordData.Settings = _settings;
 
-        context.SetRenderFunc((data, graphContext) =>
+        context.SetRenderFunc(recordData, static (state, graphContext) =>
         {
-            material.SetFloat("_Intensity", settings.Intensity);
+            state.Material.SetFloat("_Intensity", state.Settings.Intensity);
             // draw / dispatch / blit
         });
     }
@@ -440,6 +464,112 @@ internal sealed class TsukuyomiMyFeaturePass : UnsafePass
     }
 }
 ```
+
+## RenderGraph 资源与全屏绘制
+
+### 创建资源时声明访问方式
+
+四类 Pass Context 都提供 `GraphResources`。需要在当前 pass 采样或读写的纹理，可以把创建/导入与依赖声明合并：
+
+```csharp
+var graphResources = context.GraphResources;
+TextureDesc desc = TextureDescriptors.Color2D(width, height,
+    GraphicsFormat.R16G16B16A16_SFloat, "My Intermediate",
+    FilterMode.Bilinear, randomWrite: true);
+TextureHandle intermediate = graphResources.CreateTexture(desc, AccessFlags.ReadWrite);
+TextureHandle history = graphResources.ImportTexture(historyRT, AccessFlags.Read);
+graphResources.UseTexture(cameraDepth, AccessFlags.Read);
+graphResources.UseBuffer(offsets, AccessFlags.Read);
+```
+
+- `GraphResources` 是栈上的轻量视图，只能在当前 builder 的录制期使用。它直接调用原生 RenderGraph API，没有额外的资源列表或逐帧委托。
+- 访问权限由业务明确传入。上述创建/导入操作已登记依赖，不需要再次 `Builder.UseTexture`。
+- `UseTexture` / `UseBuffer` 忽略无效的可选 handle；必需输入仍应先验证，再创建和登记输出资源。它们不负责决定 Feature 是否执行。
+- Raster 使用 `context.ColorAttachment(desc / handle, index, access)` 和 `context.DepthAttachment(handle, access)`。附件与采样/UAV 声明分开，不能只根据 Write 自动推断用途；原生附件接口仍可使用。
+- 现有 `RenderGraph`、`Builder` API 保留，可用于自定义导入参数、特殊纹理和其他原生能力。
+- `TextureDescriptors.Color2D` 创建无深度、无 MSAA 的普通二维纹理，默认 Point、不清除、不开启 random write。尺寸和格式由业务决定；需要 XR、array、mip 或继承相机描述符时，直接构造 `TextureDesc`。
+- `TsukuyomiPostProcessBuildContext.CreateTexture(desc, access)` 提供相同的创建并登记能力。旧的单参数版本只创建资源。
+
+### 单次全屏后处理
+
+`PostPass` 已经绑定 source/destination。只需要一次材质绘制时：
+
+```csharp
+public override void Render(in PostPassContext context, TextureHandle source, TextureHandle destination)
+{
+    context.Blit(material, passIndex: 0);
+}
+```
+
+此调用设置当前 pass 的执行回调，沿用 `PostPass` 的目标替换逻辑。材质、shader pass 索引或 source/destination 无效时不会登记绘制；多次有效调用会替换回调，不会追加多次绘制。需要多个图节点时使用 `GraphFeaturePass`；单个节点的自定义回调继续使用 `GetOrCreateData<T>` 和 `SetRenderFunc`。
+
+### 多节点 Feature
+
+`GraphFeaturePass` 在一个注入位置录制 0～N 个原生节点。Bridge 调用它时没有打开 builder；跨注入位置的功能仍使用多个入口。现有 SerializeReference 类型及单 Pass API 保持兼容。
+
+```csharp
+public override void RecordGraph(in FeatureGraphContext graph)
+{
+    var source = graph.GetTexture(color);
+    if (!source.IsValid() || material == null) return;
+    var horizontal = graph.AddFullscreen(source, material, 0, HorizontalSampler);
+    var output = graph.AddFullscreen(horizontal, material, 1, VerticalSampler);
+    graph.SetActiveColor(output);
+}
+```
+
+- `AddFullscreen` 完成颜色目标创建、源 Read、附件 WriteAll 和静态绘制回调。材质、源或 shader pass 无效时返回原输入。调用前应验证整条分支需要的所有资源。
+- `Copy` 创建一次颜色拷贝节点；两种操作只接受可采样的 2D/array 颜色，depth、raw MSAA 和 cubemap 返回原输入。它们不会自行替换 ActiveColor。`SetActiveColor` 仅更新引用，不复制纹理；Backbuffer 上不替换目标。Bridge 保留阶段间资源刷新及 Camera Stack 颜色收尾。
+- 通用绘制要求材质参数在执行前稳定；逐节点变化的参数应存入 TData 并在自定义回调中绑定。不要在录制两个节点时依次改同一个 Material，期待它自动成为两份快照。
+- `TextureDescriptors.ColorLike` 保留源的尺寸模式、array/XR 布局和动态缩放策略，去除深度、MSAA、mip、UAV 和 memoryless。它用于颜色绘制；自定义 mip/viewport/MSAA 采样使用原生节点。
+
+强类型节点直接使用 Unity 的池化 TData：
+
+```csharp
+var depth = graph.GetTexture(depthSlot);
+if (!depth.IsValid() || compute == null) return;
+using (var node = graph.AddCompute<TraceData>("GI.Trace", TraceSampler))
+{
+    node.Data.Depth = node.ReadTexture(depth);
+    node.Data.Output = node.Resources.CreateTexture(desc, AccessFlags.Write);
+    node.Data.Compute = compute;
+    node.Data.Settings = settings;
+    node.SetRenderFunc(static (data, context) => ExecuteTrace(data, context));
+}
+```
+
+`AddRaster<T>` / `AddCompute<T>` / `AddUnsafe<T>` 返回栈上 using 作用域，分别保留原生 Builder。关闭当前作用域后再创建下一节点。必需输入检查放在 Add 之前；每个节点必须设置执行回调，新接口不安装空回调来掩盖错误，Unity 的 RenderGraph 验证负责报告未设置回调或嵌套 builder。TData 每节点独立，池化复用前必须覆盖回调读取的全部字段；不要缓存节点或跨图保存 TextureHandle。
+
+旧 Context 与新节点共享 `PassResourceBuilder`。`ReadTexture(slot / handle)` 和 `ReadBuffer(slot / handle)` 合并解析及 Read 声明。命名资源读取只查询已生产的结果，即使误传了可写 slot 也不会读时创建。可选无效 handle 不登记依赖。`ImportTexture(rt, access, importParams)` 保留原生导入选项。
+
+### 公共 Depth Pyramid 需求
+
+Feature 在参数配置完成后声明派生资源需求：
+
+```csharp
+public override void CollectResourceRequirements(in FrameContext frame,
+    in ResourceRequirementCollector requirements)
+{
+    requirements.RequireDepthPyramid();
+    // 或 requirements.RequireDepthPyramid(new DepthPyramidRequest(mipCount: 8));
+}
+```
+
+`ResourceRequirements` 属于本次 URP 相机调用，每次 AddRenderPasses 都 Begin/清空，使用递增 Invocation 区分同帧重复渲染；不保存临时 handle。请求 key 表达深度来源、生产事件、格式、checkerboard 布局。兼容请求合并 mip 覆盖范围；当前生产者生成完整的 packed min-depth pyramid。首版支持 CameraDepthTexture / AfterRenderingPrePasses / R32_SFloat / 普通 2D / 无 checkerboard，其他变体独立返回 Unsupported，不影响支持的请求。
+
+生产者必须早于消费者，且在声明的阶段生产。缺失生产者、不支持或顺序冲突通过 `GetStatus(pass)` 返回，开发版统一诊断并跳过对应消费者；录制时业务仍须检查实际资源 handle。生产者的 TextureSlot 同时配置 URP Depth 输入。所有需求关闭时不安排 Depth Pyramid。新增普通 slot 不会隐式触发派生资源生产。
+
+### History 与流程迁移
+
+- `BufferedTextureHistory` 复用 URP CameraHistoryItem，封装双缓冲描述符比较及重分配；URP 继续拥有轮换和最终释放。算法负责每项 ID 的 Reset、camera cut、连续帧、参数签名及 jitter 有效性。
+- `TextureDescriptors.HistoryColor` 接受显式尺寸，保留相机布局；floor/ceil 由算法选择。`HistoryTextureHelper.ImportPair` 只导入 previous/current 并声明 Read/Write，不轮换、不接管所有权。
+- SSGI 已复用上述辅助函数，原有 temporal 有效性判断不变。GTAO/SSGI 通过需求钩子请求同一 Depth Pyramid。
+- 体积光先迁为一个强类型 Unsafe 节点，保留内部命令顺序。后处理 Effect 的 `RecordGraph` 在 Uber builder 打开前录制；Bloom 生成和 Uber 合成是两个原生节点，Uber 通过显式 Read 依赖 Bloom 输出。Bloom 内部紧密相关的 draw 仍合并，SSGI 暂保留原节点边界。
+- 后处理 Uber plan 仅保存本节点的参数快照；恢复 keyword 的操作继续在执行阶段进行。状态恢复节点不依赖共享 active bool。
+
+### 框架回归
+
+Tests/Editor 下的 `Tsukuyomi.Rendering.Editor.Tests` 可从 Unity Test Runner 运行。自动化环境也可调用 `GraphArchitectureTestRunner.Run(resultPath)` 同步生成 NUnit XML。测试覆盖资源依赖、裁剪、同类型快照、跨图复用、旧 API 混用、附件声明、跳过、需求合并/冲突与预热后分配；实际 CPU/GPU、Camera Stack、XR 和 IL2CPP 仍需要对应场景验证。
 
 ## Shader 和 HLSL 约定
 
@@ -493,7 +623,7 @@ internal sealed class TsukuyomiMyFeaturePass : UnsafePass
 
 ### TextureSlot 已声明资源，为什么还需要 Builder.UseTexture？
 
-`TextureSlot` 用来声明 Feature 对 URP 输入的需求，并帮助 bridge pass 调用 `ConfigureInput`。`Builder.UseTexture` 是 RenderGraph 当前 pass 的真实资源读写声明。两者职责不同，都需要。
+`TextureSlot` 用来声明 Feature 对 URP 输入的需求，并帮助 bridge pass 调用 `ConfigureInput`。`Builder.UseTexture` 是 RenderGraph 当前 pass 的真实资源读写声明。两者职责不同，都需要。使用 `GraphResources` 的创建/导入接口时，后者已经在框架内部完成。
 
 ### 为什么不再添加 RequiredInputs？
 

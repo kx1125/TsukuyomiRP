@@ -12,11 +12,19 @@ namespace Tsukuyomi.Rendering
         public const string DepthPyramid = "_TsukuyomiDepthPyramid";
         public const string DepthPyramidMipLevelOffsets = "_TsukuyomiDepthPyramidMipLevelOffsets";
 
+        private const int LayoutCacheCapacity = 8;
+        private static readonly System.Collections.Generic.Dictionary<Vector3Int, PackedMipChainInfo> Layouts = new();
+        private static readonly System.Collections.Generic.Queue<Vector3Int> LayoutOrder = new();
+
         public static PackedMipChainInfo ComputePackedMipChainInfo(int width, int height, int checkerboardMipCount = 0)
         {
             width = Mathf.Max(1, width);
             height = Mathf.Max(1, height);
             checkerboardMipCount = Mathf.Clamp(checkerboardMipCount, 0, MaxCheckerboardMipCount);
+
+            var key = new Vector3Int(width, height, checkerboardMipCount);
+            if (Layouts.TryGetValue(key, out var cached))
+                return cached;
 
             Vector2Int[] mipSizes = new Vector2Int[MaxMipCount];
             Vector2Int[] mipOffsets = new Vector2Int[MaxMipCount];
@@ -74,32 +82,34 @@ namespace Tsukuyomi.Rendering
                 atlasSize.y = Mathf.Max(atlasSize.y, mipBeginCheckerboard.y + mipSize.y);
             } while (mipSize.x > 1 || mipSize.y > 1);
 
-            return new PackedMipChainInfo(
+            var result = new PackedMipChainInfo(
                 atlasSize,
                 mipSizes,
                 mipOffsets,
                 mipOffsetsCheckerboard,
-                mipLevel + 1,
+                Mathf.Min(mipLevel + 1, MaxMipCount),
                 hasCheckerboard ? maxCheckerboardLevelCount : 0);
+            if (Layouts.Count == LayoutCacheCapacity)
+                Layouts.Remove(LayoutOrder.Dequeue());
+            Layouts.Add(key, result);
+            LayoutOrder.Enqueue(key);
+            return result;
         }
 
         public static TextureDesc CreateDepthPyramidDesc(RenderTextureDescriptor cameraDescriptor, PackedMipChainInfo mipInfo)
         {
-            return new TextureDesc(mipInfo.TextureSize.x, mipInfo.TextureSize.y)
-            {
-                name = DepthPyramid,
-                colorFormat = GraphicsFormat.R32_SFloat,
-                depthBufferBits = DepthBits.None,
-                msaaSamples = MSAASamples.None,
-                enableRandomWrite = true,
-                clearBuffer = false,
-                filterMode = FilterMode.Point
-            };
+            return TextureDescriptors.Color2D(mipInfo.TextureSize.x, mipInfo.TextureSize.y,
+                GraphicsFormat.R32_SFloat, DepthPyramid, randomWrite: true);
         }
 
         public static TextureSlot CreateDepthPyramidSlot(RenderTextureDescriptor cameraDescriptor, ResourceAccess access, int checkerboardMipCount = 0)
         {
-            PackedMipChainInfo mipInfo = ComputePackedMipChainInfo(cameraDescriptor.width, cameraDescriptor.height, checkerboardMipCount);
+            return CreateDepthPyramidSlot(cameraDescriptor, access,
+                ComputePackedMipChainInfo(cameraDescriptor.width, cameraDescriptor.height, checkerboardMipCount));
+        }
+
+        public static TextureSlot CreateDepthPyramidSlot(RenderTextureDescriptor cameraDescriptor, ResourceAccess access, PackedMipChainInfo mipInfo)
+        {
             TextureDesc desc = CreateDepthPyramidDesc(cameraDescriptor, mipInfo);
             return access switch
             {

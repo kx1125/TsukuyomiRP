@@ -37,6 +37,8 @@ namespace UnityRhi.Dlss.Urp
 
         private readonly UnityRhiDlssOptions _options;
         private readonly Dictionary<(CameraId cameraId, int eye), DlssCameraContext> _contexts = new();
+        private readonly List<(CameraId cameraId, int eye)> _releaseKeys = new();
+        private static readonly ProfilingSampler DispatchSampler = new("UnityRHI DLSS");
         private Material _prepareMaterial;
         private Material _copyMaterial;
         private Vector2Int _inputResolution = new(1, 1);
@@ -134,6 +136,11 @@ namespace UnityRhi.Dlss.Urp
 
         public override bool supportsXR => true;
 #endif
+#if UNITY_6000_6_OR_NEWER
+        public override UpscalerOptions options => _options;
+
+        public override bool supportsXR => true;
+#endif
 #else
         public override string GetName() => UpscalerName;
 
@@ -172,7 +179,7 @@ namespace UnityRhi.Dlss.Urp
         }
 
 #if UNITY_6000_6_OR_NEWER
-        public void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution,
+        public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution,
 #else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution,
 #endif
@@ -352,7 +359,7 @@ namespace UnityRhi.Dlss.Urp
                 prepareData.Depth = sourceDepth;
                 prepareData.Motion = io.motionVectorColor;
                 prepareData.Material = _prepareMaterial;
-                prepareData.Properties = new MaterialPropertyBlock();
+                prepareData.Properties ??= new MaterialPropertyBlock();
                 prepareData.ColorArray = colorArray;
                 prepareData.DepthArray = depthArray;
                 prepareData.MotionArray = motionArray;
@@ -388,7 +395,7 @@ namespace UnityRhi.Dlss.Urp
             using (IUnsafeRenderGraphBuilder builder =
                 renderGraph.AddUnsafePass<DispatchPassData>(
                     texArray ? $"UnityRHI DLSS Eye {eye}" : "UnityRHI DLSS",
-                    out DispatchPassData passData, new ProfilingSampler("UnityRHI DLSS")))
+                    out DispatchPassData passData, DispatchSampler))
             {
                 passData.Upscaler = this;
                 passData.Context = context;
@@ -434,7 +441,7 @@ namespace UnityRhi.Dlss.Urp
             {
                 passData.Source = source;
                 passData.Material = _copyMaterial;
-                passData.Properties = new MaterialPropertyBlock();
+                passData.Properties ??= new MaterialPropertyBlock();
                 builder.UseTexture(source, AccessFlags.Read);
                 builder.SetRenderAttachment(destination, 0, AccessFlags.ReadWrite, 0, eye);
                 builder.AllowPassCulling(false);
@@ -510,6 +517,21 @@ namespace UnityRhi.Dlss.Urp
                 $"Cam{cameraInstanceId}_Eye{eye}");
             _contexts.Add(key, context);
             return context;
+        }
+
+        internal void ReleaseCamera(ulong cameraId)
+        {
+            _releaseKeys.Clear();
+            foreach (var entry in _contexts)
+                if (unchecked((ulong)entry.Key.cameraId) == cameraId)
+                    _releaseKeys.Add(entry.Key);
+            foreach (var key in _releaseKeys)
+            {
+                var context = _contexts[key];
+                _contexts.Remove(key);
+                TsukuyomiUpscaling.RetireResources(context.Dispose);
+            }
+            _releaseKeys.Clear();
         }
 
         public void ResetHistory() { foreach (var context in _contexts.Values) context.ResetHistory(); }

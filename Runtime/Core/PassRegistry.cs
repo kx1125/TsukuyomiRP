@@ -97,7 +97,9 @@ namespace Tsukuyomi.Rendering
             if (pass == null)
                 return false;
 
-            foreach (TextureSlot slot in TextureSlotMetadata.Enumerate(pass))
+            using var pooledSlots = UnityEngine.Pool.ListPool<TextureSlot>.Get(out var slots);
+            pass.CollectTextureSlots(slots);
+            foreach (TextureSlot slot in slots)
             {
                 if (slot.Builtin == builtin && slot.Access != ResourceAccess.Write)
                     return true;
@@ -124,4 +126,3 @@ namespace Tsukuyomi.Rendering
         }
     }
 }
-

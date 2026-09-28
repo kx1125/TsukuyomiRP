@@ -18,6 +18,7 @@ namespace Tsukuyomi.Rendering
         void CalculateJitter(int frame, out Vector2 jitter, out bool allowScaling);
         void RecordRenderGraph(RenderGraph graph, ContextContainer frame);
         void ResetHistory();
+        void ReleaseCamera(ulong cameraId);
     }
 
     internal sealed class Fsr3TemporalBackend : ITemporalUpscalerBackend
@@ -35,6 +36,7 @@ namespace Tsukuyomi.Rendering
         }
         public void RecordRenderGraph(RenderGraph graph, ContextContainer frame) => _upscaler.RecordRenderGraph(graph, frame);
         public void ResetHistory() => _upscaler.ResetHistory();
+        public void ReleaseCamera(ulong cameraId) => _upscaler.ReleaseCamera(cameraId);
         public void Dispose() => _upscaler.Dispose();
     }
 
@@ -65,6 +67,7 @@ namespace Tsukuyomi.Rendering
         }
         public void RecordRenderGraph(RenderGraph graph, ContextContainer frame) => _upscaler.RecordRenderGraph(graph, frame);
         public void ResetHistory() => _upscaler.ResetHistory();
+        public void ReleaseCamera(ulong cameraId) => _upscaler.ReleaseCamera(cameraId);
         public void Dispose()
         {
             _upscaler.Dispose();

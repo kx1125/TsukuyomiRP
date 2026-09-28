@@ -2,29 +2,42 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.Universal;
 
 namespace Tsukuyomi.Rendering
 {
     /// <summary>
-    /// Unity 6.6 creates a parameterless, shared upscaler and supplies its options per call.
-    /// Keep backend resources with the existing options owners, outside that shared instance.
+    /// Unity 6.6 constructs the upscaler with its serialized options.
+    /// Keep backend resources with the existing options owner, outside this adapter.
     /// </summary>
     internal sealed class TsukuyomiFrameworkUpscaler : AbstractUpscaler
     {
+        private readonly TsukuyomiUpscalerOptions _options;
+
         [UnityEngine.Scripting.Preserve]
-        public TsukuyomiFrameworkUpscaler() { }
+        public TsukuyomiFrameworkUpscaler(TsukuyomiUpscalerOptions options) => _options = options;
 
         public override string name => TsukuyomiUpscaling.UpscalerName;
-        public override bool hasQualityMode => true;
+        public override UpscalerOptions options => ResolveOptions();
         public override bool isTemporal => TsukuyomiUpscaling.Active?.isTemporal ?? false;
         public override bool supportsSharpening => TsukuyomiUpscaling.Active?.supportsSharpening ?? false;
 
-        public override UpscalerResolutionInfo GetResolutionInfo(Vector2Int displayResolution, UpscalerOptions options)
+        private TsukuyomiUpscalerOptions ResolveOptions()
         {
-            var owner = TsukuyomiUpscaling.PrepareUpscaler(options);
-            var renderResolution = displayResolution;
-            owner?.NegotiatePreUpscaleResolution(ref renderResolution, displayResolution);
-            return UpscalerResolutionInfo.Fixed(renderResolution);
+            // URP caches this adapter when the pipeline is created. Its options may be
+            // added or replaced on the asset later, so the constructor reference can be stale.
+            var asset = UniversalRenderPipeline.asset;
+            if (asset)
+                foreach (var candidate in asset.upscalerOptions)
+                    if (candidate is TsukuyomiUpscalerOptions source && source)
+                        return source;
+            return _options;
+        }
+
+        public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
+        {
+            TsukuyomiUpscaling.PrepareUpscaler(options)?.NegotiatePreUpscaleResolution(
+                ref preUpscaleResolution, postUpscaleResolution);
         }
 
         public override void CalculateJitter(int frameIndex, float upscaleRatio, out Vector2 jitter, out bool allowScaling)
@@ -39,8 +52,7 @@ namespace Tsukuyomi.Rendering
 
         public override void RecordRenderGraph(RenderGraph graph, ContextContainer frame)
         {
-            var io = frame.Get<UpscalingIO>();
-            TsukuyomiUpscaling.PrepareUpscaler(io.options)?.RecordRenderGraph(graph, frame);
+            TsukuyomiUpscaling.PrepareUpscaler(options)?.RecordRenderGraph(graph, frame);
         }
     }
 }

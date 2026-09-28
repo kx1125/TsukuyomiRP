@@ -8,7 +8,7 @@ using UnityEngine.Rendering.Universal;
 namespace Tsukuyomi.Rendering
 {
     [System.Serializable]
-    internal sealed class TsukuyomiVolumetricFogPass : UnsafePass
+    internal sealed class TsukuyomiVolumetricFogPass : GraphFeaturePass
     {
         private const int DownsampleDepthPass = 0;
         private const int VolumetricFogRenderPass = 0;
@@ -54,11 +54,17 @@ namespace Tsukuyomi.Rendering
         private Material _volumetricFogMaterial;
         private Material _downsampleDepthMaterial;
 
-        private readonly ProfilingSampler _downsampleDepthSampler = new("Downsample Depth");
-        private readonly ProfilingSampler _raymarchSampler = new("Raymarch");
-        private readonly ProfilingSampler _blurSampler = new("Blur");
-        private readonly ProfilingSampler _upsampleSampler = new("Upsample");
-        private readonly ProfilingSampler _compositeSampler = new("Composite");
+        private static readonly ProfilingSampler _downsampleDepthSampler = new("Downsample Depth");
+        private static readonly ProfilingSampler _raymarchSampler = new("Raymarch");
+        private static readonly ProfilingSampler _blurSampler = new("Blur");
+        private static readonly ProfilingSampler _upsampleSampler = new("Upsample");
+        private static readonly ProfilingSampler _compositeSampler = new("Composite");
+
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(depth);
+            slots.Add(color);
+        }
 
         public override string Name => "Volume Light";
 
@@ -112,7 +118,24 @@ namespace Tsukuyomi.Rendering
             _downsampleDepthMaterial = null;
         }
 
-        public override void Record(in UnsafePassContext context)
+        private sealed class RenderData
+        {
+            public TextureHandle CameraColor;
+            public TextureHandle DownsampledDepth;
+            public TextureHandle VolumetricFog;
+            public TextureHandle BlurTemp;
+            public TextureHandle UpsampleComposition;
+            public Material VolumetricFogMaterial;
+            public Material DownsampleDepthMaterial;
+            public TsukuyomiVolumeLightResolvedSettings Settings;
+            public NativeArray<VisibleLight> VisibleLights;
+            public int MainLightIndex;
+            public int AdditionalLightsCount;
+            public int Width;
+            public int Height;
+        }
+
+        public override void RecordGraph(in FeatureGraphContext context)
         {
             if (_profile == null || !_settings.IsActive || _volumetricFogMaterial == null || _downsampleDepthMaterial == null)
                 return;
@@ -125,86 +148,85 @@ namespace Tsukuyomi.Rendering
             if (!cameraDepth.IsValid() || !cameraColor.IsValid())
                 return;
 
+            using var node = context.AddUnsafe<RenderData>(Name);
+            var passData = node.Data;
+            var graphResources = node.Resources;
             RenderTextureDescriptor cameraDescriptor = context.CameraData.cameraTargetDescriptor;
-            TextureHandle downsampledDepth = context.RenderGraph.CreateTexture(CreateHalfDesc(cameraDescriptor, GraphicsFormat.R32_SFloat, "_DownsampledCameraDepth"));
-            TextureHandle volumetricFog = context.RenderGraph.CreateTexture(CreateHalfDesc(cameraDescriptor, GraphicsFormat.R16G16B16A16_SFloat, "_VolumetricFog"));
-            TextureHandle blurTemp = context.RenderGraph.CreateTexture(CreateHalfDesc(cameraDescriptor, GraphicsFormat.R16G16B16A16_SFloat, "_VolumetricFogBlur"));
-            TextureHandle upsampleComposition = context.RenderGraph.CreateTexture(CreateFullDesc(cameraDescriptor, "_VolumetricFogUpsampleComposition"));
+            TextureHandle downsampledDepth = graphResources.CreateTexture(CreateHalfDesc(cameraDescriptor, GraphicsFormat.R32_SFloat, "_DownsampledCameraDepth"), AccessFlags.ReadWrite);
+            TextureHandle volumetricFog = graphResources.CreateTexture(CreateHalfDesc(cameraDescriptor, GraphicsFormat.R16G16B16A16_SFloat, "_VolumetricFog"), AccessFlags.ReadWrite);
+            TextureHandle blurTemp = graphResources.CreateTexture(CreateHalfDesc(cameraDescriptor, GraphicsFormat.R16G16B16A16_SFloat, "_VolumetricFogBlur"), AccessFlags.ReadWrite);
+            TextureHandle upsampleComposition = graphResources.CreateTexture(CreateFullDesc(cameraDescriptor, "_VolumetricFogUpsampleComposition"), AccessFlags.ReadWrite);
 
-            Material volumetricFogMaterial = _volumetricFogMaterial;
-            Material downsampleDepthMaterial = _downsampleDepthMaterial;
-            TsukuyomiVolumeLightResolvedSettings settings = _settings;
-            NativeArray<VisibleLight> visibleLights = context.LightData.visibleLights;
-            int mainLightIndex = context.LightData.mainLightIndex;
-            int additionalLightsCount = context.LightData.additionalLightsCount;
-            int width = cameraDescriptor.width;
-            int height = cameraDescriptor.height;
+            passData.VolumetricFogMaterial = _volumetricFogMaterial;
+            passData.DownsampleDepthMaterial = _downsampleDepthMaterial;
+            passData.Settings = _settings;
+            passData.VisibleLights = context.LightData.visibleLights;
+            passData.MainLightIndex = context.LightData.mainLightIndex;
+            passData.AdditionalLightsCount = context.LightData.additionalLightsCount;
+            passData.Width = cameraDescriptor.width;
+            passData.Height = cameraDescriptor.height;
 
-            ProfilingSampler downsampleDepthSampler = _downsampleDepthSampler;
-            ProfilingSampler raymarchSampler = _raymarchSampler;
-            ProfilingSampler blurSampler = _blurSampler;
-            ProfilingSampler upsampleSampler = _upsampleSampler;
-            ProfilingSampler compositeSampler = _compositeSampler;
+            node.Builder.UseTexture(cameraDepth, AccessFlags.Read);
+            node.Builder.UseTexture(cameraColor, AccessFlags.ReadWrite);
+            node.Builder.AllowGlobalStateModification(true);
 
-            context.Builder.UseTexture(cameraDepth, AccessFlags.Read);
-            context.Builder.UseTexture(cameraColor, AccessFlags.ReadWrite);
-            context.Builder.UseTexture(downsampledDepth, AccessFlags.ReadWrite);
-            context.Builder.UseTexture(volumetricFog, AccessFlags.ReadWrite);
-            context.Builder.UseTexture(blurTemp, AccessFlags.ReadWrite);
-            context.Builder.UseTexture(upsampleComposition, AccessFlags.ReadWrite);
-            context.Builder.AllowGlobalStateModification(true);
+            passData.CameraColor = cameraColor;
+            passData.DownsampledDepth = downsampledDepth;
+            passData.VolumetricFog = volumetricFog;
+            passData.BlurTemp = blurTemp;
+            passData.UpsampleComposition = upsampleComposition;
 
-            context.SetRenderFunc((data, graphContext) =>
+            node.SetRenderFunc(static (state, graphContext) =>
             {
-                Rect halfViewport = new(0.0f, 0.0f, Mathf.Max(1, width / 2), Mathf.Max(1, height / 2));
-                Rect fullViewport = new(0.0f, 0.0f, width, height);
+                Rect halfViewport = new(0.0f, 0.0f, Mathf.Max(1, state.Width / 2), Mathf.Max(1, state.Height / 2));
+                Rect fullViewport = new(0.0f, 0.0f, state.Width, state.Height);
 
-                using (new ProfilingScope(graphContext.cmd, downsampleDepthSampler))
+                using (new ProfilingScope(graphContext.cmd, _downsampleDepthSampler))
                 {
-                    graphContext.cmd.SetRenderTarget(downsampledDepth, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                    graphContext.cmd.SetRenderTarget(state.DownsampledDepth, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
                     graphContext.cmd.SetViewport(halfViewport);
-                    Blitter.BlitTexture(graphContext.cmd, downsampledDepth, Vector2.one, downsampleDepthMaterial, DownsampleDepthPass);
-                    graphContext.cmd.SetGlobalTexture(DownsampledCameraDepthTextureId, downsampledDepth);
+                    Blitter.BlitTexture(graphContext.cmd, state.DownsampledDepth, Vector2.one, state.DownsampleDepthMaterial, DownsampleDepthPass);
+                    graphContext.cmd.SetGlobalTexture(DownsampledCameraDepthTextureId, state.DownsampledDepth);
                 }
 
                 graphContext.cmd.SetKeyword(MainLightShadowScreenKeyword, false);
                 graphContext.cmd.SetKeyword(MainLightShadowCascadesKeyword, true);
 
-                using (new ProfilingScope(graphContext.cmd, raymarchSampler))
+                using (new ProfilingScope(graphContext.cmd, _raymarchSampler))
                 {
-                    UpdateVolumetricFogMaterialParameters(volumetricFogMaterial, settings, mainLightIndex, additionalLightsCount, visibleLights);
-                    graphContext.cmd.SetRenderTarget(volumetricFog, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                    UpdateVolumetricFogMaterialParameters(state.VolumetricFogMaterial, state.Settings, state.MainLightIndex, state.AdditionalLightsCount, state.VisibleLights);
+                    graphContext.cmd.SetRenderTarget(state.VolumetricFog, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
                     graphContext.cmd.SetViewport(halfViewport);
-                    Blitter.BlitTexture(graphContext.cmd, volumetricFog, Vector2.one, volumetricFogMaterial, VolumetricFogRenderPass);
+                    Blitter.BlitTexture(graphContext.cmd, state.VolumetricFog, Vector2.one, state.VolumetricFogMaterial, VolumetricFogRenderPass);
                 }
 
-                using (new ProfilingScope(graphContext.cmd, blurSampler))
+                using (new ProfilingScope(graphContext.cmd, _blurSampler))
                 {
-                    int blurIterations = Mathf.Clamp(settings.BlurIterations, 1, 4);
+                    int blurIterations = Mathf.Clamp(state.Settings.BlurIterations, 1, 4);
                     for (int i = 0; i < blurIterations; i++)
                     {
-                        graphContext.cmd.SetRenderTarget(blurTemp, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetRenderTarget(state.BlurTemp, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
                         graphContext.cmd.SetViewport(halfViewport);
-                        Blitter.BlitTexture(graphContext.cmd, volumetricFog, Vector2.one, volumetricFogMaterial, VolumetricFogHorizontalBlurPass);
-                        graphContext.cmd.SetRenderTarget(volumetricFog, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        Blitter.BlitTexture(graphContext.cmd, state.VolumetricFog, Vector2.one, state.VolumetricFogMaterial, VolumetricFogHorizontalBlurPass);
+                        graphContext.cmd.SetRenderTarget(state.VolumetricFog, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
                         graphContext.cmd.SetViewport(halfViewport);
-                        Blitter.BlitTexture(graphContext.cmd, blurTemp, Vector2.one, volumetricFogMaterial, VolumetricFogVerticalBlurPass);
+                        Blitter.BlitTexture(graphContext.cmd, state.BlurTemp, Vector2.one, state.VolumetricFogMaterial, VolumetricFogVerticalBlurPass);
                     }
                 }
 
-                using (new ProfilingScope(graphContext.cmd, upsampleSampler))
+                using (new ProfilingScope(graphContext.cmd, _upsampleSampler))
                 {
-                    graphContext.cmd.SetGlobalTexture(VolumetricFogTextureId, volumetricFog);
-                    graphContext.cmd.SetRenderTarget(upsampleComposition, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                    graphContext.cmd.SetGlobalTexture(VolumetricFogTextureId, state.VolumetricFog);
+                    graphContext.cmd.SetRenderTarget(state.UpsampleComposition, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
                     graphContext.cmd.SetViewport(fullViewport);
-                    Blitter.BlitTexture(graphContext.cmd, cameraColor, Vector2.one, volumetricFogMaterial, VolumetricFogDepthAwareUpsampleCompositionPass);
+                    Blitter.BlitTexture(graphContext.cmd, state.CameraColor, Vector2.one, state.VolumetricFogMaterial, VolumetricFogDepthAwareUpsampleCompositionPass);
                 }
 
-                using (new ProfilingScope(graphContext.cmd, compositeSampler))
+                using (new ProfilingScope(graphContext.cmd, _compositeSampler))
                 {
-                    graphContext.cmd.SetRenderTarget(cameraColor, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                    graphContext.cmd.SetRenderTarget(state.CameraColor, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
                     graphContext.cmd.SetViewport(fullViewport);
-                    Blitter.BlitTexture(graphContext.cmd, upsampleComposition, Vector2.one, volumetricFogMaterial, VolumetricFogCopyPass);
+                    Blitter.BlitTexture(graphContext.cmd, state.UpsampleComposition, Vector2.one, state.VolumetricFogMaterial, VolumetricFogCopyPass);
                 }
             });
         }
@@ -228,29 +250,14 @@ namespace Tsukuyomi.Rendering
 
         private static TextureDesc CreateHalfDesc(RenderTextureDescriptor cameraDescriptor, GraphicsFormat format, string name)
         {
-            return new TextureDesc(Mathf.Max(1, cameraDescriptor.width / 2), Mathf.Max(1, cameraDescriptor.height / 2))
-            {
-                name = name,
-                colorFormat = format,
-                depthBufferBits = DepthBits.None,
-                msaaSamples = MSAASamples.None,
-                clearBuffer = false,
-                clearColor = Color.clear,
-                filterMode = FilterMode.Bilinear
-            };
+            return TextureDescriptors.Color2D(Mathf.Max(1, cameraDescriptor.width / 2),
+                Mathf.Max(1, cameraDescriptor.height / 2), format, name, FilterMode.Bilinear);
         }
 
         private static TextureDesc CreateFullDesc(RenderTextureDescriptor cameraDescriptor, string name)
         {
-            return new TextureDesc(cameraDescriptor.width, cameraDescriptor.height)
-            {
-                name = name,
-                colorFormat = cameraDescriptor.graphicsFormat,
-                depthBufferBits = DepthBits.None,
-                msaaSamples = MSAASamples.None,
-                clearBuffer = false,
-                filterMode = FilterMode.Bilinear
-            };
+            return TextureDescriptors.Color2D(cameraDescriptor.width, cameraDescriptor.height,
+                cameraDescriptor.graphicsFormat, name, FilterMode.Bilinear);
         }
 
         private static void UpdateVolumetricFogMaterialParameters(

@@ -6,7 +6,7 @@ using UnityEngine.Rendering.Universal;
 
 namespace Tsukuyomi.Rendering
 {
-    internal sealed class TsukuyomiPostProcessPass : UnsafePass
+    internal sealed class TsukuyomiPostProcessPass : GraphFeaturePass
     {
         private const int UberCompositePass = 0;
 
@@ -20,9 +20,18 @@ namespace Tsukuyomi.Rendering
         };
 
         private readonly List<TsukuyomiPostProcessEffect> _activeEffects = new();
+        // Recording scratch only. Every value is copied to a native node before another camera records.
+        private readonly TextureHandle[] _effectOutputs;
+
+        public TsukuyomiPostProcessPass() => _effectOutputs = new TextureHandle[_effects.Length];
         private TsukuyomiPipelineProfile _profile;
         private Material _uberMaterial;
         private bool _ownsUberMaterial;
+
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(color);
+        }
 
         public override string Name => "Tsukuyomi Post Processing";
 
@@ -73,7 +82,16 @@ namespace Tsukuyomi.Rendering
             _ownsUberMaterial = false;
         }
 
-        public override void Record(in UnsafePassContext context)
+        private sealed class RenderData
+        {
+            public TextureHandle Source;
+            public TextureHandle Destination;
+            public readonly TsukuyomiPostProcessPlan Plan = new();
+            public Material UberMaterial;
+            public TsukuyomiPostProcessEffect[] Effects;
+        }
+
+        public override void RecordGraph(in FeatureGraphContext context)
         {
             if (_uberMaterial == null || _activeEffects.Count == 0 || context.CameraData.isPreviewCamera)
                 return;
@@ -89,37 +107,44 @@ namespace Tsukuyomi.Rendering
             if (!destination.IsValid())
                 return;
 
-            context.Builder.UseTexture(source, AccessFlags.Read);
-            context.Builder.UseTexture(destination, AccessFlags.Write);
-            context.Builder.AllowGlobalStateModification(true);
-
-            var plan = new TsukuyomiPostProcessPlan();
-            var buildContext = new TsukuyomiPostProcessBuildContext(
-                context.RenderGraph,
-                context.Builder,
-                context.CameraData,
-                source,
-                destination,
-                _uberMaterial,
-                plan);
-
             for (int i = 0; i < _activeEffects.Count; i++)
-                _activeEffects[i].Record(buildContext);
+                _effectOutputs[i] = _activeEffects[i].RecordGraph(context, source, _uberMaterial);
 
-            Material uberMaterial = _uberMaterial;
-            TsukuyomiPostProcessEffect[] effects = _effects;
-
-            context.SetRenderFunc((data, graphContext) =>
+            using (var node = context.AddUnsafe<RenderData>(Name))
             {
-                for (int i = 0; i < effects.Length; i++)
-                    effects[i].ResetUberMaterial(uberMaterial);
+                var passData = node.Data;
+                node.Builder.UseTexture(source, AccessFlags.Read);
+                node.Builder.UseTexture(destination, AccessFlags.Write);
+                node.Builder.AllowGlobalStateModification(true);
 
-                plan.ExecuteStages(graphContext);
-                plan.SetupUberMaterial(graphContext, uberMaterial);
+                TsukuyomiPostProcessPlan plan = passData.Plan;
+                plan.Clear();
+                for (int i = 0; i < _activeEffects.Count; i++)
+                {
+                    node.ReadTexture(_effectOutputs[i]);
+                    var buildContext = new TsukuyomiPostProcessBuildContext(context.RenderGraph, node.Builder,
+                        context.CameraData, source, destination, _uberMaterial, plan, _effectOutputs[i]);
+                    _activeEffects[i].Record(buildContext);
+                    _effectOutputs[i] = TextureHandle.nullHandle;
+                }
 
-                graphContext.cmd.SetRenderTarget(destination, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                Blitter.BlitTexture(graphContext.cmd, source, new Vector4(1.0f, 1.0f, 0.0f, 0.0f), uberMaterial, UberCompositePass);
-            });
+                passData.UberMaterial = _uberMaterial;
+                passData.Effects = _effects;
+
+                passData.Source = source;
+                passData.Destination = destination;
+
+                node.SetRenderFunc(static (state, graphContext) =>
+                {
+                    for (int i = 0; i < state.Effects.Length; i++)
+                        state.Effects[i].ResetUberMaterial(state.UberMaterial);
+
+                    state.Plan.SetupUberMaterial(graphContext, state.UberMaterial);
+
+                    graphContext.cmd.SetRenderTarget(state.Destination, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                    Blitter.BlitTexture(graphContext.cmd, state.Source, new Vector4(1.0f, 1.0f, 0.0f, 0.0f), state.UberMaterial, UberCompositePass);
+                });
+            }
 
             PassRecorder.SwapActiveColor(context.Resources, destination);
         }

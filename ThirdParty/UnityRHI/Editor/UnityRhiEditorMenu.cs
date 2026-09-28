@@ -19,6 +19,14 @@ namespace UnityRhi.EditorTools
                 return;
             }
 
+#if UNITY_6000_6_OR_NEWER
+            // Unity 6.6 has already selected its D3D12 runtime before this callback.
+            // Use the native plugin's host-runtime mode before the first P/Invoke.
+            // Preserve an explicit override supplied when the editor was launched.
+            if (string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("UNITYRHI_AGILITY_SDK")))
+                System.Environment.SetEnvironmentVariable("UNITYRHI_AGILITY_SDK", "0", System.EnvironmentVariableTarget.Process);
+#endif
+
             // Unity loads native plugins lazily, on the first P/Invoke. Touch the
             // DLL here so UnityPluginLoad (and the [UnityRHI] init logs) run as
             // soon as scripts are loaded rather than at first use.

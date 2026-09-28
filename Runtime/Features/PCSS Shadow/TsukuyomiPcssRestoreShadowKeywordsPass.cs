@@ -16,6 +16,11 @@ namespace Tsukuyomi.Rendering
         [Write(BuiltinTexture.ActiveColor)]
         public TextureSlot activeColor = TextureSlot.Write("ActiveColor", BuiltinTexture.ActiveColor);
 
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(activeColor);
+        }
+
         public override string Name => "Tsukuyomi Restore Main Light Shadow Keywords";
 
         internal static void InitializeKeywords()
@@ -30,8 +35,14 @@ namespace Tsukuyomi.Rendering
             s_KeywordsInitialized = true;
         }
 
+        private sealed class RenderData
+        {
+            public UniversalShadowData ShadowData;
+        }
+
         public override void Record(in RasterPassContext context)
         {
+            var passData = context.GetOrCreateData<RenderData>();
             if (!s_KeywordsInitialized)
                 return;
 
@@ -39,14 +50,15 @@ namespace Tsukuyomi.Rendering
             if (!activeColorTexture.IsValid())
                 return;
 
-            UniversalShadowData shadowData = context.FrameData.Get<UniversalShadowData>();
+            passData.ShadowData = context.FrameData.Get<UniversalShadowData>();
 
             context.Builder.SetRenderAttachment(activeColorTexture, 0, AccessFlags.Write);
             context.Builder.AllowGlobalStateModification(true);
-            context.SetRenderFunc((data, graphContext) =>
+
+            context.SetRenderFunc(passData, static (state, graphContext) =>
             {
-                int cascadesCount = shadowData.mainLightShadowCascadesCount;
-                bool mainLightShadows = shadowData.supportsMainLightShadows;
+                int cascadesCount = state.ShadowData.mainLightShadowCascadesCount;
+                bool mainLightShadows = state.ShadowData.supportsMainLightShadows;
                 bool receiveShadowsNoCascade = mainLightShadows && cascadesCount == 1;
                 bool receiveShadowsCascades = mainLightShadows && cascadesCount > 1;
 

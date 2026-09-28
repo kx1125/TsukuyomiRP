@@ -234,6 +234,8 @@ namespace Tsukuyomi.Rendering
             Camera camera = renderingData.cameraData.camera;
             _enqueueFrame = new FrameContext(renderingData.frameData,
                 camera ? _resourceHub.ForCamera(camera) : _resourceHub);
+            var requirements = renderingData.frameData.GetOrCreate<ResourceRequirements>();
+            requirements.Begin(camera);
 #if ENABLE_UPSCALER_FRAMEWORK
             _fsr3ManualMaskPass.Configure(Profile);
             renderer.EnqueuePass(_fsr3OpaqueOnlyCapturePass);
@@ -284,9 +286,21 @@ namespace Tsukuyomi.Rendering
             bool ssgiEnabled = !usesDeferredLighting
                 && _ssgiPass != null
                 && _ssgiPass.Configure(Profile, ssgiVolume, ref renderingData);
-            bool depthPyramidEnabled = (gtaoEnabled || ssgiEnabled)
-                && _depthPyramidPass != null
-                && _depthPyramidPass.Configure();
+            if (gtaoEnabled) _gtaoBridgePass.CollectResourceRequirements(requirements, _enqueueFrame);
+            if (ssgiEnabled) _ssgiBridgePass.CollectResourceRequirements(requirements, _enqueueFrame);
+            foreach (var bridge in _bridgePasses)
+                bridge.CollectResourceRequirements(requirements, _enqueueFrame);
+
+            bool supportsPyramid = !renderingData.cameraData.isPreviewCamera && SystemInfo.supportsComputeShaders
+                && renderingData.cameraData.cameraTargetDescriptor.dimension == UnityEngine.Rendering.TextureDimension.Tex2D;
+            bool hasProducer = _depthPyramidPass != null && _depthPyramidPass.Enabled;
+            bool depthPyramidEnabled = requirements.ResolveDepthPyramid(
+                _depthPyramidBridgePass.renderPassEvent, hasProducer, supportsPyramid);
+            if (depthPyramidEnabled && !_depthPyramidPass.Configure())
+                depthPyramidEnabled = requirements.ResolveDepthPyramid(_depthPyramidBridgePass.renderPassEvent, false, supportsPyramid);
+            requirements.ReportFailures();
+            gtaoEnabled &= requirements.CanRecord(_gtaoPass);
+            ssgiEnabled &= requirements.CanRecord(_ssgiPass);
             if (depthPyramidEnabled)
             {
                 EnqueueBridge(renderer, _depthPyramidBridgePass);
@@ -395,14 +409,24 @@ namespace Tsukuyomi.Rendering
             };
         }
 
-        private static bool UsesDeferredLighting(ScriptableRenderer renderer)
+        private ScriptableRenderer _deferredRenderer;
+        private Func<bool> _usesDeferredLighting;
+
+        private bool UsesDeferredLighting(ScriptableRenderer renderer)
         {
             if (renderer == null)
                 return false;
 
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            PropertyInfo property = renderer.GetType().GetProperty("usesDeferredLighting", flags);
-            return property != null && property.PropertyType == typeof(bool) && (bool)property.GetValue(renderer);
+            if (!ReferenceEquals(renderer, _deferredRenderer))
+            {
+                _deferredRenderer = renderer;
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                PropertyInfo property = renderer.GetType().GetProperty("usesDeferredLighting", flags);
+                _usesDeferredLighting = property?.PropertyType == typeof(bool)
+                    ? (Func<bool>)Delegate.CreateDelegate(typeof(Func<bool>), renderer, property.GetGetMethod(true))
+                    : null;
+            }
+            return _usesDeferredLighting?.Invoke() ?? false;
         }
         private void ExcludePerObjectShadowLayerFromMainLight(ref RenderingData renderingData, RenderingLayerMask perObjectShadowRenderingLayer)
         {

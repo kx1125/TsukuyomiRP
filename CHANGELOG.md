@@ -4,6 +4,27 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-29
+
+### Added
+
+- Added `GraphFeaturePass` and typed Raster, Compute and Unsafe nodes for recording multiple native RenderGraph passes at one injection point, plus fullscreen and copy helpers.
+- Added resource creation/import helpers, explicit texture-slot collection, and shared Depth Pyramid requirements with support and ordering checks.
+- Added reusable buffered-history allocation and texture descriptor helpers, plus a two-stage fullscreen example.
+
+### Changed
+
+- Reduced recurring managed allocations with pooled render-data snapshots, static callbacks, reusable effect arrays and post-processing plans, cached depth-pyramid layouts, and reusable upscaler dispatch descriptions.
+- Reused frame-resource views and made `FrameContext` a readonly struct.
+- Migrated volumetric fog to a typed graph node and separated Bloom generation from Uber composition with an explicit texture dependency.
+- Refactored SSGI to use shared buffered-history helpers and expanded the feature development guide for the new recording APIs.
+
+### Fixed
+
+- Reject invalid shader pass indices before recording or publishing a fullscreen post-process output.
+- Release destroyed-camera upscaler contexts and destroy released FSR3 render textures.
+- Update Unity 6.6 upscaler options and resolution negotiation, and initialize UnityRHI against the editor's selected D3D12 runtime unless explicitly overridden.
+
 ## [0.1.9] - 2026-09-28
 
 ### Added

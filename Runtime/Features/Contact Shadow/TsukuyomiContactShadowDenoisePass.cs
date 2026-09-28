@@ -31,7 +31,13 @@ namespace Tsukuyomi.Rendering
         private ComputeShader _computeShader;
         private int _horizontalKernel = -1;
         private int _verticalKernel = -1;
-        private readonly ProfilingSampler _profilingSampler = new("Diffuse Shadow Denoise");
+        private static readonly ProfilingSampler _profilingSampler = new("Diffuse Shadow Denoise");
+
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(depth);
+            slots.Add(normals);
+        }
 
         public override string Name => "Diffuse Shadow Denoise";
 
@@ -73,8 +79,26 @@ namespace Tsukuyomi.Rendering
                 && _verticalKernel >= 0;
         }
 
+        private sealed class RenderData
+        {
+            public TextureHandle DepthTexture;
+            public TextureHandle NormalsTexture;
+            public TextureHandle NoisyMap;
+            public TextureHandle Intermediate;
+            public TextureHandle Output;
+            public ComputeShader ComputeShader;
+            public int HorizontalKernel;
+            public int VerticalKernel;
+            public int Width;
+            public int Height;
+            public int FilterRadius;
+            public float CameraFov;
+            public float LightAngle;
+        }
+
         public override void Record(in ComputePassContext context)
         {
+            var passData = context.GetOrCreateData<RenderData>();
             if (_profile == null || !_settings.Enabled || _settings.Denoiser != TsukuyomiShadowDenoiser.Spatial)
                 return;
 
@@ -103,40 +127,42 @@ namespace Tsukuyomi.Rendering
             context.BindTexture(intermediate, intermediateSlot);
             context.BindTexture(output, outputSlot);
 
-            ComputeShader computeShader = _computeShader;
-            int horizontalKernel = _horizontalKernel;
-            int verticalKernel = _verticalKernel;
-            int width = context.CameraData.cameraTargetDescriptor.width;
-            int height = context.CameraData.cameraTargetDescriptor.height;
-            int filterRadius = Mathf.Clamp(_settings.FilterSize, 1, 32);
-            float cameraFov = context.CameraData.camera.fieldOfView * Mathf.Deg2Rad;
-            float lightAngle = 2.5f * Mathf.Deg2Rad;
-            ProfilingSampler profilingSampler = _profilingSampler;
+            passData.ComputeShader = _computeShader;
+            passData.HorizontalKernel = _horizontalKernel;
+            passData.VerticalKernel = _verticalKernel;
+            passData.Width = context.CameraData.cameraTargetDescriptor.width;
+            passData.Height = context.CameraData.cameraTargetDescriptor.height;
+            passData.FilterRadius = Mathf.Clamp(_settings.FilterSize, 1, 32);
+            passData.CameraFov = context.CameraData.camera.fieldOfView * Mathf.Deg2Rad;
+            passData.LightAngle = 2.5f * Mathf.Deg2Rad;
 
-            context.SetRenderFunc((data, graphContext) =>
+            passData.DepthTexture = depthTexture;
+            passData.NormalsTexture = normalsTexture;
+            passData.NoisyMap = noisyMap;
+            passData.Intermediate = intermediate;
+            passData.Output = output;
+
+            context.SetRenderFunc(passData, static (state, graphContext) =>
             {
-                using (new ProfilingScope(graphContext.cmd, profilingSampler))
-                {
-                    int dispatchX = Mathf.CeilToInt(width / (float)TileSize);
-                    int dispatchY = Mathf.CeilToInt(height / (float)TileSize);
+                int dispatchX = Mathf.CeilToInt(state.Width / (float)TileSize);
+                int dispatchY = Mathf.CeilToInt(state.Height / (float)TileSize);
 
-                    graphContext.cmd.SetComputeFloatParam(computeShader, RaytracingLightAngleId, lightAngle);
-                    graphContext.cmd.SetComputeFloatParam(computeShader, CameraFovId, cameraFov);
-                    graphContext.cmd.SetComputeIntParam(computeShader, DenoiserFilterRadiusId, filterRadius);
+                graphContext.cmd.SetComputeFloatParam(state.ComputeShader, RaytracingLightAngleId, state.LightAngle);
+                graphContext.cmd.SetComputeFloatParam(state.ComputeShader, CameraFovId, state.CameraFov);
+                graphContext.cmd.SetComputeIntParam(state.ComputeShader, DenoiserFilterRadiusId, state.FilterRadius);
 
-                    graphContext.cmd.SetComputeTextureParam(computeShader, horizontalKernel, DepthTextureId, depthTexture);
-                    graphContext.cmd.SetComputeTextureParam(computeShader, horizontalKernel, NormalBufferTextureId, normalsTexture);
-                    graphContext.cmd.SetComputeTextureParam(computeShader, horizontalKernel, DenoiseInputTextureId, noisyMap);
-                    graphContext.cmd.SetComputeTextureParam(computeShader, horizontalKernel, DenoiseOutputTextureRwId, intermediate);
-                    graphContext.cmd.DispatchCompute(computeShader, horizontalKernel, dispatchX, dispatchY, 1);
+                graphContext.cmd.SetComputeTextureParam(state.ComputeShader, state.HorizontalKernel, DepthTextureId, state.DepthTexture);
+                graphContext.cmd.SetComputeTextureParam(state.ComputeShader, state.HorizontalKernel, NormalBufferTextureId, state.NormalsTexture);
+                graphContext.cmd.SetComputeTextureParam(state.ComputeShader, state.HorizontalKernel, DenoiseInputTextureId, state.NoisyMap);
+                graphContext.cmd.SetComputeTextureParam(state.ComputeShader, state.HorizontalKernel, DenoiseOutputTextureRwId, state.Intermediate);
+                graphContext.cmd.DispatchCompute(state.ComputeShader, state.HorizontalKernel, dispatchX, dispatchY, 1);
 
-                    graphContext.cmd.SetComputeTextureParam(computeShader, verticalKernel, DepthTextureId, depthTexture);
-                    graphContext.cmd.SetComputeTextureParam(computeShader, verticalKernel, NormalBufferTextureId, normalsTexture);
-                    graphContext.cmd.SetComputeTextureParam(computeShader, verticalKernel, DenoiseInputTextureId, intermediate);
-                    graphContext.cmd.SetComputeTextureParam(computeShader, verticalKernel, DenoiseOutputTextureRwId, output);
-                    graphContext.cmd.DispatchCompute(computeShader, verticalKernel, dispatchX, dispatchY, 1);
-                }
-            });
+                graphContext.cmd.SetComputeTextureParam(state.ComputeShader, state.VerticalKernel, DepthTextureId, state.DepthTexture);
+                graphContext.cmd.SetComputeTextureParam(state.ComputeShader, state.VerticalKernel, NormalBufferTextureId, state.NormalsTexture);
+                graphContext.cmd.SetComputeTextureParam(state.ComputeShader, state.VerticalKernel, DenoiseInputTextureId, state.Intermediate);
+                graphContext.cmd.SetComputeTextureParam(state.ComputeShader, state.VerticalKernel, DenoiseOutputTextureRwId, state.Output);
+                graphContext.cmd.DispatchCompute(state.ComputeShader, state.VerticalKernel, dispatchX, dispatchY, 1);
+            }, _profilingSampler);
         }
 
         internal static TextureDesc CreateDenoiseDesc(RenderTextureDescriptor cameraDescriptor)
@@ -145,15 +171,8 @@ namespace Tsukuyomi.Rendering
                 ? GraphicsFormat.R16_SFloat
                 : GraphicsFormat.R16G16B16A16_SFloat;
 
-            return new TextureDesc(cameraDescriptor.width, cameraDescriptor.height)
-            {
-                colorFormat = format,
-                depthBufferBits = DepthBits.None,
-                msaaSamples = MSAASamples.None,
-                enableRandomWrite = true,
-                clearBuffer = false,
-                clearColor = Color.clear
-            };
+            return TextureDescriptors.Color2D(cameraDescriptor.width, cameraDescriptor.height,
+                format, randomWrite: true);
         }
     }
 }

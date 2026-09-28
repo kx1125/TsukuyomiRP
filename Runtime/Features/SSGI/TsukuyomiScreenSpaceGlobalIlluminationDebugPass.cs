@@ -15,6 +15,11 @@ namespace Tsukuyomi.Rendering
         private Shader _shader;
         private bool _missingShaderLogged;
 
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(activeColor);
+        }
+
         public override string Name => "Tsukuyomi SSGI Debug Output";
 
         public bool Configure()
@@ -50,23 +55,30 @@ namespace Tsukuyomi.Rendering
             return base.IsActive(frame) && _material != null;
         }
 
+        private sealed class RenderData
+        {
+            public Material Material;
+        }
+
         public override void Record(in RasterPassContext context)
         {
+            var passData = context.GetOrCreateData<RenderData>();
             TextureHandle activeColorTexture = context.Resources.ActiveColor;
             if (_material == null || !activeColorTexture.IsValid())
                 return;
 
-            context.Builder.SetRenderAttachment(activeColorTexture, 0, AccessFlags.Write);
+            context.ColorAttachment(activeColorTexture);
             context.Builder.UseAllGlobalTextures(true);
             context.Builder.AllowPassCulling(false);
 
-            Material material = _material;
-            context.SetRenderFunc((data, graphContext) =>
+            passData.Material = _material;
+
+            context.SetRenderFunc(passData, static (state, graphContext) =>
             {
                 Blitter.BlitTexture(
                     graphContext.cmd,
                     new Vector4(1.0f, 1.0f, 0.0f, 0.0f),
-                    material,
+                    state.Material,
                     0);
             });
         }

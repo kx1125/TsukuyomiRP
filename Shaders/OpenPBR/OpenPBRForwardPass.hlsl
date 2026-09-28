@@ -1,8 +1,10 @@
-#ifndef TSUKUYOMI_PBR_FORWARD_PASS_INCLUDED
-#define TSUKUYOMI_PBR_FORWARD_PASS_INCLUDED
+#ifndef TSUKUYOMI_OPENPBR_FORWARD_PASS_INCLUDED
+#define TSUKUYOMI_OPENPBR_FORWARD_PASS_INCLUDED
 
-#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiPBRInput.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/Shaders/OpenPBR/OpenPBRInput.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Lighting/TsukuyomiLightingPBR.hlsl"
+#define TSUKUYOMI_OPENPBR_SAMPLE_ENVIRONMENT TsukuyomiGlossyEnvironmentReflection
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/OpenPBR/TsukuyomiOpenPBRURP.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSGI/TsukuyomiScreenSpaceGlobalIllumination.hlsl"
 
 #if defined(LOD_FADE_CROSSFADE)
@@ -196,7 +198,7 @@ TsukuyomiPBRVaryings TsukuyomiPBRForwardVertex(TsukuyomiPBRAttributes input)
     TSUKUYOMI_OUTPUT_SH4(vertexInput.positionWS, output.normalWS.xyz, GetWorldSpaceNormalizeViewDir(vertexInput.positionWS), output.vertexSH, output.probeOcclusion);
 
 #ifdef _ADDITIONAL_LIGHTS_VERTEX
-    output.fogFactorAndVertexLight = half4(fogFactor, vertexLight);
+    output.fogFactorAndVertexLight = half4(fogFactor, TsukuyomiVertexLighting(vertexInput.positionWS, normalInput.normalWS));
 #else
     output.fogFactor = fogFactor;
 #endif
@@ -233,7 +235,41 @@ void TsukuyomiPBRForwardFragment(
 
     TsukuyomiPBRInitializeBakedGIData(input, inputData);
 
-    half4 color = TsukuyomiFragmentPBR(inputData, surfaceData);
+    TsukuyomiOpenPBRMaterial m = TsukuyomiOpenPBRFromURPSurface(surfaceData);
+    m.diffuseRoughness = _OpenPBRDiffuseRoughness;
+    m.specularIOR = _OpenPBRIOR;
+    m.anisotropy = _OpenPBRAnisotropy;
+    m.coatWeight = _OpenPBRCoatWeight;
+    m.coatRoughness = _OpenPBRCoatRoughness;
+    m.coatIOR = _OpenPBRCoatIOR;
+    m.coatColor = _OpenPBRCoatColor.rgb;
+    m.coatDarkening = _OpenPBRCoatDarkening;
+    m.fuzzWeight = _OpenPBRFuzzWeight;
+    m.fuzzColor = _OpenPBRFuzzColor.rgb;
+    m.fuzzRoughness = _OpenPBRFuzzRoughness;
+    TsukuyomiOpenPBRGeometry g;
+    g.geometricNormalWS = NormalizeNormalPerPixel(input.normalWS);
+    g.normalWS = inputData.normalWS;
+    g.tangentWS = input.tangentWS.xyz;
+    g.tangentSign = input.tangentWS.w;
+    g.viewDirectionWS = inputData.viewDirectionWS;
+    float3 tangent, bitangent;
+    TsuOPBRBasis(g.geometricNormalWS, g.tangentWS, g.tangentSign, tangent, bitangent);
+    half3 coatTS = SampleNormal(input.uv, TEXTURE2D_ARGS(_OpenPBRCoatNormalMap, sampler_OpenPBRCoatNormalMap), _OpenPBRCoatNormalScale);
+    g.coatNormalWS = NormalizeNormalPerPixel(tangent * coatTS.x + bitangent * coatTS.y + g.geometricNormalWS * coatTS.z);
+    TsukuyomiOpenPBRPrepared p = TsukuyomiOpenPBRPrepare(m, g);
+    TsukuyomiOpenPBRLightingOptions options = TsukuyomiOpenPBRDefaultLightingOptions();
+    options.occlusion = surfaceData.occlusion;
+    options.microShadowOpacity = _MicroShadowOpacity;
+    options.indirectDiffuseIntensity = _IndirectDiffuseIntensity;
+    options.indirectSpecularIntensity = _IndirectSpecularIntensity;
+    options.horizonOcclusionPower = _HorizonOcclusionPower;
+#if TSUKUYOMI_OPENPBR_SAMPLE_HIGH
+    half4 color = half4(TsukuyomiOpenPBRFragmentHigh(inputData, p, options), surfaceData.alpha);
+#else
+    half4 color = half4(TsukuyomiOpenPBRFragmentBalanced(inputData, p, options), surfaceData.alpha);
+#endif
+    color.rgb += surfaceData.emission;
     color.rgb = MixFog(color.rgb, inputData.fogCoord);
     color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent());
 

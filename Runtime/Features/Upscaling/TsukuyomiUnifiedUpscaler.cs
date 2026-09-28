@@ -45,8 +45,10 @@ namespace Tsukuyomi.Rendering
             Instances.Add(this);
         }
         public override string name => TsukuyomiUpscaling.UpscalerName;
+#if !UNITY_6000_6_OR_NEWER
         public override UpscalerOptions options => _source;
         public override bool supportsXR => false;
+#endif
         public override bool supportsSharpening => ActualBackend == UpscalerBackend.FSR3;
         public override bool isTemporal => _backend != null && TsukuyomiUpscaling.IsSupportedCamera(TsukuyomiUpscaling.CurrentCamera, out _);
 
@@ -54,8 +56,22 @@ namespace Tsukuyomi.Rendering
         {
             for (int i = Instances.Count - 1; i >= 0; --i)
                 if (Instances[i]._source && asset.upscalerOptions.Contains(Instances[i]._source)) return Instances[i];
+#if UNITY_6000_6_OR_NEWER
+            foreach (var options in asset.upscalerOptions)
+                if (options is TsukuyomiUpscalerOptions source && source)
+                    return FindOrCreate(source);
+#endif
             return null;
         }
+#if UNITY_6000_6_OR_NEWER
+        internal static TsukuyomiUnifiedUpscaler FindOrCreate(TsukuyomiUpscalerOptions source)
+        {
+            if (!source) return null;
+            for (int i = Instances.Count - 1; i >= 0; --i)
+                if (ReferenceEquals(Instances[i]._source, source)) return Instances[i];
+            return new TsukuyomiUnifiedUpscaler(source);
+        }
+#endif
         internal static void BeginContextForAll(TsukuyomiUnifiedUpscaler active)
         {
             foreach (var instance in Instances)
@@ -121,7 +137,12 @@ namespace Tsukuyomi.Rendering
             _dlssFirstDispatch = -1;
             _cameras.Clear();
         }
+#if UNITY_6000_6_OR_NEWER
+        // Kept as the backend contract; the 6.6 framework adapter returns resolution info.
+        public void NegotiatePreUpscaleResolution(ref Vector2Int renderSize, Vector2Int displaySize)
+#else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int renderSize, Vector2Int displaySize)
+#endif
         {
             renderSize = displaySize;
             bool supported = TsukuyomiUpscaling.IsSupportedCamera(TsukuyomiUpscaling.CurrentCamera, out var cameraReason);
@@ -139,6 +160,9 @@ namespace Tsukuyomi.Rendering
 #endif
         {
             jitter = Vector2.zero; allowScaling = false;
+#if UNITY_6000_6_OR_NEWER
+            TsukuyomiUpscaling.CurrentUpscaleRatio = upscaleRatio;
+#endif
             if (isTemporal) _backend.CalculateJitter(frameIndex, out jitter, out allowScaling);
         }
         public override void RecordRenderGraph(RenderGraph graph, ContextContainer frame)

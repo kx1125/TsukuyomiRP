@@ -129,9 +129,11 @@ namespace UnityRhi.Dlss.Urp
 
         public override bool supportsSharpening => false;
 
+#if !UNITY_6000_6_OR_NEWER
         public override UpscalerOptions options => _options;
 
         public override bool supportsXR => true;
+#endif
 #else
         public override string GetName() => UpscalerName;
 
@@ -169,7 +171,11 @@ namespace UnityRhi.Dlss.Urp
             _jitter = jitter;
         }
 
+#if UNITY_6000_6_OR_NEWER
+        public void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution,
+#else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution,
+#endif
             Vector2Int postUpscaleResolution)
         {
             _outputResolution = postUpscaleResolution;
@@ -250,7 +256,7 @@ namespace UnityRhi.Dlss.Urp
             RgTextureDesc colorDesc = io.cameraColor.GetDescriptor(renderGraph);
             RgTextureDesc depthDesc = sourceDepth.GetDescriptor(renderGraph);
             RgTextureDesc motionDesc = io.motionVectorColor.GetDescriptor(renderGraph);
-            ResolveEyes(io, colorDesc, out int firstEye, out int eyeCount, out bool texArray);
+            ResolveEyes(io, frameData, colorDesc, out int firstEye, out int eyeCount, out bool texArray);
             if (!_loggedXr && (texArray || firstEye != 0 ||
                 (frameData.Contains<UniversalCameraData>() &&
                  frameData.Get<UniversalCameraData>().xr.enabled)))
@@ -445,10 +451,21 @@ namespace UnityRhi.Dlss.Urp
         private static bool IsTexArray(in RgTextureDesc desc) =>
             desc.dimension == UnityEngine.Rendering.TextureDimension.Tex2DArray && desc.slices > 1;
 
-        private static void ResolveEyes(UpscalingIO io, in RgTextureDesc colorDesc,
+        private static void ResolveEyes(UpscalingIO io, ContextContainer frameData, in RgTextureDesc colorDesc,
             out int firstEye, out int eyeCount, out bool texArray)
         {
+#if UNITY_6000_6_OR_NEWER
+            // UpscalingIO no longer carries an eye index. Array views start at zero;
+            // multipass history still needs the URP XR pass ID to distinguish eyes.
+            firstEye = 0;
+            if (frameData.Contains<UniversalCameraData>())
+            {
+                var xr = frameData.Get<UniversalCameraData>().xr;
+                if (xr.enabled && !xr.singlePassEnabled) firstEye = xr.multipassId;
+            }
+#else
             firstEye = io.eyeIndex;
+#endif
             if (io.enableTexArray && IsTexArray(colorDesc))
             {
                 eyeCount = Mathf.Max(1, io.numActiveViews);

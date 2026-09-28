@@ -2,7 +2,7 @@
 #define GLASS_FORWARD_PASS_INCLUDED
 
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiGlassInput.hlsl"
-#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Lighting/TsukuyomiLighting.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Lighting/TsukuyomiLightingPBR.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 

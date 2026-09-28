@@ -33,11 +33,12 @@ namespace Tsukuyomi.Rendering
             Instances.Add(this);
         }
 
-        // The property contract and EntityId camera IDs are shared by Unity 6000.5 and 6000.6.
         public override string name => UpscalerName;
         public override bool isTemporal => true;
         public override bool supportsSharpening => true;
+#if !TSUKUYOMI_UPSCALER_API_6000_6
         public override bool supportsXR => false;
+#endif
 
 #if TSUKUYOMI_UPSCALER_API_6000_6
         public override IUpscalerContext CreateContext(UpscalerOptions options, Vector2Int displayResolution)
@@ -75,7 +76,11 @@ namespace Tsukuyomi.Rendering
         }
 #endif
 
+#if TSUKUYOMI_UPSCALER_API_6000_6
+        public void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
+#else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
+#endif
         {
             if (!TryGetValidResources(out TsukuyomiRenderPipelineResources resources))
                 return;

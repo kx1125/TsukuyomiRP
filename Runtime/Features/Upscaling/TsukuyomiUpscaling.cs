@@ -211,7 +211,11 @@ namespace Tsukuyomi.Rendering
             s_Backend = null; s_Quality = null; s_NeuralRendering = null; s_Status = default;
             s_ShuttingDown = false;
             s_DlssFailure = null; s_NrFailure = null; s_Revision++;
+#if UNITY_6000_6_OR_NEWER
+            UpscalerRegistry.Register<TsukuyomiFrameworkUpscaler, TsukuyomiUpscalerOptions>(UpscalerName);
+#else
             UpscalerRegistry.Register<TsukuyomiUnifiedUpscaler, TsukuyomiUpscalerOptions>(UpscalerName);
+#endif
             RenderPipelineManager.beginContextRendering -= BeginContext;
             RenderPipelineManager.beginContextRendering += BeginContext;
             RenderPipelineManager.beginCameraRendering -= BeginCamera;
@@ -246,6 +250,14 @@ namespace Tsukuyomi.Rendering
             TsukuyomiUnifiedUpscaler.BeginContextForAll(Active);
         }
         private static void BeginCamera(ScriptableRenderContext context, Camera camera) { CurrentCamera = camera; }
+#if UNITY_6000_6_OR_NEWER
+        internal static TsukuyomiUnifiedUpscaler PrepareUpscaler(UpscalerOptions options)
+        {
+            Active = TsukuyomiUnifiedUpscaler.FindOrCreate(options as TsukuyomiUpscalerOptions);
+            TsukuyomiUnifiedUpscaler.BeginContextForAll(Active);
+            return Active;
+        }
+#endif
         private static void EndCamera(ScriptableRenderContext context, Camera camera) { CurrentCamera = null; }
         private static void Shutdown()
         {

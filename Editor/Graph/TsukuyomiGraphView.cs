@@ -113,9 +113,8 @@ namespace Tsukuyomi.Rendering.Editor
                 evt.menu.AppendAction($"Add Pass/{point}", (a) => { }, DropdownMenuAction.Status.Disabled);
                 evt.menu.AppendSeparator();
 
-                var types = AppDomain.CurrentDomain.GetAssemblies()
-                    .SelectMany(s => s.GetTypes())
-                    .Where(p => p.IsPublic && typeof(RenderPassBase).IsAssignableFrom(p) && !p.IsAbstract)
+                var types = UnityEditor.TypeCache.GetTypesDerivedFrom<RenderPassBase>()
+                    .Where(p => p.IsPublic && !p.IsAbstract)
                     .OrderBy(p => p.Name);
 
                 foreach (var type in types)

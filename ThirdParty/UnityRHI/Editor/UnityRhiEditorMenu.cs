@@ -19,8 +19,8 @@ namespace UnityRhi.EditorTools
                 return;
             }
 
-#if UNITY_6000_6_OR_NEWER
-            // Unity 6.6 has already selected its D3D12 runtime before this callback.
+#if UNITY_6000_5_OR_NEWER
+            // Unity 6.5 and later have already selected the D3D12 runtime before this callback.
             // Use the native plugin's host-runtime mode before the first P/Invoke.
             // Preserve an explicit override supplied when the editor was launched.
             if (string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("UNITYRHI_AGILITY_SDK")))

@@ -16,9 +16,9 @@
       "path": "Samples~/LookDev"
     }
   ],
-  "documentationUrl": "https://github.com/kx1125/TsukuyomiRP#readme",
-  "changelogUrl": "https://github.com/kx1125/TsukuyomiRP/blob/main/CHANGELOG.md",
-  "licensesUrl": "https://github.com/kx1125/TsukuyomiRP/blob/main/LICENSE",
+  "documentationUrl": "https://github.com/kx1125/TsukuyomiRP/blob/v0.1.9/README.md",
+  "changelogUrl": "https://github.com/kx1125/TsukuyomiRP/blob/v0.1.9/CHANGELOG.md",
+  "licensesUrl": "https://github.com/kx1125/TsukuyomiRP/blob/v0.1.9/LICENSE.md",
   "license": "MIT",
   "repository": {
     "type": "git",

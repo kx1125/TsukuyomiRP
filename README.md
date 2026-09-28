@@ -9,15 +9,16 @@ TsukuyomiRP is an experimental collection of custom rendering features for Unity
 
 ## Requirements
 
-- Unity 6000.5 or newer
-- Universal Render Pipeline 17.5.0
+- Unity 6000.5 with Universal Render Pipeline 17.5, or Unity 6000.6 with Universal Render Pipeline 17.6
+- Keep the URP version matched to the Unity Editor; the package retains 17.5.0 as its minimum dependency.
+- Git and Git LFS for installation from a Git URL. Native plugins and sample assets are stored in Git LFS.
 
 ## Installation
 
 In Unity, open **Window > Package Management > Package Manager**, select **Install package from git URL**, and enter:
 
 ```text
-https://github.com/kx1125/TsukuyomiRP.git#v0.1.7
+https://github.com/kx1125/TsukuyomiRP.git#v0.1.9
 ```
 
 You can also add the package directly to your project's `Packages/manifest.json`:
@@ -25,10 +26,16 @@ You can also add the package directly to your project's `Packages/manifest.json`
 ```json
 {
   "dependencies": {
-    "tsukuyomi.render-pipelines.universal": "https://github.com/kx1125/TsukuyomiRP.git#v0.1.7"
+    "tsukuyomi.render-pipelines.universal": "https://github.com/kx1125/TsukuyomiRP.git#v0.1.9"
   }
 }
 ```
+
+## DLSS / FSR3
+
+The unified `Tsukuyomi Upscaler` supports switching between DLSS SR / DLAA and FSR3, with optional DLSS 5 Neural Rendering after post processing.
+
+The Git URL above installs the complete package, including `Plugins` and `ThirdParty/UnityRHI`. Restart Unity after installation so its Windows native plugins preload. Separate `top.kuanmi.*` packages are unnecessary.
 
 ## Samples
 
@@ -44,4 +51,6 @@ The sample render pipeline asset references its included renderer and Tsukuyomi 
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](LICENSE.md).
+
+Bundled native libraries and third-party code retain their respective licenses; see the [third-party notices](ThirdParty/UnityRHI/ThirdPartyNotices.md).

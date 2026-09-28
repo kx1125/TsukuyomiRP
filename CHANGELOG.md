@@ -4,12 +4,22 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-28
+
+### Added
+
+- Added OpenPBR SpecularPBR materials and Balanced/High shader variants with their lookup resources.
+- Added the unified Tsukuyomi Upscaler for DLSS SR / DLAA and FSR3, with optional DLSS 5 Neural Rendering and bundled Windows native plugins.
+
 ### Changed
 
+- Replaced the legacy Standard shaders with OpenPBR-based SpecularPBR lighting.
 - Create and cache volumetric fog and depth-downsampling materials from preloaded shader references, removing the bundled material assets and their resource settings.
 
 ### Fixed
 
+- Support Unity 6.6 / URP 17.6 upscaler construction, framework-owned options, resolution queries and XR eye IDs while retaining the Unity 6.5 / URP 17.5 integration.
+- Use Unity's TypeCache for the graph editor's render-pass menu to avoid scanning unloaded assemblies on Unity 6.6.
 - Keep volumetric material state private to each pass, release replaced materials when shaders change, and reuse valid materials when another shader is missing.
 
 ## [0.1.8] - 2026-09-13

@@ -70,6 +70,7 @@ Shader "TsukuyomiRP/Lit/PBR"
             "RenderPipeline" = "UniversalPipeline"
             "UniversalMaterialType" = "Lit"
             "IgnoreProjector" = "True"
+            "TsukuyomiRTShadow" = "True"
         }
         LOD 300
 
@@ -269,6 +270,21 @@ Shader "TsukuyomiRP/Lit/PBR"
 
             #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiPBRInput.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ObjectMotionVectors.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "TsukuyomiRTShadow"
+            Tags { "LightMode" = "TsukuyomiRTShadow" }
+
+            HLSLPROGRAM
+            #pragma only_renderers d3d11
+            #pragma raytracing surface_shader
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _SURFACE_TYPE_TRANSPARENT
+            #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiPBRInput.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Ray Traced Shadow/RTShadowCaster.hlsl"
             ENDHLSL
         }
     }

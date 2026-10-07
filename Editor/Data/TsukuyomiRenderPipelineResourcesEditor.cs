@@ -14,10 +14,14 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_ShowPostProcessing = true;
         private static bool s_ShowFsr3Resources = true;
         private static bool s_ShowDefaultTextures = true;
+        private static bool s_ShowRectLights = true;
+        private static bool s_ShowRayTracedShadows = true;
 
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
+            DrawFoldout(ref s_ShowRectLights, "Rect Lights", "rectLightResources");
+            DrawFoldout(ref s_ShowRayTracedShadows, "Ray Traced Shadows", "rayTracedShadowShader", "rayTracedShadowDenoiser");
 
             DrawFoldout(
                 ref s_ShowPcssShadow,

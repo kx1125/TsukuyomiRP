@@ -1,0 +1,18 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: eb70f44251e45ba0b0bc498e70ee4e7e, type: 3}
+  m_Name: RectLightResources
+  m_EditorClassIdentifier: 
+  ggxMatrix: {fileID: 4900000, guid: f32d2764a3685fa3adab7a5c554fc148, type: 3}
+  ggxAmplitude: {fileID: 4900000, guid: c74912fcf5ef55d5a2896acff8ba61e0, type: 3}
+  disneyMatrix: {fileID: 4900000, guid: 3fbcedcbd9d15bf6ba47edc13700e496, type: 3}
+  disneyFGD: {fileID: 4900000, guid: 33a9015376f25df099d501bcfa8e8a6e, type: 3}

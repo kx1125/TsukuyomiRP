@@ -19,6 +19,8 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_PostProcessingExpanded = true;
         private static bool s_SssSkinExpanded = true;
         private static bool s_PassListExpanded;
+        private static bool s_RectLightsExpanded = true;
+        private static bool s_RayTracedShadowsExpanded = true;
 
         public override void OnInspectorGUI()
         {
@@ -70,6 +72,8 @@ namespace Tsukuyomi.Rendering.Editor
 
             EditorGUI.indentLevel++;
             DrawPlanarReflectionSettings();
+            DrawRectLightSettings();
+            DrawRayTracedShadowSettings();
             DrawPcssSettings();
             DrawPerObjectShadowSettings();
             DrawContactShadowSettings();
@@ -79,6 +83,43 @@ namespace Tsukuyomi.Rendering.Editor
             DrawPostProcessingSettings();
             DrawSssSkinSettings();
             EditorGUI.indentLevel--;
+        }
+
+        private void DrawRectLightSettings()
+        {
+            var enabled = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableRectLights));
+            s_RectLightsExpanded = CoreEditorUtils.DrawHeaderToggleFoldout(
+                EditorGUIUtility.TrTextContent("Rect Lights"), s_RectLightsExpanded, enabled, null, null, null, null);
+            if (s_RectLightsExpanded)
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MaxRectLights)));
+                EditorGUILayout.HelpBox("Add TsukuyomiRectLight components and call AccumulateRectLights from the material shader. Desktop Forward/Forward+. Each light controls diffuse quality; GGX LTC specular is shared. The screen-UV overload supports ray traced shadows.", MessageType.Info);
+                EditorGUI.indentLevel--;
+            }
+            CoreEditorUtils.DrawSplitter();
+        }
+
+        private void DrawRayTracedShadowSettings()
+        {
+            var enabled = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableRayTracedShadows));
+            s_RayTracedShadowsExpanded = CoreEditorUtils.DrawHeaderToggleFoldout(
+                EditorGUIUtility.TrTextContent("Ray Traced Shadows"), s_RayTracedShadowsExpanded,
+                enabled, null, null, null, null);
+            if (s_RayTracedShadowsExpanded)
+            {
+                EditorGUI.indentLevel++;
+                using (new EditorGUI.DisabledScope(!enabled.boolValue))
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.RayTracedShadowSamples)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MaxRayTracedShadowLights)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.RayTracedShadowCasterMask)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.RayTracedShadowDirectionalDistance)));
+                    EditorGUILayout.HelpBox("Windows DX12, desktop Forward/Forward+. Add TsukuyomiRayTracedShadowLight to native lights or enable RayTraced on a rectangle. Materials consume the explicit RT shadow sampling API. Casters require a TsukuyomiRTShadow pass and a Ray Tracing Mode other than Off.", MessageType.Info);
+                }
+                EditorGUI.indentLevel--;
+            }
+            CoreEditorUtils.DrawSplitter();
         }
 
         private void DrawPlanarReflectionSettings()

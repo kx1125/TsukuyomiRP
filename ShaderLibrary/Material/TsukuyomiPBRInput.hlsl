@@ -26,6 +26,7 @@ half _HorizonOcclusionPower;
 half _Fsr3ReactiveScale;
 half _Fsr3CompositionScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
+float _Cull;
 CBUFFER_END
 
 #ifdef UNITY_DOTS_INSTANCING_ENABLED

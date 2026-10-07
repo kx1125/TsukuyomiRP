@@ -29,6 +29,7 @@ float _IndirectDiffuseIntensity;
 float _IndirectSpecularIntensity;
 float _HorizonOcclusionPower;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
+float _Cull;
 CBUFFER_END
 
 #ifdef UNITY_DOTS_INSTANCING_ENABLED

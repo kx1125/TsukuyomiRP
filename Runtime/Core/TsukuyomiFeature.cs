@@ -66,6 +66,10 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiVolumetricFogPass _volumeLightPass;
         private TsukuyomiSssSkinPass _sssSkinPass;
         private TsukuyomiPostProcessPass _postProcessPass;
+        private TsukuyomiRectLightPass _rectLightPass;
+        private TsukuyomiBridgePass _rectLightBridgePass;
+        private TsukuyomiRayTracedShadowPass _rayTracedShadowPass;
+        private TsukuyomiBridgePass _rayTracedShadowBridgePass;
 #if ENABLE_UPSCALER_FRAMEWORK
         private TsukuyomiFsr3OpaqueOnlyCapturePass _fsr3OpaqueOnlyCapturePass;
         private TsukuyomiFsr3ManualMaskPass _fsr3ManualMaskPass;
@@ -121,6 +125,23 @@ namespace Tsukuyomi.Rendering
             _volumeLightPass ??= new TsukuyomiVolumetricFogPass();
             _sssSkinPass ??= new TsukuyomiSssSkinPass();
             _postProcessPass ??= new TsukuyomiPostProcessPass();
+            _rectLightPass ??= new TsukuyomiRectLightPass();
+            _rayTracedShadowPass?.Dispose();
+            _rayTracedShadowPass = new TsukuyomiRayTracedShadowPass { InjectionPoint = InjectionPoint.BeforeOpaque };
+            var rtShadowRegistry = new PassRegistry();
+            rtShadowRegistry.AddPass(_rayTracedShadowPass);
+            _rayTracedShadowBridgePass = new TsukuyomiBridgePass(rtShadowRegistry, InjectionPoint.BeforeOpaque, _resourceHub)
+            {
+                // URP schedules a depth read in the GBuffer event range after GBuffer,
+                // even in Forward, where that copy does not run. Request it before
+                // GBuffer so depth priming is copied (and motion rendered) after prepass.
+                renderPassEvent = RenderPassEvent.BeforeRenderingGbuffer - 1
+            };
+            _rectLightPass.InjectionPoint = InjectionPoint.BeforeOpaque;
+            var rectLightRegistry = new PassRegistry();
+            rectLightRegistry.AddPass(_rectLightPass);
+            _rectLightBridgePass = new TsukuyomiBridgePass(rectLightRegistry, InjectionPoint.BeforeOpaque, _resourceHub)
+            { renderPassEvent = RenderPassEvent.BeforeRenderingOpaques };
 #if ENABLE_UPSCALER_FRAMEWORK
             _fsr3OpaqueOnlyCapturePass ??= new TsukuyomiFsr3OpaqueOnlyCapturePass();
             _fsr3ManualMaskPass ??= new TsukuyomiFsr3ManualMaskPass();
@@ -236,6 +257,10 @@ namespace Tsukuyomi.Rendering
                 camera ? _resourceHub.ForCamera(camera) : _resourceHub);
             var requirements = renderingData.frameData.GetOrCreate<ResourceRequirements>();
             requirements.Begin(camera);
+            _rectLightPass.Configure(Profile, UsesDeferredLighting(renderer));
+            _rayTracedShadowPass.Configure(Profile, UsesDeferredLighting(renderer), _rectLightPass, camera);
+            EnqueueBridge(renderer, _rayTracedShadowBridgePass);
+            EnqueueBridge(renderer, _rectLightBridgePass);
 #if ENABLE_UPSCALER_FRAMEWORK
             _fsr3ManualMaskPass.Configure(Profile);
             renderer.EnqueuePass(_fsr3OpaqueOnlyCapturePass);
@@ -390,6 +415,7 @@ namespace Tsukuyomi.Rendering
         private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled, bool ssgiEnabled)
         {
             return (contactShadowDenoiseEnabled && PassRegistry.PassRequiresBuiltinTexture(_contactShadowDenoisePass, BuiltinTexture.CameraNormals))
+                || (_rayTracedShadowPass != null && _rayTracedShadowPass.RequiresNormals)
                 || (gtaoEnabled && PassRegistry.PassRequiresBuiltinTexture(_gtaoPass, BuiltinTexture.CameraNormals))
                 || (ssgiEnabled && PassRegistry.PassRequiresBuiltinTexture(_ssgiPass, BuiltinTexture.CameraNormals))
                 || (_registry != null && _registry.RequiresBuiltinTexture(BuiltinTexture.CameraNormals));
@@ -540,6 +566,12 @@ namespace Tsukuyomi.Rendering
             _postProcessPass?.Dispose();
             _postProcessPass = null;
             _postProcessBridgePass = null;
+            _rectLightPass?.Dispose();
+            _rayTracedShadowPass?.Dispose();
+            _rayTracedShadowPass = null;
+            _rayTracedShadowBridgePass = null;
+            _rectLightPass = null;
+            _rectLightBridgePass = null;
             _sssSkinPass?.Dispose();
             _sssSkinPass = null;
             _sssSkinBridgePass = null;

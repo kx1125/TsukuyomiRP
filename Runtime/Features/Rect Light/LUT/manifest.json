@@ -1,0 +1,26 @@
+{
+  "resolution": 64,
+  "unityGraphicsCommit": "feb4de2d9a93a4ae10d287d3a6d7003d08ea3e53",
+  "selfshadowCommit": "31e5e96b54f98f33098f8503003119ba2231a1c6",
+  "matrixUV": "(perceptualRoughness, sqrt(1-NoV)), half-texel remap",
+  "disneyFGDUV": "(sqrt(NoV), perceptualRoughness), half-texel remap; decode R + 0.5",
+  "disneyFGDIntegration": "64-point Gauss-Legendre with analytic azimuthal moments",
+  "files": {
+    "GGXMatrix.bytes": {
+      "bytes": 32768,
+      "sha256": "d8a46ada3b16bf2736d45240d0ded31070adff62b23c34d4d50bdfd44ee42f82"
+    },
+    "GGXAmplitude.bytes": {
+      "bytes": 32768,
+      "sha256": "a2a4a3eca0aecdf276f3cf28e43d523961dd8774ad6a69f1f421d71bbb2c6ed6"
+    },
+    "DisneyMatrix.bytes": {
+      "bytes": 32768,
+      "sha256": "1ed83f404632ac882d3e8d4ee096c5a03fcb2482857368b6d59a345b319d360a"
+    },
+    "DisneyFGD.bytes": {
+      "bytes": 8192,
+      "sha256": "54622ea7ceae9964c1ca2273a0f991b9d1779493edda6b41c876e4113a4f6f57"
+    }
+  }
+}

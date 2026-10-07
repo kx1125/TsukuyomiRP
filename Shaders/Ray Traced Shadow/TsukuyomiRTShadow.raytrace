@@ -1,0 +1,214 @@
+#pragma max_recursion_depth 1
+
+#define SHADER_TARGET 50
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "RTShadowCommon.hlsl"
+
+RaytracingAccelerationStructure _TsukuyomiRTShadowAccelerationStructure;
+StructuredBuffer<TsukuyomiRTShadowLightData> _TsukuyomiRTShadowLights;
+Texture2D<float> _RTShadowDepth;
+Texture2D<float4> _RTShadowNormals;
+RWTexture2DArray<float2> _RTShadowRawRW;
+float4 _RTShadowResolution;
+float4 _RTShadowCameraPosition;
+float4x4 _RTShadowInverseViewProjection;
+int _RTShadowFrameIndex, _RTShadowSampleCount, _RTShadowLightCount, _RTShadowNormalsOctEncoded;
+
+uint RTShadowHash(uint x)
+{
+    x ^= x >> 16; x *= 0x7feb352du;
+    x ^= x >> 15; x *= 0x846ca68bu;
+    return x ^ (x >> 16);
+}
+
+float RTShadowRandom(uint x) { return (RTShadowHash(x) >> 8) * (1.0 / 16777216.0); }
+float3 RTShadowSafeNormalize(float3 v) { return v * rsqrt(max(dot(v, v), 1e-20)); }
+
+float3 RTShadowNormal(uint2 pixel)
+{
+    float3 n = _RTShadowNormals.Load(int3(pixel, 0)).xyz;
+    if (_RTShadowNormalsOctEncoded != 0)
+        n = UnpackNormalOctQuadEncode(Unpack888ToFloat2(n) * 2.0 - 1.0);
+    return RTShadowSafeNormalize(n);
+}
+
+float3 RTShadowWorldPosition(float2 uv, float depth)
+{
+    float4 clip = float4(uv * 2.0 - 1.0, depth, 1.0);
+#if UNITY_UV_STARTS_AT_TOP
+    clip.y = -clip.y;
+#endif
+    float4 world = mul(_RTShadowInverseViewProjection, clip);
+    return world.xyz / world.w;
+}
+
+void RTShadowBasis(float3 axis, out float3 tangent, out float3 bitangent)
+{
+    tangent = RTShadowSafeNormalize(cross(abs(axis.z) < 0.999 ? float3(0, 0, 1) : float3(0, 1, 0), axis));
+    bitangent = cross(axis, tangent);
+}
+
+float3 RTShadowConeDirection(float3 axis, float cosTheta, float azimuth)
+{
+    float3 t, b;
+    RTShadowBasis(axis, t, b);
+    float s, c;
+    sincos(azimuth, s, c);
+    return axis * cosTheta + (t * c + b * s) * sqrt(saturate(1.0 - cosTheta * cosTheta));
+}
+
+// Offset by representable world-space units, with a small absolute offset near the origin.
+// This avoids a distance-proportional bias that would erase small contact shadows far from the camera.
+float3 RTShadowOffsetOrigin(float3 p, float3 n)
+{
+    int3 offset = int3(256.0 * n);
+    float3 shifted = asfloat(asint(p) + int3(p.x < 0 ? -offset.x : offset.x,
+        p.y < 0 ? -offset.y : offset.y, p.z < 0 ? -offset.z : offset.z));
+    return float3(abs(p.x) < 0.03125 ? p.x + n.x * (1.0 / 65536.0) : shifted.x,
+        abs(p.y) < 0.03125 ? p.y + n.y * (1.0 / 65536.0) : shifted.y,
+        abs(p.z) < 0.03125 ? p.z + n.z * (1.0 / 65536.0) : shifted.z);
+}
+
+// Returns the sample direction, finite ray length, and a relative irradiance weight.
+// Area/solid-angle PDFs are constant within each light and cancel in the visibility ratio.
+bool RTShadowLightSample(TsukuyomiRTShadowLightData light, float3 p, float3 n, float2 u,
+    out float3 direction, out float rayLength, out float weight)
+{
+    direction = 0; rayLength = 0; weight = 0;
+    uint type = (uint)light.directionType.w;
+    float3 forward = RTShadowSafeNormalize(light.directionType.xyz);
+    if (type == 3u)
+    {
+        direction = RTShadowConeDirection(-forward, lerp(1.0, light.shapeParams.y, u.x), TWO_PI * u.y);
+        rayLength = light.positionRange.w;
+        weight = saturate(dot(n, direction));
+        return rayLength > 0 && weight > 0;
+    }
+
+    float3 toCenter = light.positionRange.xyz - p;
+    float centerD2 = dot(toCenter, toCenter);
+    if (centerD2 >= light.positionRange.w * light.positionRange.w || light.positionRange.w <= 0)
+        return false;
+
+    if (type == 1u)
+    {
+        float radius = max(0.0, light.shapeParams.x);
+        if (radius <= 1e-6)
+        {
+            rayLength = sqrt(centerD2);
+            direction = toCenter / max(rayLength, 1e-10);
+        }
+        else
+        {
+            // Sampling the visible solid-angle cap avoids wasting rays on the sphere's back face.
+            bool inside = centerD2 <= radius * radius;
+            float3 axis = centerD2 > 1e-12 ? toCenter * rsqrt(centerD2) : n;
+            float cosMax = inside ? -1.0 : sqrt(saturate(1.0 - radius * radius / centerD2));
+            direction = RTShadowConeDirection(axis, lerp(1.0, cosMax, u.x), TWO_PI * u.y);
+            float projection = dot(toCenter, direction);
+            // Subtract vectors before squaring: r^2-d^2+projection^2 loses a small radius
+            // entirely when a compact emitter is far from the receiver.
+            float3 perpendicular = toCenter - projection * direction;
+            float root = sqrt(max(0.0, radius * radius - dot(perpendicular, perpendicular)));
+            rayLength = inside ? projection + root : projection - root;
+        }
+        weight = saturate(dot(n, direction));
+        return rayLength > 1e-6 && weight > 0;
+    }
+
+    // Rectangle and spot disk are one-sided emitters; reject the back side before sampling.
+    if (dot(forward, -toCenter) <= 1e-7) return false;
+    float3 samplePosition = light.positionRange.xyz;
+    bool pointSpot = type == 2u && light.shapeParams.x <= 1e-6;
+    if (type == 0u)
+        samplePosition += light.rightSize.xyz * ((2.0 * u.x - 1.0) * light.rightSize.w)
+            + light.upSize.xyz * ((2.0 * u.y - 1.0) * light.upSize.w);
+    else
+    {
+        float s, c;
+        sincos(TWO_PI * u.y, s, c);
+        samplePosition += (light.rightSize.xyz * c + light.upSize.xyz * s) * (sqrt(u.x) * light.shapeParams.x);
+    }
+    float3 delta = samplePosition - p;
+    float d2 = dot(delta, delta);
+    rayLength = sqrt(d2);
+    direction = delta / max(rayLength, 1e-10);
+    float emitterCosine = saturate(dot(forward, -direction));
+    weight = saturate(dot(n, direction)) * (pointSpot ? 1.0 : emitterCosine)
+        * max(centerD2, 1e-6) / max(d2, 1e-10);
+    if (type == 2u)
+    {
+        float cone = saturate((emitterCosine - light.shapeParams.z) * light.shapeParams.w);
+        weight *= cone * cone;
+    }
+    return rayLength > 1e-6 && weight > 0;
+}
+
+[shader("miss")]
+void MissShadows(inout TsukuyomiRTShadowPayload payload : SV_RayPayload)
+{
+    payload.visibility = 1.0;
+    payload.hitDistance = 0.0;
+}
+
+[shader("raygeneration")]
+void RayGenShadows()
+{
+    uint3 pixel = DispatchRaysIndex();
+    if (any(pixel.xy >= (uint2)_RTShadowResolution.xy) || pixel.z >= (uint)_RTShadowLightCount) return;
+    float depth = _RTShadowDepth.Load(int3(pixel.xy, 0));
+    if (depth == UNITY_RAW_FAR_CLIP_VALUE)
+    {
+        _RTShadowRawRW[pixel] = float2(1, 0);
+        return;
+    }
+    float2 uv = (pixel.xy + 0.5) * _RTShadowResolution.zw;
+    float3 p = RTShadowWorldPosition(uv, depth);
+    float3 n = RTShadowNormal(pixel.xy);
+    TsukuyomiRTShadowLightData light = _TsukuyomiRTShadowLights[pixel.z];
+    uint count = (uint)clamp(_RTShadowSampleCount, 1, 64);
+    uint seed = RTShadowHash(pixel.x + pixel.y * (uint)_RTShadowResolution.x)
+        ^ RTShadowHash((uint)light.shadowParams.y) ^ RTShadowHash((uint)_RTShadowFrameIndex);
+    float2 rotation = float2(RTShadowRandom(seed), RTShadowRandom(seed ^ 0x51633e2du));
+    float sum = 0, visibleSum = 0, hitSum = 0, occludedSum = 0, maximumWeight = 0;
+    [loop] for (uint sampleIndex = 0; sampleIndex < count; ++sampleIndex)
+    {
+        float2 u = frac(float2((sampleIndex + 0.5) / count,
+            reversebits(sampleIndex) * 2.3283064365386963e-10) + rotation);
+        float3 direction;
+        float distance, weight;
+        if (!RTShadowLightSample(light, p, n, u, direction, distance, weight)) continue;
+        float3 origin = RTShadowOffsetOrigin(p, n);
+        float offsetAlongRay = dot(origin - p, direction);
+        float remaining = distance - max(0.0, offsetAlongRay) - max(1e-5, distance * 1e-6);
+        TsukuyomiRTShadowPayload payload;
+        payload.visibility = 1;
+        payload.hitDistance = 0;
+        if (remaining > 1e-6)
+        {
+            RayDesc ray;
+            ray.Origin = origin;
+            ray.Direction = direction;
+            ray.TMin = 0;
+            ray.TMax = remaining;
+            // Material AnyHit implements alpha clipping and per-material face culling.
+            TraceRay(_TsukuyomiRTShadowAccelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+                0xff, 0, 1, 0, ray, payload);
+        }
+        // Rescaling by the running maximum prevents a near-emitter sample overflowing the sums.
+        if (weight > maximumWeight)
+        {
+            float scale = maximumWeight / weight;
+            sum *= scale; visibleSum *= scale; hitSum *= scale; occludedSum *= scale;
+            maximumWeight = weight;
+        }
+        float w = weight / max(maximumWeight, 1e-20);
+        sum += w;
+        visibleSum += w * payload.visibility;
+        hitSum += w * (1.0 - payload.visibility) * min(payload.hitDistance, 65504.0);
+        occludedSum += w * (1.0 - payload.visibility);
+    }
+    float visibility = sum > 1e-8 ? saturate(visibleSum / sum) : 1.0;
+    _RTShadowRawRW[pixel] = float2(visibility, occludedSum > 1e-8 ? hitSum / occludedSum : 0.0);
+}

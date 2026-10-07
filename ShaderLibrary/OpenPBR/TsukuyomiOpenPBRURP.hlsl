@@ -3,6 +3,7 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Lighting/TsukuyomiEvaluateMaterial.hlsl"
 #include "TsukuyomiOpenPBR.hlsl"
+#include "TsukuyomiOpenPBRRTShadow.hlsl"
 
 // Optional caller hook for planar reflection or another radiance provider.
 // Signature matches GlossyEnvironmentReflection(R, position, roughness, AO, uv).
@@ -18,6 +19,8 @@ struct TsukuyomiOpenPBRLightingOptions
     float indirectSpecularIntensity;
     float horizonOcclusionPower;
 };
+
+#include "TsukuyomiOpenPBRRectLight.hlsl"
 
 TsukuyomiOpenPBRLightingOptions TsukuyomiOpenPBRDefaultLightingOptions()
 {
@@ -136,7 +139,7 @@ float3 TsuOPBRURPFragment(InputData inputData, TsukuyomiOpenPBRPrepared p,
         p.material.baseColor * (1.0 - p.material.metalness), options.occlusion, p.baseSpecular.f0);
     uint layers = GetMeshRenderingLayer();
     half4 shadowMask = CalculateShadowMask(inputData);
-    Light main = GetMainLight(inputData.shadowCoord, inputData.positionWS, shadowMask);
+    Light main = TsuOPBRGetMainLight(inputData, shadowMask);
     MixRealtimeAndBakedGI(main, inputData.normalWS, inputData.bakedGI);
     TsukuyomiOpenPBREnvironment e = TsuOPBRURPSampleEnvironment(p, inputData, options, high);
     TsukuyomiOpenPBRResponse indirect;
@@ -154,7 +157,7 @@ float3 TsuOPBRURPFragment(InputData inputData, TsukuyomiOpenPBRPrepared p,
     [loop] for (uint lightIndex = 0; lightIndex < min(URP_FP_DIRECTIONAL_LIGHTS_COUNT, MAX_VISIBLE_LIGHTS); ++lightIndex)
     {
         CLUSTER_LIGHT_LOOP_SUBTRACTIVE_LIGHT_CHECK
-        Light light = GetAdditionalLight(lightIndex, inputData.positionWS, shadowMask);
+        Light light = TsuOPBRGetAdditionalLight(lightIndex, inputData, shadowMask);
         #ifdef _LIGHT_LAYERS
         if (IsMatchingLightLayer(light.layerMask, layers))
         #endif
@@ -162,7 +165,7 @@ float3 TsuOPBRURPFragment(InputData inputData, TsukuyomiOpenPBRPrepared p,
     }
     #endif
     LIGHT_LOOP_BEGIN(count)
-        Light light = GetAdditionalLight(lightIndex, inputData.positionWS, shadowMask);
+        Light light = TsuOPBRGetAdditionalLight(lightIndex, inputData, shadowMask);
         #ifdef _LIGHT_LAYERS
         if (IsMatchingLightLayer(light.layerMask, layers))
         #endif
@@ -173,6 +176,7 @@ float3 TsuOPBRURPFragment(InputData inputData, TsukuyomiOpenPBRPrepared p,
     // Vertex irradiance has no incoming directions: diffuse-only approximation.
     color += inputData.vertexLighting * p.material.baseColor * (1.0 - p.material.metalness);
 #endif
+    color += TsuOPBRURPRectLights(p, inputData, layers, ao, options, high);
     return color;
 }
 

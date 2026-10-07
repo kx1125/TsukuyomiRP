@@ -5,6 +5,16 @@ namespace Tsukuyomi.Rendering
     [CreateAssetMenu(menuName = "TsukuyomiRpP/Render Pipeline Resources", fileName = "TsukuyomiRenderPipelineResources")]
     public sealed class TsukuyomiRenderPipelineResources : ScriptableObject
     {
+        [Header("Rect Lights")]
+        [SerializeField] private TsukuyomiRectLightResources rectLightResources;
+        public TsukuyomiRectLightResources RectLightResources => rectLightResources;
+
+        [Header("Ray Traced Shadows")]
+        [SerializeField] private UnityEngine.Rendering.RayTracingShader rayTracedShadowShader;
+        [SerializeField] private ComputeShader rayTracedShadowDenoiser;
+        public UnityEngine.Rendering.RayTracingShader RayTracedShadowShader => rayTracedShadowShader;
+        public ComputeShader RayTracedShadowDenoiser => rayTracedShadowDenoiser;
+
         [Header("OpenPBR")]
         [SerializeField] private TsukuyomiOpenPBRResources openPBRResources;
         public TsukuyomiOpenPBRResources OpenPBRResources => openPBRResources;

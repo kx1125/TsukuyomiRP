@@ -38,6 +38,7 @@ float _OpenPBRFuzzWeight;
 float4 _OpenPBRFuzzColor;
 float _OpenPBRFuzzRoughness;
 float _OpenPBRCoatNormalScale;
+float _Cull;
 CBUFFER_END
 
 #ifdef UNITY_DOTS_INSTANCING_ENABLED

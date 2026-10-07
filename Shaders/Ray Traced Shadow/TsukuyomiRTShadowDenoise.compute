@@ -1,0 +1,180 @@
+#pragma only_renderers d3d11
+#pragma kernel CopyGeometry
+#pragma kernel Temporal
+#pragma kernel Atrous
+#pragma kernel Finalize
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "RTShadowCommon.hlsl"
+
+StructuredBuffer<TsukuyomiRTShadowLightData> _TsukuyomiRTShadowLights;
+Texture2D<float> _RTShadowDepth;
+Texture2D<float4> _RTShadowNormals;
+Texture2D<float2> _RTShadowMotion;
+Texture2D<float4> _RTShadowPreviousGeometry;
+Texture2DArray<float2> _RTShadowRaw;
+Texture2DArray<float4> _RTShadowHistory;
+Texture2DArray<float4> _RTShadowFilterInput;
+RWTexture2D<float4> _RTShadowGeometryRW;
+RWTexture2DArray<float4> _RTShadowTemporalRW;
+RWTexture2DArray<float4> _RTShadowFilterRW;
+RWTexture2DArray<float> _RTShadowOutputRW;
+float4 _RTShadowResolution;
+float4 _RTShadowCameraPosition;
+float2 _RTShadowJitterDelta;
+float4x4 _RTShadowInverseViewProjection, _RTShadowPreviousInverseViewProjection;
+int _RTShadowLightCount, _RTShadowNormalsOctEncoded, _RTShadowHistoryValid, _RTShadowFilterStep;
+
+float3 RTSafeNormalize(float3 n) { return n * rsqrt(max(dot(n, n), 1e-20)); }
+
+float3 RTNormal(uint2 pixel)
+{
+    float3 n = _RTShadowNormals.Load(int3(pixel, 0)).xyz;
+    if (_RTShadowNormalsOctEncoded != 0)
+        n = UnpackNormalOctQuadEncode(Unpack888ToFloat2(n) * 2.0 - 1.0);
+    return RTSafeNormalize(n);
+}
+
+float3 RTWorldPosition(float2 uv, float depth, float4x4 inverseViewProjection)
+{
+    float4 clip = float4(uv * 2.0 - 1.0, depth, 1.0);
+#if UNITY_UV_STARTS_AT_TOP
+    clip.y = -clip.y;
+#endif
+    float4 world = mul(inverseViewProjection, clip);
+    return world.xyz / world.w;
+}
+
+bool RTPixelValid(uint3 pixel)
+{
+    return all(pixel.xy < (uint2)_RTShadowResolution.xy) && pixel.z < (uint)_RTShadowLightCount;
+}
+
+[numthreads(8, 8, 1)]
+void CopyGeometry(uint3 pixel : SV_DispatchThreadID)
+{
+    if (any(pixel.xy >= (uint2)_RTShadowResolution.xy)) return;
+    _RTShadowGeometryRW[pixel.xy] = float4(RTNormal(pixel.xy), _RTShadowDepth.Load(int3(pixel.xy, 0)));
+}
+
+[numthreads(8, 8, 1)]
+void Temporal(uint3 pixel : SV_DispatchThreadID)
+{
+    if (!RTPixelValid(pixel)) return;
+    float depth = _RTShadowDepth.Load(int3(pixel.xy, 0));
+    float2 raw = _RTShadowRaw.Load(int4(pixel, 0));
+    float4 result = float4(raw.x, raw.x * raw.x, 1.0, raw.y);
+    if (depth == UNITY_RAW_FAR_CLIP_VALUE)
+    {
+        _RTShadowTemporalRW[pixel] = float4(1, 1, 1, 0);
+        return;
+    }
+
+    TsukuyomiRTShadowLightData light = _TsukuyomiRTShadowLights[pixel.z];
+    float2 uv = (pixel.xy + 0.5) * _RTShadowResolution.zw;
+    float2 previousUv = uv - _RTShadowMotion.Load(int3(pixel.xy, 0)) + _RTShadowJitterDelta;
+    int previousSlice = (int)light.shadowParams.w;
+    bool valid = _RTShadowHistoryValid != 0 && light.shadowParams.z > 0.5 && previousSlice >= 0
+        && all(previousUv >= 0) && all(previousUv < 1);
+    uint historyWidth, historyHeight, historySlices;
+    _RTShadowHistory.GetDimensions(historyWidth, historyHeight, historySlices);
+    valid = valid && previousSlice < (int)historySlices;
+    if (valid)
+    {
+        int2 previousPixel = min((int2)(previousUv * _RTShadowResolution.xy), (int2)_RTShadowResolution.xy - 1);
+        float4 previousGeometry = _RTShadowPreviousGeometry.Load(int3(previousPixel, 0));
+        float3 normal = RTNormal(pixel.xy);
+        float3 world = RTWorldPosition(uv, depth, _RTShadowInverseViewProjection);
+        float3 previousWorld = RTWorldPosition((previousPixel + 0.5) * _RTShadowResolution.zw,
+            previousGeometry.w, _RTShadowPreviousInverseViewProjection);
+        float distanceToCamera = length(world - _RTShadowCameraPosition.xyz);
+        // Allow the footprint of one full-resolution pixel while rejecting another surface.
+        float tolerance = max(0.005, distanceToCamera * 0.002);
+        valid = previousGeometry.w != UNITY_RAW_FAR_CLIP_VALUE
+            && dot(normal, previousGeometry.xyz) > 0.9
+            && distance(world, previousWorld) < tolerance;
+        if (valid)
+        {
+            float4 history = _RTShadowHistory.Load(int4(previousPixel, previousSlice, 0));
+            float minValue = raw.x, maxValue = raw.x;
+            int2 limit = (int2)_RTShadowResolution.xy - 1;
+            [unroll] for (int y = -1; y <= 1; ++y)
+            {
+                [unroll] for (int x = -1; x <= 1; ++x)
+                {
+                    float neighbor = _RTShadowRaw.Load(int4(clamp((int2)pixel.xy + int2(x, y), 0, limit), pixel.z, 0)).x;
+                    minValue = min(minValue, neighbor);
+                    maxValue = max(maxValue, neighbor);
+                }
+            }
+            float count = min(max(history.z, 1.0) + 1.0, 32.0);
+            // A changed blocker should not inherit a stable shadow from a different distance.
+            if (raw.y > 0 && history.w > 0 && abs(raw.y - history.w) > max(0.02, raw.y * 0.1))
+                count = min(count, 2.0);
+            float historyWeight = (count - 1.0) / count;
+            float clippedHistory = clamp(history.x, minValue, maxValue);
+            result.x = lerp(raw.x, clippedHistory, historyWeight);
+            // Clamp the second moment consistently after clipping the first moment.
+            float variance = max(0.0, history.y - history.x * history.x);
+            result.y = lerp(raw.x * raw.x, clippedHistory * clippedHistory + min(variance, 0.25), historyWeight);
+            result.z = count;
+            result.w = raw.y;
+        }
+    }
+    _RTShadowTemporalRW[pixel] = result;
+}
+
+[numthreads(8, 8, 1)]
+void Atrous(uint3 pixel : SV_DispatchThreadID)
+{
+    if (!RTPixelValid(pixel)) return;
+    float centerDepth = _RTShadowDepth.Load(int3(pixel.xy, 0));
+    float4 center = _RTShadowFilterInput.Load(int4(pixel, 0));
+    if (centerDepth == UNITY_RAW_FAR_CLIP_VALUE)
+    {
+        _RTShadowFilterRW[pixel] = center;
+        return;
+    }
+    float3 centerNormal = RTNormal(pixel.xy);
+    float2 uv = (pixel.xy + 0.5) * _RTShadowResolution.zw;
+    float3 centerWorld = RTWorldPosition(uv, centerDepth, _RTShadowInverseViewProjection);
+    float cameraDistance = length(centerWorld - _RTShadowCameraPosition.xyz);
+    float variance = max(0.0, center.y - center.x * center.x);
+    float shadowSigma = max(0.08, 2.0 * sqrt(variance + 0.02 / max(center.z, 1.0)));
+    float weightSum = 0;
+    float2 filtered = 0;
+    [unroll] for (int y = -2; y <= 2; ++y)
+    {
+        [unroll] for (int x = -2; x <= 2; ++x)
+        {
+            int2 coord = (int2)pixel.xy + int2(x, y) * _RTShadowFilterStep;
+            if (any(coord < 0) || any(coord >= (int2)_RTShadowResolution.xy)) continue;
+            float depth = _RTShadowDepth.Load(int3(coord, 0));
+            if (depth == UNITY_RAW_FAR_CLIP_VALUE) continue;
+            float4 sampleValue = _RTShadowFilterInput.Load(int4(coord, pixel.z, 0));
+            float3 normal = RTNormal(coord);
+            float3 world = RTWorldPosition((coord + 0.5) * _RTShadowResolution.zw, depth, _RTShadowInverseViewProjection);
+            float3 difference = world - centerWorld;
+            // Plane distance preserves contact edges on a sloped but continuous receiver.
+            float planeDistance = max(abs(dot(difference, centerNormal)), abs(dot(difference, normal)));
+            float planeSigma = max(0.001, cameraDistance * 0.0005 * _RTShadowFilterStep);
+            float geometryWeight = exp(-planeDistance / planeSigma) * pow(saturate(dot(centerNormal, normal)), 64.0);
+            float signalWeight = exp(-abs(sampleValue.x - center.x) / shadowSigma);
+            float kernelX = x == 0 ? 6.0 : (abs(x) == 1 ? 4.0 : 1.0);
+            float kernelY = y == 0 ? 6.0 : (abs(y) == 1 ? 4.0 : 1.0);
+            float weight = kernelX * kernelY * geometryWeight * signalWeight;
+            filtered += sampleValue.xy * weight;
+            weightSum += weight;
+        }
+    }
+    _RTShadowFilterRW[pixel] = float4(filtered / max(weightSum, 1e-8), center.zw);
+}
+
+[numthreads(8, 8, 1)]
+void Finalize(uint3 pixel : SV_DispatchThreadID)
+{
+    if (!RTPixelValid(pixel)) return;
+    float visibility = saturate(_RTShadowFilterInput.Load(int4(pixel, 0)).x);
+    _RTShadowOutputRW[pixel] = lerp(1.0, visibility, saturate(_TsukuyomiRTShadowLights[pixel.z].shadowParams.x));
+}

@@ -88,6 +88,17 @@ namespace Tsukuyomi.Rendering
             return replacement;
         }
 
+        /// <summary>Release a feature's buffer when it has no contribution for this camera.</summary>
+        public void ReleaseBuffer(string key)
+        {
+            if (_persistentBuffers.Remove(key, out GraphicsBuffer buffer)) buffer.Dispose();
+        }
+
+        public void ReleaseHistoryTexture(string key)
+        {
+            if (_historyTextures.Remove(key, out HistoryEntry entry)) entry.Handle.Release();
+        }
+
         /// <summary>Call on a camera cut or temporal discontinuity before recording the graph.</summary>
         public void ResetHistory()
         {

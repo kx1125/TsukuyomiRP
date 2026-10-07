@@ -32,6 +32,17 @@ namespace Tsukuyomi.Rendering
     [CreateAssetMenu(menuName = "TsukuyomiRpP/Pipeline Profile", fileName = "TsukuyomiPipelineProfile")]
     public class TsukuyomiPipelineProfile : ScriptableObject
     {
+        [Header("Rect Lights")]
+        public bool EnableRectLights;
+        [Range(1, 64)] public int MaxRectLights = 16;
+
+        [Header("Ray Traced Shadows")]
+        public bool EnableRayTracedShadows;
+        [Range(1, 64)] public int RayTracedShadowSamples = 8;
+        [Range(1, 16)] public int MaxRayTracedShadowLights = 4;
+        public LayerMask RayTracedShadowCasterMask = -1;
+        [Min(0.01f)] public float RayTracedShadowDirectionalDistance = 100;
+
         [Header("Planar Reflection")]
         public bool EnablePlanarReflection;
 

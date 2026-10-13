@@ -136,11 +136,6 @@ namespace UnityRhi.Dlss.Urp
 
         public override bool supportsXR => true;
 #endif
-#if UNITY_6000_6_OR_NEWER
-        public override UpscalerOptions options => _options;
-
-        public override bool supportsXR => true;
-#endif
 #else
         public override string GetName() => UpscalerName;
 
@@ -179,7 +174,8 @@ namespace UnityRhi.Dlss.Urp
         }
 
 #if UNITY_6000_6_OR_NEWER
-        public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution,
+        // Retained for the unified backend; no longer part of AbstractUpscaler in URP 17.6.
+        public void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution,
 #else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution,
 #endif
@@ -252,6 +248,10 @@ namespace UnityRhi.Dlss.Urp
 
             _inputResolution = io.preUpscaleResolution;
             _outputResolution = io.postUpscaleResolution;
+#if UNITY_6000_6_OR_NEWER
+            // Match the jitter applied to the camera projection by the framework.
+            _jitter = io.subpixelJitter;
+#endif
 
             int renderWidth = io.preUpscaleResolution.x;
             int renderHeight = io.preUpscaleResolution.y;

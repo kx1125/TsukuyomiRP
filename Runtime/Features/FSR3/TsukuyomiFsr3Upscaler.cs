@@ -77,7 +77,8 @@ namespace Tsukuyomi.Rendering
 #endif
 
 #if TSUKUYOMI_UPSCALER_API_6000_6
-        public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
+        // Retained for the unified backend; no longer part of AbstractUpscaler in URP 17.6.
+        public void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
 #else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int preUpscaleResolution, Vector2Int postUpscaleResolution)
 #endif
@@ -133,7 +134,12 @@ namespace Tsukuyomi.Rendering
             cameraContext.LastFrame = io.frameIndex;
             Fsr3UpscalerContext fsrContext = cameraContext.Context;
             TsukuyomiFsr3Settings settings = _settings;
+#if TSUKUYOMI_UPSCALER_API_6000_6
+            // Match the jitter applied to the camera projection by the framework.
+            Vector2 jitterOffset = io.subpixelJitter;
+#else
             Vector2 jitterOffset = CalculateJitter(io.frameIndex, io.preUpscaleResolution, io.postUpscaleResolution);
+#endif
             Vector2Int renderSize = io.preUpscaleResolution;
             Vector2Int displaySize = io.postUpscaleResolution;
             float fieldOfView = io.fieldOfViewDegrees;

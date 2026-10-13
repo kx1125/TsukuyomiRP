@@ -87,27 +87,7 @@ void TsukuyomiSpecularPBRInitializeInputData(TsukuyomiSpecularPBRVaryings input,
     inputData.fogCoord = InitializeInputDataFog(float4(input.positionWS, 1.0), input.fogFactor);
 #endif
 
-#if defined(UNITY_PRETRANSFORM_TO_DISPLAY_ORIENTATION)
-    float2 preRotatedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
-    switch (UNITY_DISPLAY_ORIENTATION_PRETRANSFORM)
-    {
-        default:
-        case UNITY_DISPLAY_ORIENTATION_PRETRANSFORM_0:
-            inputData.normalizedScreenSpaceUV = preRotatedScreenSpaceUV;
-            break;
-        case UNITY_DISPLAY_ORIENTATION_PRETRANSFORM_90:
-            inputData.normalizedScreenSpaceUV = float2(1 - preRotatedScreenSpaceUV.y, preRotatedScreenSpaceUV.x);
-            break;
-        case UNITY_DISPLAY_ORIENTATION_PRETRANSFORM_180:
-            inputData.normalizedScreenSpaceUV = float2(1 - preRotatedScreenSpaceUV.x, 1 - preRotatedScreenSpaceUV.y);
-            break;
-        case UNITY_DISPLAY_ORIENTATION_PRETRANSFORM_270:
-            inputData.normalizedScreenSpaceUV = float2(preRotatedScreenSpaceUV.y, 1 - preRotatedScreenSpaceUV.x);
-            break;
-    }
-#else
-    inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
-#endif
+    inputData.normalizedScreenSpaceUV = SpecularPBRScreenUV(input.positionCS.xy);
 
 #if defined(DEBUG_DISPLAY)
     #if defined(DYNAMICLIGHTMAP_ON)
@@ -206,11 +186,8 @@ TsukuyomiSpecularPBRVaryings TsukuyomiSpecularPBRForwardVertex(TsukuyomiSpecular
 }
 
 
-TEXTURE2D_X(_LightingTexBlurred);
-TEXTURE2D_X(_SSSSkinMaskTexture);
-TEXTURE2D_X_FLOAT(_TsukuyomiSpecularPBRSSSDepth);
-float _TsukuyomiSpecularPBRSSSReady;
-float4 _TsukuyomiSpecularPBRSSSLightingScale;
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Lighting/TsukuyomiSpecularPBRSSS.hlsl"
+
 
 TsukuyomiOpenPBRPrepared PrepareSpecularPBR(SurfaceData surfaceData, InputData inputData, TsukuyomiSpecularPBRVaryings input)
 {
@@ -252,17 +229,7 @@ void SetupSpecularPBR(TsukuyomiSpecularPBRVaryings input, out SurfaceData surfac
     TsukuyomiSpecularPBRInitializeBakedGIData(input, inputData);
 }
 
-bool SpecularPBRHasSkinLighting(TsukuyomiSpecularPBRVaryings input, float2 screenUV)
-{
-    if (_TsukuyomiSpecularPBRSSSReady < 0.5) return false;
-    float coverage = SAMPLE_TEXTURE2D_X_LOD(_SSSSkinMaskTexture, sampler_PointClamp, screenUV, 0).r;
-    if (coverage <= 0.0) return false;
-    float rawDepth = SAMPLE_TEXTURE2D_X_LOD(_TsukuyomiSpecularPBRSSSDepth, sampler_PointClamp, screenUV, 0).r;
-    float skinDepth = IsPerspectiveProjection() ? LinearEyeDepth(rawDepth, _ZBufferParams) : LinearDepthToEyeDepth(rawDepth);
-    float surfaceDepth = -TransformWorldToView(input.positionWS).z;
-    // Reject SSS data belonging to a surface behind a renderer outside the skin layer.
-    return abs(skinDepth - surfaceDepth) <= max(0.002, surfaceDepth * 0.002);
-}
+
 
 void TsukuyomiSpecularPBRForwardFragment(TsukuyomiSpecularPBRVaryings input,
     out half4 outColor : SV_Target0
@@ -278,17 +245,9 @@ void TsukuyomiSpecularPBRForwardFragment(TsukuyomiSpecularPBRVaryings input,
     TsukuyomiOpenPBRPrepared p = PrepareSpecularPBR(surfaceData, inputData, input);
     float strength = saturate(SampleSpecularPBRMask(input.uv).r);
     TsukuyomiOpenPBRResponse lit = SpecularPBRLightingHigh(inputData, p, strength, surfaceData.occlusion, 0.0);
-    float3 color = lit.diffuse + lit.specular + surfaceData.emission;
-#if defined(_SSS_ON)
-    float skinMask = saturate(SampleSpecularPBRMask(input.uv).a);
-    if (skinMask > 0.0 && SpecularPBRHasSkinLighting(input, inputData.normalizedScreenSpaceUV))
-    {
-        float3 baseTexture = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv).rgb;
-        float3 scattered = SAMPLE_TEXTURE2D_X_LOD(_LightingTexBlurred, sampler_LinearClamp,
-            inputData.normalizedScreenSpaceUV, 0).rgb * baseTexture;
-        color = SpecularPBRComposite(lit.diffuse, lit.specular, scattered, skinMask, surfaceData.emission);
-    }
-#endif
+    float3 baseTexture = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv).rgb;
+    float3 color = SpecularPBRCompositeSkin(lit, baseTexture, saturate(SampleSpecularPBRMask(input.uv).a),
+        inputData.positionWS, inputData.normalizedScreenSpaceUV, surfaceData.emission);
     outColor = half4(MixFog(color, inputData.fogCoord), 1.0);
 #ifdef _WRITE_RENDERING_LAYERS
     outRenderingLayers = EncodeMeshRenderingLayer();
@@ -323,16 +282,9 @@ half4 TsukuyomiSpecularPBRSSSLightingFragment(TsukuyomiSpecularPBRVaryings input
     SetupSpecularPBR(input, surfaceData, inputData);
     float4 mask = SampleSpecularPBRMask(input.uv);
     if (mask.a <= 0.0) return 0;
-    // Preserve sharp albedo texture details: evaluate the lighting/tint here,
-    // and apply the base texture after the screen-space diffusion.
-    surfaceData.albedo = _BaseColor.rgb * lerp(_OcclusionColor.rgb, 1.0, surfaceData.occlusion);
-    surfaceData.emission = 0;
+    SpecularPBRPrepareDiffusionSurface(surfaceData, lerp(_OcclusionColor.rgb, 1.0, surfaceData.occlusion));
     TsukuyomiOpenPBRPrepared p = PrepareSpecularPBR(surfaceData, inputData, input);
-    float3 transmission = 0;
-#if defined(TRANSMISSION)
-    transmission = SAMPLE_TEXTURE2D(_TransmissionMap, sampler_TransmissionMap, input.uv).rgb
-        * _TransmissionColor.rgb * lerp(1.0, surfaceData.occlusion, TransmissionOcc);
-#endif
+    float3 transmission = SpecularPBRSampleTransmission(input.uv, surfaceData.occlusion);
     TsukuyomiOpenPBRResponse lit = SpecularPBRLightingHigh(inputData, p, saturate(mask.r), surfaceData.occlusion, transmission);
     // Mask participates in blur rejection and final blending, never twice in radiance.
     return half4(lit.diffuse, 1.0);

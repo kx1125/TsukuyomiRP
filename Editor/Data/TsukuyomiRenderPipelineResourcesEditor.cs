@@ -9,6 +9,7 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_ShowPcssShadow = true;
         private static bool s_ShowContactShadow = true;
         private static bool s_ShowDepthPyramid = true;
+        private static bool s_ShowMsvo = true;
         private static bool s_ShowGtao = true;
         private static bool s_ShowVolumeLight = true;
         private static bool s_ShowPostProcessing = true;
@@ -41,6 +42,9 @@ namespace Tsukuyomi.Rendering.Editor
                 ref s_ShowDepthPyramid,
                 "Depth Pyramid",
                 "depthPyramidComputeShader");
+
+            DrawFoldout(ref s_ShowMsvo, "Multi Scale Volumetric Occlusion",
+                "msvoDownsample1", "msvoDownsample2", "msvoRender", "msvoUpsample", "msvoCompositeShader");
 
             DrawFoldout(
                 ref s_ShowGtao,

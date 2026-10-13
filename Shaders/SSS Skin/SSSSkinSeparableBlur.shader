@@ -39,6 +39,8 @@ Shader "Hidden/SSSSkin/SeparableBlur"
             float DitherIntensity;
             int _SSSSkinSampleCount;
 
+
+
             float2 RandN2(float2 pos, float2 random)
             {
                 return frac(sin(dot(pos + random, float2(12.9898, 78.233))) * float2(43758.5453, 28001.8384));
@@ -85,7 +87,7 @@ Shader "Hidden/SSSSkin/SeparableBlur"
                 float rawDepth = _SSSSkinUseSharedDepthNormals > 0.5
                     ? SampleSceneDepth(uv)
                     : SAMPLE_TEXTURE2D_X_LOD(_SSSSkinDepthTexture, sampler_PointClamp, uv, 0).r;
-                return LinearEyeDepth(rawDepth, _ZBufferParams);
+                return IsPerspectiveProjection() ? LinearEyeDepth(rawDepth, _ZBufferParams) : LinearDepthToEyeDepth(rawDepth);
             }
 
             float SampleSkinMask(float2 uv)
@@ -109,15 +111,24 @@ Shader "Hidden/SSSSkin/SeparableBlur"
                 float2 scale = _TexelOffsetScale.xy * _BlitTexture_TexelSize.xy;
                 scale *= 20.0 * rcp(max(centerDepth, 1e-4));
 
-                float radiusCheck = abs(scale.x) + abs(scale.y);
-                if (radiusCheck <= 0.001 || centerDepth >= _SSSSkinMaxDistance)
-                    return centerColor;
-
                 int sampleCount = max(_SSSSkinSampleCount, 2);
                 float3 sssColor = max(_SSSSkinBlurColor.rgb, 1e-10);
+                // Compare the effective footprint in lighting-buffer pixels.
+                // A fixed UV cutoff incorrectly disables small radii at any distance.
+                float2 pixelExtent = abs(scale) * _BlitTexture_TexelSize.zw;
+                float pixelRadius = max(pixelExtent.x, pixelExtent.y) * max(sssColor.r, max(sssColor.g, sssColor.b));
+                if (pixelRadius <= 0.25 || centerDepth >= _SSSSkinMaxDistance)
+                    return centerColor;
 
                 float3 blurred = 0.0;
                 float3 weightSum = 0.0;
+                float2 rotationNoise = 0;
+                if (_SSSSkinRandomizedRotation > 0.5)
+                {
+                    float ditherScale = max(DitherScale, 0.0);
+                    float2 random = RandN2(1.0.xx, SAMPLE_TEXTURE2D_LOD(NoiseTexture, sampler_NoiseTexture, uv + ditherScale.xx * _Time.xx, 0).xy);
+                    rotationNoise = SAMPLE_TEXTURE2D_LOD(NoiseTexture, sampler_NoiseTexture, uv * ditherScale - random, 0).xy * 2.0 - 1.0;
+                }
 
                 [loop]
                 for (int k = 0; k < sampleCount; k++)
@@ -127,12 +138,11 @@ Shader "Hidden/SSSSkin/SeparableBlur"
 
                     if (_SSSSkinRandomizedRotation > 0.5)
                     {
-                        float ditherScale = max(DitherScale, 0.0);
-                        float ditherIntensity = saturate(DitherIntensity);
-                        float2 random = RandN2(1.0.xx, SAMPLE_TEXTURE2D_LOD(NoiseTexture, sampler_NoiseTexture, uv + ditherScale.xx * _Time.xx, 0).xy);
-                        float2 blueNoise = SAMPLE_TEXTURE2D_LOD(NoiseTexture, sampler_NoiseTexture, uv * ditherScale - random, 0).xy * 2.0 - 1.0;
-                        float2 rotatedOffset = mul(offset, float2x2(blueNoise.x, blueNoise.y, -blueNoise.y, blueNoise.x));
-                        offset = lerp(stepValue * scale, rotatedOffset, ditherIntensity);
+                        float2 uf = saturate(uv + offset), ub = saturate(uv - offset);
+                        float edge = EdgeWeight(centerDepth, SampleLinearEyeDepth(uf), centerNormal, SampleComparableNormal(uf), SampleSkinMask(uf))
+                            * EdgeWeight(centerDepth, SampleLinearEyeDepth(ub), centerNormal, SampleComparableNormal(ub), SampleSkinMask(ub));
+                        float2 rotatedOffset = mul(offset, float2x2(rotationNoise.x, rotationNoise.y, -rotationNoise.y, rotationNoise.x));
+                        offset = lerp(offset, rotatedOffset, saturate(DitherIntensity) * edge);
                     }
 
                     float2 uvForward = saturate(uv + offset);

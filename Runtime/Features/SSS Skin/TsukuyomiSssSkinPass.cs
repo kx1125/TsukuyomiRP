@@ -60,6 +60,17 @@ namespace Tsukuyomi.Rendering
         private bool _ownsBlurMaterial;
         private bool _warnedMissingLayer;
 
+        [Read(BuiltinTexture.CameraDepthTexture)]
+        public TextureSlot sceneDepth = TextureSlot.Read("SSS Scene Depth", BuiltinTexture.CameraDepthTexture);
+        [Read(BuiltinTexture.CameraNormals)]
+        public TextureSlot sceneNormals = TextureSlot.Read("SSS Scene Normals", BuiltinTexture.CameraNormals);
+
+        public override void CollectTextureSlots(List<TextureSlot> slots)
+        {
+            slots.Add(sceneDepth);
+            slots.Add(sceneNormals);
+        }
+
         public override string Name => "SSS Skin";
 
         public bool Configure(TsukuyomiPipelineProfile profile, TsukuyomiSssSkinVolume volume, bool useSharedDepthNormals)
@@ -158,7 +169,7 @@ namespace Tsukuyomi.Rendering
             baseDescriptor.msaaSamples = 1;
 
             int qualityDivisor = GetQualityDivisor(_settings.Quality);
-            RenderTextureDescriptor lightingDescriptor = CreateLightingDescriptor(baseDescriptor, qualityDivisor);
+            RenderTextureDescriptor lightingDescriptor = CreateLightingDescriptor(baseDescriptor, qualityDivisor, _settings.HighPrecision);
             PassSettings passSettings = CreatePassSettings(lightingDescriptor, context.CameraData.camera);
             bool executeBlur = passSettings.Iterations > 0 && passSettings.Radius > 0.0f;
 
@@ -418,7 +429,7 @@ namespace Tsukuyomi.Rendering
             int iterations = Mathf.Clamp(_settings.ScatteringIterations, 0, 10);
             float radius = Mathf.Max(0.0f, _settings.ScatteringRadius);
             float fovCompensation = camera != null && !camera.orthographic
-                ? 60.0f / Mathf.Max(1.0f, camera.fieldOfView)
+                ? 60f / Mathf.Max(1.0f, camera.fieldOfView)
                 : 1.0f;
 
             return new PassSettings
@@ -433,7 +444,7 @@ namespace Tsukuyomi.Rendering
                 Color = _settings.SssColor,
                 RandomizedRotation = _settings.RandomizedRotation,
                 DitherScale = _settings.DitherScale,
-                DitherIntensity = _settings.DitherIntensity,
+                DitherIntensity = Mathf.Clamp01(_settings.DitherIntensity),
                 VerticalOffsetScale = new Vector4(0.0f, descriptor.height * radius * 0.002f * fovCompensation, 0.0f, 0.0f),
                 HorizontalOffsetScale = new Vector4(descriptor.width * radius * 0.002f * fovCompensation, 0.0f, 0.0f, 0.0f)
             };
@@ -537,13 +548,13 @@ namespace Tsukuyomi.Rendering
             return descriptor;
         }
 
-        private static RenderTextureDescriptor CreateLightingDescriptor(RenderTextureDescriptor baseDescriptor, int qualityDivisor)
+        private static RenderTextureDescriptor CreateLightingDescriptor(RenderTextureDescriptor baseDescriptor, int qualityDivisor, bool highPrecision)
         {
             RenderTextureDescriptor descriptor = baseDescriptor;
             descriptor.width = Mathf.Max(1, descriptor.width / Mathf.Max(1, qualityDivisor));
             descriptor.height = Mathf.Max(1, descriptor.height / Mathf.Max(1, qualityDivisor));
             descriptor.depthStencilFormat = GraphicsFormat.None;
-            descriptor.graphicsFormat = GetLightingFormat();
+            descriptor.graphicsFormat = GetLightingFormat(highPrecision);
             return descriptor;
         }
 
@@ -583,12 +594,14 @@ namespace Tsukuyomi.Rendering
             return GraphicsFormat.R32G32B32A32_SFloat;
         }
 
-        private static GraphicsFormat GetLightingFormat()
+        private static GraphicsFormat GetLightingFormat(bool highPrecision)
         {
-            if (SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, GraphicsFormatUsage.Render))
-                return GraphicsFormat.B10G11R11_UFloatPack32;
+            if (highPrecision && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_SFloat, GraphicsFormatUsage.Render))
+                return GraphicsFormat.R32G32B32A32_SFloat;
             if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, GraphicsFormatUsage.Render))
                 return GraphicsFormat.R16G16B16A16_SFloat;
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, GraphicsFormatUsage.Render))
+                return GraphicsFormat.B10G11R11_UFloatPack32;
             return GraphicsFormat.R8G8B8A8_UNorm;
         }
 

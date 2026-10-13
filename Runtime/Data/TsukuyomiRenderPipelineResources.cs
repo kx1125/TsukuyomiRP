@@ -53,6 +53,16 @@ namespace Tsukuyomi.Rendering
         [SerializeField]
         private ComputeShader gtaoBlurAndUpsampleComputeShader;
 
+        [Header("Multi Scale Volumetric Occlusion")]
+        [SerializeField] private ComputeShader msvoDownsample1, msvoDownsample2, msvoRender, msvoUpsample;
+        [SerializeField] private Shader msvoCompositeShader;
+        public ComputeShader MsvoDownsample1 => msvoDownsample1;
+        public ComputeShader MsvoDownsample2 => msvoDownsample2;
+        public ComputeShader MsvoRender => msvoRender;
+        public ComputeShader MsvoUpsample => msvoUpsample;
+        public Shader MsvoCompositeShader => msvoCompositeShader;
+        public bool HasMsvoResources => msvoDownsample1 && msvoDownsample2 && msvoRender && msvoUpsample && msvoCompositeShader;
+
         [Header("Screen Space Global Illumination")]
         [SerializeField]
         private ComputeShader ssgiTraceComputeShader;

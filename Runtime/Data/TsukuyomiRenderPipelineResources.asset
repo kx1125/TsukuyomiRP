@@ -26,6 +26,11 @@ MonoBehaviour:
   gtaoTraceComputeShader: {fileID: 7200000, guid: 2de05ff8e81300f409e2a581928dc28f, type: 3}
   gtaoSpatialDenoiseComputeShader: {fileID: 7200000, guid: 3da0bf2562a102b41b5ad0b92ff60912, type: 3}
   gtaoBlurAndUpsampleComputeShader: {fileID: 7200000, guid: c2b24b2455fb1b1449068881db13bf9c, type: 3}
+  msvoDownsample1: {fileID: 7200000, guid: ef2478ccbf1d8174baa85e3bc8a7d742, type: 3}
+  msvoDownsample2: {fileID: 7200000, guid: 20cbd7b9561d1044db4f9fb07f9cba1c, type: 3}
+  msvoRender: {fileID: 7200000, guid: 7a62e901a06584c4c8079e1a43d3662b, type: 3}
+  msvoUpsample: {fileID: 7200000, guid: 65d169a3d393ee147879727988c0a270, type: 3}
+  msvoCompositeShader: {fileID: 4800000, guid: 1a9870152f1a3ab42aec4df781a43b26, type: 3}
   ssgiTraceComputeShader: {fileID: 7200000, guid: 13b1844101634bfd80ead58f85acc267, type: 3}
   ssgiTemporalComputeShader: {fileID: 7200000, guid: ab403372ff1d4f469bb78eb9ec4cce87, type: 3}
   ssgiDiffuseDenoiserComputeShader: {fileID: 7200000, guid: 699927cf122f4749a774f34e548f3ad0, type: 3}

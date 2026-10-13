@@ -23,6 +23,7 @@ namespace Tsukuyomi.Rendering
         private PassRegistry _contactShadowRegistry;
         private PassRegistry _contactShadowDenoiseRegistry;
         private PassRegistry _depthPyramidRegistry;
+        private PassRegistry _msvoRegistry, _msvoRestoreRegistry;
         private PassRegistry _gtaoRegistry;
         private PassRegistry _gtaoRestoreRegistry;
         private PassRegistry _ssgiRegistry;
@@ -40,6 +41,7 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiBridgePass _contactShadowBridgePass;
         private TsukuyomiBridgePass _contactShadowDenoiseBridgePass;
         private TsukuyomiBridgePass _depthPyramidBridgePass;
+        private TsukuyomiBridgePass _msvoEarlyBridgePass, _msvoLateBridgePass, _msvoRestoreBridgePass;
         private TsukuyomiBridgePass _gtaoBridgePass;
         private TsukuyomiBridgePass _gtaoRestoreBridgePass;
         private TsukuyomiBridgePass _ssgiBridgePass;
@@ -54,6 +56,9 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiContactShadowPass _contactShadowPass;
         private TsukuyomiContactShadowDenoisePass _contactShadowDenoisePass;
         private TsukuyomiDepthPyramidPass _depthPyramidPass;
+        private TsukuyomiMultiScaleAmbientOcclusionPass _msvoPass;
+        private TsukuyomiMultiScaleAmbientOcclusionCompositePass _msvoCompositePass;
+        private TsukuyomiMultiScaleAmbientOcclusionRestoreKeywordsPass _msvoRestorePass;
         private TsukuyomiGroundTruthAmbientOcclusionPass _gtaoPass;
         private TsukuyomiGroundTruthAmbientOcclusionRestoreKeywordsPass _gtaoRestorePass;
         private TsukuyomiScreenSpaceGlobalIlluminationPass _ssgiPass;
@@ -80,6 +85,7 @@ namespace Tsukuyomi.Rendering
             TsukuyomiPcssScreenSpaceShadowPass.InitializeKeywords();
             TsukuyomiPcssRestoreShadowKeywordsPass.InitializeKeywords();
             TsukuyomiGroundTruthAmbientOcclusionPass.InitializeKeywords();
+            TsukuyomiMultiScaleAmbientOcclusionPass.InitializeKeywords();
             TsukuyomiScreenSpaceGlobalIlluminationPass.InitializeKeyword();
             TsukuyomiVolumetricFogPass.InitializeKeywords();
         }
@@ -95,6 +101,8 @@ namespace Tsukuyomi.Rendering
             _contactShadowRegistry = new PassRegistry();
             _contactShadowDenoiseRegistry = new PassRegistry();
             _depthPyramidRegistry = new PassRegistry();
+            _msvoRegistry = new PassRegistry();
+            _msvoRestoreRegistry = new PassRegistry();
             _gtaoRegistry = new PassRegistry();
             _gtaoRestoreRegistry = new PassRegistry();
             _ssgiRegistry = new PassRegistry();
@@ -113,6 +121,9 @@ namespace Tsukuyomi.Rendering
             _contactShadowPass ??= new TsukuyomiContactShadowPass();
             _contactShadowDenoisePass ??= new TsukuyomiContactShadowDenoisePass();
             _depthPyramidPass ??= new TsukuyomiDepthPyramidPass();
+            _msvoPass ??= new TsukuyomiMultiScaleAmbientOcclusionPass();
+            _msvoRestorePass ??= new TsukuyomiMultiScaleAmbientOcclusionRestoreKeywordsPass();
+            _msvoCompositePass ??= new TsukuyomiMultiScaleAmbientOcclusionCompositePass(_msvoPass);
             _gtaoPass ??= new TsukuyomiGroundTruthAmbientOcclusionPass();
             _gtaoRestorePass ??= new TsukuyomiGroundTruthAmbientOcclusionRestoreKeywordsPass();
             _ssgiPass ??= new TsukuyomiScreenSpaceGlobalIlluminationPass();
@@ -150,6 +161,9 @@ namespace Tsukuyomi.Rendering
             _contactShadowPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _contactShadowDenoisePass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _depthPyramidPass.InjectionPoint = InjectionPoint.BeforeOpaque;
+            _msvoPass.InjectionPoint = InjectionPoint.AfterOpaque;
+            _msvoCompositePass.InjectionPoint = InjectionPoint.AfterOpaque;
+            _msvoRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
             _gtaoPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _gtaoRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
             _ssgiPass.InjectionPoint = InjectionPoint.BeforeOpaque;
@@ -165,6 +179,9 @@ namespace Tsukuyomi.Rendering
             _contactShadowRegistry.AddPass(_contactShadowPass);
             _contactShadowDenoiseRegistry.AddPass(_contactShadowDenoisePass);
             _depthPyramidRegistry.AddPass(_depthPyramidPass);
+            _msvoRegistry.AddPass(_msvoPass);
+            _msvoRegistry.AddPass(_msvoCompositePass);
+            _msvoRestoreRegistry.AddPass(_msvoRestorePass);
             _gtaoRegistry.AddPass(_gtaoPass);
             _gtaoRestoreRegistry.AddPass(_gtaoRestorePass);
             _ssgiRegistry.AddPass(_ssgiPass);
@@ -189,6 +206,12 @@ namespace Tsukuyomi.Rendering
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingPrePasses
             };
+            _msvoEarlyBridgePass = new TsukuyomiBridgePass(_msvoRegistry, InjectionPoint.BeforeOpaque, _resourceHub)
+            { renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 2 };
+            _msvoLateBridgePass = new TsukuyomiBridgePass(_msvoRegistry, InjectionPoint.AfterOpaque, _resourceHub)
+            { renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1 };
+            _msvoRestoreBridgePass = new TsukuyomiBridgePass(_msvoRestoreRegistry, _msvoRestorePass.InjectionPoint, _resourceHub)
+            { renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1 };
             _gtaoBridgePass = new TsukuyomiBridgePass(_gtaoRegistry, _gtaoPass.InjectionPoint, _resourceHub)
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 2
@@ -279,6 +302,7 @@ namespace Tsukuyomi.Rendering
             TsukuyomiPcssVolume pcssVolume = volumeStack?.GetComponent<TsukuyomiPcssVolume>();
             TsukuyomiPerObjectShadowVolume perObjectShadowVolume = volumeStack?.GetComponent<TsukuyomiPerObjectShadowVolume>();
             TsukuyomiContactShadowVolume contactShadowVolume = volumeStack?.GetComponent<TsukuyomiContactShadowVolume>();
+            var msvoVolume = volumeStack?.GetComponent<TsukuyomiMultiScaleAmbientOcclusionVolume>();
             TsukuyomiGroundTruthAmbientOcclusionVolume gtaoVolume = volumeStack?.GetComponent<TsukuyomiGroundTruthAmbientOcclusionVolume>();
             TsukuyomiScreenSpaceGlobalIlluminationVolume ssgiVolume = volumeStack?.GetComponent<TsukuyomiScreenSpaceGlobalIlluminationVolume>();
             TsukuyomiVolumeLightVolume volumeLightVolume = volumeStack?.GetComponent<TsukuyomiVolumeLightVolume>();
@@ -307,7 +331,10 @@ namespace Tsukuyomi.Rendering
             }
 
             bool usesDeferredLighting = UsesDeferredLighting(renderer);
-            bool gtaoEnabled = _gtaoPass != null && _gtaoPass.Configure(Profile, gtaoVolume);
+            bool msvoEnabled = _msvoPass.Configure(Profile, msvoVolume) && _msvoPass.IsActive(_enqueueFrame)
+                && _msvoCompositePass.Configure();
+            _msvoPass.InjectionPoint = _msvoPass.Settings.IsLighting ? InjectionPoint.BeforeOpaque : InjectionPoint.AfterOpaque;
+            bool gtaoEnabled = !msvoEnabled && _gtaoPass != null && _gtaoPass.Configure(Profile, gtaoVolume);
             bool ssgiEnabled = !usesDeferredLighting
                 && _ssgiPass != null
                 && _ssgiPass.Configure(Profile, ssgiVolume, ref renderingData);
@@ -329,6 +356,16 @@ namespace Tsukuyomi.Rendering
             if (depthPyramidEnabled)
             {
                 EnqueueBridge(renderer, _depthPyramidBridgePass);
+            }
+
+            if (msvoEnabled)
+            {
+                EnqueueBridge(renderer, _msvoPass.Settings.IsLighting ? _msvoEarlyBridgePass : _msvoLateBridgePass);
+                if (_msvoPass.Settings.IsLighting)
+                {
+                    if (_msvoCompositePass.IsActive(_enqueueFrame)) EnqueueBridge(renderer, _msvoLateBridgePass);
+                    EnqueueBridge(renderer, _msvoRestoreBridgePass);
+                }
             }
 
             if (gtaoEnabled && depthPyramidEnabled)
@@ -388,10 +425,8 @@ namespace Tsukuyomi.Rendering
                 EnqueueBridge(renderer, _postProcessBridgePass);
             }
 
-            bool useSharedDepthNormals = RequiresCameraNormals(
-                contactShadowDenoiseEnabled,
-                gtaoEnabled && depthPyramidEnabled,
-                ssgiEnabled && depthPyramidEnabled);
+            // SSS declares scene depth/normals itself; it no longer depends on AO being enabled.
+            bool useSharedDepthNormals = true;
             if (_sssSkinPass != null && _sssSkinPass.Configure(Profile, sssSkinVolume, useSharedDepthNormals))
             {
                 EnqueueBridge(renderer, _sssSkinBridgePass);
@@ -540,6 +575,10 @@ namespace Tsukuyomi.Rendering
             _contactShadowDenoiseBridgePass = null;
             _depthPyramidPass = null;
             _depthPyramidBridgePass = null;
+            _msvoCompositePass?.Dispose();
+            _msvoCompositePass = null; _msvoPass = null;
+            _msvoEarlyBridgePass = null; _msvoLateBridgePass = null; _msvoRegistry = null;
+            _msvoRestorePass = null; _msvoRestoreBridgePass = null; _msvoRestoreRegistry = null;
             _gtaoPass = null;
             _gtaoBridgePass = null;
             _gtaoRestorePass = null;

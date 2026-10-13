@@ -51,8 +51,16 @@ namespace Tsukuyomi.Rendering
         public override bool supportsXR => false;
 #endif
 #if UNITY_6000_6_OR_NEWER
-        public override UpscalerOptions options => _source;
-        public override bool supportsXR => false;
+        public override bool hasQualityMode => true;
+
+        public override UpscalerResolutionInfo GetResolutionInfo(Vector2Int displayResolution, UpscalerOptions options)
+        {
+            var renderResolution = displayResolution;
+            NegotiatePreUpscaleResolution(ref renderResolution, displayResolution);
+            if (isTemporal && options && options.resolutionMode == UpscalerResolutionMode.CustomScaling)
+                return base.GetResolutionInfo(displayResolution, options);
+            return UpscalerResolutionInfo.Fixed(renderResolution);
+        }
 #endif
         public override bool supportsSharpening => ActualBackend == UpscalerBackend.FSR3;
         public override bool isTemporal => _backend != null && TsukuyomiUpscaling.IsSupportedCamera(TsukuyomiUpscaling.CurrentCamera, out _);
@@ -168,7 +176,8 @@ namespace Tsukuyomi.Rendering
             _cameras.Clear();
         }
 #if UNITY_6000_6_OR_NEWER
-        public override void NegotiatePreUpscaleResolution(ref Vector2Int renderSize, Vector2Int displaySize)
+        // Backend helper; URP 17.6 calls GetResolutionInfo instead of this legacy contract.
+        public void NegotiatePreUpscaleResolution(ref Vector2Int renderSize, Vector2Int displaySize)
 #else
         public override void NegotiatePreUpscaleResolution(ref Vector2Int renderSize, Vector2Int displaySize)
 #endif
@@ -203,6 +212,11 @@ namespace Tsukuyomi.Rendering
             if (isTemporal)
             {
                 var io = frame.Get<UpscalingIO>();
+#if UNITY_6000_6_OR_NEWER
+                TsukuyomiUpscaling.CurrentUpscaleRatio = (float)io.postUpscaleResolution.x / Mathf.Max(1, io.preUpscaleResolution.x);
+                TsukuyomiUpscaling.SetFrameStatus(_snapshot.backend, ActualBackend, NeuralRenderingRequested,
+                    _reason, io.preUpscaleResolution, io.postUpscaleResolution);
+#endif
                 var camera = TsukuyomiUpscaling.CurrentCamera;
                 var history = TrackCamera(io.cameraInstanceID, camera);
                 io.resetHistory |= history.Frame < 0;

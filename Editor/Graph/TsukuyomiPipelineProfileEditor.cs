@@ -13,6 +13,7 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_PcssExpanded = true;
         private static bool s_PerObjectShadowExpanded = true;
         private static bool s_ContactShadowExpanded = true;
+        private static bool s_MsvoExpanded = true;
         private static bool s_GtaoExpanded = true;
         private static bool s_SsgiExpanded = true;
         private static bool s_VolumeLightExpanded = true;
@@ -78,6 +79,7 @@ namespace Tsukuyomi.Rendering.Editor
             DrawPerObjectShadowSettings();
             DrawContactShadowSettings();
             DrawGtaoSettings();
+            DrawMsvoSettings();
             DrawSsgiSettings();
             DrawVolumeLightSettings();
             DrawPostProcessingSettings();
@@ -339,6 +341,35 @@ namespace Tsukuyomi.Rendering.Editor
             EditorGUI.indentLevel--;
 
             property.vector4Value = value;
+        }
+
+        private void DrawMsvoSettings()
+        {
+            var enabled = serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.EnableMSVO));
+            s_MsvoExpanded = CoreEditorUtils.DrawHeaderToggleFoldout(
+                EditorGUIUtility.TrTextContent("Multi Scale Volumetric Occlusion"), s_MsvoExpanded, enabled, null, null, null, null);
+            if (s_MsvoExpanded)
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoCompositionMode)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoDebugOcclusion)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoIntensity)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoThicknessModifier)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoScaleCount)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoExhaustiveSampling)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoDepthSphereDiameter)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoBlurTolerance)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoUpsampleTolerance)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoNoiseFilterTolerance)));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoBlurReferenceWidth)));
+                if (serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoCompositionMode)).enumValueIndex == 0)
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoOcclusionColor)));
+                if (serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoCompositionMode)).enumValueIndex == 1)
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.MsvoDirectLightingStrength)));
+                EditorGUILayout.HelpBox("Active MSVO takes precedence over GTAO. Volume overrides provide per-camera settings. Color Composite multiplies camera color; Lighting publishes the standard screen-space AO texture.", MessageType.Info);
+                EditorGUI.indentLevel--;
+            }
+            CoreEditorUtils.DrawSplitter();
         }
 
         private void DrawGtaoSettings()

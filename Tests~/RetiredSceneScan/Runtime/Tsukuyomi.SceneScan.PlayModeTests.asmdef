@@ -1,0 +1,10 @@
+{
+  "name": "Tsukuyomi.SceneScan.PlayModeTests",
+  "references": [
+    "Tsukuyomi.Rendering",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime"
+  ],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

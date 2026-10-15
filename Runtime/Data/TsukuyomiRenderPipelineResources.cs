@@ -89,6 +89,15 @@ namespace Tsukuyomi.Rendering
         [SerializeField]
         private Material postProcessUberMaterial;
 
+        [Header("Scene Scan")]
+        [SerializeField]
+        private Shader scanMainShader;
+        [SerializeField] private Shader scanTargetMaskShader;
+        [SerializeField] private Shader scanGridShader;
+        [SerializeField] private Shader scanGlitchShader;
+        [SerializeField] private Shader voxelTransitionShader;
+        [SerializeField] private Shader xrayCompositeShader;
+
         [Header("FSR3 Upscaler Resources")]
         [SerializeField]
         private TsukuyomiFsr3Shaders fsr3Shaders = new();
@@ -127,6 +136,12 @@ namespace Tsukuyomi.Rendering
         public Material SssSkinBlurMaterial => sssSkinBlurMaterial;
         public Shader PostProcessUberShader => postProcessUberShader;
         public Material PostProcessUberMaterial => postProcessUberMaterial;
+        public Shader ScanMainShader => scanMainShader;
+        public Shader ScanTargetMaskShader => scanTargetMaskShader;
+        public Shader ScanGridShader => scanGridShader;
+        public Shader ScanGlitchShader => scanGlitchShader;
+        public Shader VoxelTransitionShader => voxelTransitionShader;
+        public Shader XrayCompositeShader => xrayCompositeShader;
         public Texture2D DefaultWhiteTexture => defaultWhiteTexture;
         public Texture2D DefaultBlackTexture => defaultBlackTexture;
         public Texture2D DefaultNormalTexture => defaultNormalTexture;
@@ -153,7 +168,3 @@ namespace Tsukuyomi.Rendering
         public bool HasFsr3Resources => fsr3Shaders != null && fsr3Shaders.IsValid;
     }
 }
-
-
-
-

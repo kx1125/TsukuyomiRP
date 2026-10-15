@@ -19,6 +19,11 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_PostProcessingExpanded = true;
         private static bool s_SssSkinExpanded = true;
         private static bool s_PassListExpanded;
+        private static bool s_VoxelTransitionExpanded = true;
+        private static bool s_ScanPostProcessExpanded = true;
+        private static bool s_XrayRenderExpanded = true;
+        private static bool s_SpatialGridRenderExpanded = true;
+
 
         public override void OnInspectorGUI()
         {
@@ -78,6 +83,26 @@ namespace Tsukuyomi.Rendering.Editor
             DrawVolumeLightSettings();
             DrawPostProcessingSettings();
             DrawSssSkinSettings();
+            DrawSceneEffectSettings("VoxelTransition", nameof(TsukuyomiPipelineProfile.EnableVoxelTransition), nameof(TsukuyomiPipelineProfile.VoxelTransition), ref s_VoxelTransitionExpanded);
+            DrawSceneEffectSettings("ScanPostProcess", nameof(TsukuyomiPipelineProfile.EnableScanPostProcess), nameof(TsukuyomiPipelineProfile.ScanPostProcess), ref s_ScanPostProcessExpanded, nameof(TsukuyomiPipelineProfile.ScanPostEffects));
+            DrawSceneEffectSettings("XrayRender", nameof(TsukuyomiPipelineProfile.EnableXrayRender), nameof(TsukuyomiPipelineProfile.XrayRender), ref s_XrayRenderExpanded);
+            DrawSceneEffectSettings("SpatialGridRender", nameof(TsukuyomiPipelineProfile.EnableSpatialGridRender), nameof(TsukuyomiPipelineProfile.SpatialGridRender), ref s_SpatialGridRenderExpanded);
+
+            EditorGUI.indentLevel--;
+        }
+
+        private void DrawSceneEffectSettings(string title, string enabledName, string parametersName, ref bool expanded, string effectsName = null)
+        {
+            var enabled = serializedObject.FindProperty(enabledName);
+            CoreEditorUtils.DrawSplitter();
+            expanded = CoreEditorUtils.DrawHeaderToggleFoldout(EditorGUIUtility.TrTextContent(title), expanded, enabled, null, null, null, null);
+            if (!expanded) return;
+            EditorGUI.indentLevel++;
+            using (new EditorGUI.DisabledScope(!enabled.boolValue))
+            {
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(parametersName), true);
+                if (effectsName != null) EditorGUILayout.PropertyField(serializedObject.FindProperty(effectsName));
+            }
             EditorGUI.indentLevel--;
         }
 
@@ -480,4 +505,3 @@ namespace Tsukuyomi.Rendering.Editor
         }
     }
 }
-

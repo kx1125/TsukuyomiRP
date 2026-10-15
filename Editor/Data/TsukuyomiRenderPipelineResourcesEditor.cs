@@ -12,6 +12,7 @@ namespace Tsukuyomi.Rendering.Editor
         private static bool s_ShowGtao = true;
         private static bool s_ShowVolumeLight = true;
         private static bool s_ShowPostProcessing = true;
+        private static bool s_ShowSceneEffects = true;
         private static bool s_ShowFsr3Resources = true;
         private static bool s_ShowDefaultTextures = true;
 
@@ -59,6 +60,9 @@ namespace Tsukuyomi.Rendering.Editor
                 "Post Processing",
                 "postProcessUberShader",
                 "postProcessUberMaterial");
+
+            DrawFoldout(ref s_ShowSceneEffects, "Scene Effects", "voxelTransitionShader", "scanMainShader",
+                "scanGlitchShader", "scanTargetMaskShader", "xrayCompositeShader", "scanGridShader");
 
             DrawChildFoldout(ref s_ShowFsr3Resources, "FSR3 Resources", "fsr3Shaders");
 

@@ -25,7 +25,7 @@
 - 新 Feature 放在 TsukuyomiRP 包内独立目录中，避免和 RenderGraph 封装核心代码混在一起。
 - 固定管线能力放在 `Rendering Features` 中配置；可组合、可排序的通用 Pass 放在 `Passes` list 中。
 - 资源通过 `TsukuyomiRenderPipelineResources` 预加载，不在运行时使用 `Shader.Find`，也不要求用户手动在 RendererFeature 面板上配置 shader。
-- 默认参数来自 `TsukuyomiPipelineProfile`，场景差异通过 Volume Override 覆盖。
+- 管线级默认参数来自 `TsukuyomiPipelineProfile`，场景差异通过 Volume Override 覆盖。SceneScan 四个渲染功能通过相机级参数 API 驱动，项目预设与时序由项目模块管理。
 - 优先接入 TsukuyomiRP 的 RenderGraph 封装：`GraphFeaturePass`、`RasterPass`、`ComputePass`、`UnsafePass`、`TextureSlot`、`ResourceHub`。
 - Feature 有依赖时显式表达启用条件和队列顺序；不要依赖字段声明顺序或偶然的 enqueue 顺序。
 - 修改全局 keyword、全局纹理、Rendering Layer 或灯光状态的 Feature，关闭、缺少 Profile 和 `Dispose()` 时都必须恢复状态。
@@ -569,7 +569,7 @@ public override void CollectResourceRequirements(in FrameContext frame,
 
 ### 框架回归
 
-Tests/Editor 下的 `Tsukuyomi.Rendering.Editor.Tests` 可从 Unity Test Runner 运行。自动化环境也可调用 `GraphArchitectureTestRunner.Run(resultPath)` 同步生成 NUnit XML。测试覆盖资源依赖、裁剪、同类型快照、跨图复用、旧 API 混用、附件声明、跳过、需求合并/冲突与预热后分配；实际 CPU/GPU、Camera Stack、XR 和 IL2CPP 仍需要对应场景验证。
+渲染包不包含本地验证脚本。回归测试由接入项目的 Editor 测试程序集维护，通过 Unity Test Runner 运行，不随渲染包发布。测试覆盖资源依赖、裁剪、同类型快照、跨图复用、旧 API 混用、附件声明、跳过、需求合并/冲突与预热后分配；实际 CPU/GPU、Camera Stack、XR 和 IL2CPP 仍需要对应场景验证。
 
 ## Shader 和 HLSL 约定
 
@@ -636,3 +636,44 @@ Tests/Editor 下的 `Tsukuyomi.Rendering.Editor.Tests` 可从 Unity Test Runner 
 ### 一个 Feature 内部多个阶段要不要拆多个 RenderGraph pass？
 
 看渲染路径和资源生命周期。PCSS 的 Penumbra 和 ScreenSpaceShadows 属于同一个屏幕空间阴影流程，放在同一个 `Screen Space Shadows` pass 内分阶段绘制。Volume Light 也在一个 pass 内维持 Downsample/Raymarch/Blur/Upsample/Composite 阶段。Compute 生成和 denoise 这种天然独立、需要跨 pass 消费的流程，可以拆成多个 pass。
+
+
+## SceneScan 四个独立渲染功能
+
+`TsukuyomiPipelineProfile` 和 `TsukuyomiRP` Volume 面板分别提供 VoxelTransition、ScanPostProcess、XrayRender、SpatialGridRender 的开关与参数。前端调用对应 Pass 的静态相机 API，不持有 RendererFeature。Renderer 内部仍提供只读 Pass 入口；不要把同一实例再添加到 `Profile.Passes`。
+
+四个 Pass 均提供静态 `SetCameraEnabled`、强类型 `SetCameraParameters`、`SetCameraAnimation`、`HasCameraOverrides` 和 `ClearCamera`。优先级为 Profile 默认值、已勾选的 Volume 字段、显式相机覆盖；修改参数不会隐式启用功能。动画 API 只更新外部曲线结果，不会覆盖面板外观、范围或覆盖模式。项目负责时序、曲线、随机输入与目标业务分类；节点记录时把解析参数复制到 RenderGraph 数据中。
+
+```csharp
+var grid = SpatialGridParameters.Default;
+grid.OriginWS = origin.position;
+TsukuyomiSpatialGridRenderPass.SetCameraParameters(camera, grid);
+TsukuyomiSpatialGridRenderPass.SetCameraEnabled(camera, true);
+
+TsukuyomiScanPostProcessPass.SetCameraParameters(camera, ScanPostProcessParameters.Default);
+TsukuyomiScanPostProcessPass.SetCameraEnabled(camera, true);
+TsukuyomiScanPostProcessPass.SetCameraEffectEnabled(camera, ScanPostEffect.VoxelGlitch, false);
+TsukuyomiScanPostProcessPass.SetCameraEffectEnabled(camera, ScanPostEffect.HorizontalGlitch, true);
+TsukuyomiScanPostProcessPass.SetCameraEffectEnabled(camera, ScanPostEffect.ChromaticSplit, false);
+
+TsukuyomiXrayRenderPass.SetCameraRenderers(camera, new[] {
+    new RendererMaskEntry(targetRenderer, 1),
+    new RendererMaskEntry(excludedRenderer, 0, RendererMaskRole.Excluded)
+});
+TsukuyomiXrayRenderPass.SetCameraParameters(camera, XrayRenderParameters.Default);
+TsukuyomiXrayRenderPass.SetCameraEnabled(camera, true);
+```
+
+`SpatialGridParameters.Default` 使用完整覆盖，间距 5、半径 40、线宽 0.025、点尺寸 0.12。`SpatialGridCoverage.Full` 绕过扫描覆盖；`Blend` 仍控制淡入，脉冲仍由参数驱动。组合扫描在面板使用 `Scan` 模式，项目通过 `ScanAnimationParameters` 传入原点、原始进度、World/Screen 进度和 Blend；Range、RingWidth、NoiseStrength、PulseSpeed 等保持由 Profile/Volume 调整。表面网格属于 `ScanPostEffect.Scan`，与独立空间网格分开管理。
+
+空间网格内部的 `ISpatialGridBackend` 负责配置、录制 RenderGraph 节点与释放资源。当前每个相机拥有独立的 `SpatialGridMeshBackend`、材质和 Mesh 缓存。后端保留原格点对齐、球形覆盖、墙后衰减、加色混合、排除与脉冲；每轴半格点数限制 1–8、半径限制 1–40、有效半径同时不超过 `halfCount * spacing`。这些限制和顶点/索引布局不进入公共 API。
+
+默认网格为 17³：4,913 个点、13,872 条连接线、75,140 个顶点、37,570 个三角形，一次 Mesh 绘制。`SetCameraEnabled(camera, false)` 强制停止录制但保留设置/缓存；`ClearCamera(camera)` 移除运行时覆盖并恢复面板控制；`TsukuyomiSpatialGridRenderPass.ReleaseCameraResources(camera)` 单独释放该相机的后端缓存；`Dispose` 释放渲染器资源和解析状态，静态相机控制保留到显式清理或子系统重置。粒子与 Compute 后端以后替换内部实现，项目调用保持不变。
+
+VoxelTransition 保留原图引用，输出体素采样色、仅扭曲色和屏幕扩张权重。关闭时共享合成使用原图与屏幕权重 1。XrayRender 拥有目标 Mask、私有目标深度和高亮贡献；Renderer 注册按值复制，正整数标签 1 使用 PrimaryColor，其他正标签使用 SecondaryColor。排除标签在 Xray 高亮关闭时仍可供空间网格和颜色合成使用。
+
+透明之前（事件 449）：Mask → VoxelTransition → Xray contribution → 公共颜色合成 → SpatialGrid。公共合成保持表面效果 + 目标贡献、屏幕混合、闪光、整体淡入/排除的顺序。空间网格仅声明颜色附件、场景深度与可选排除 Mask，并通过 `RequiresIntermediateColorTarget` 独立请求中间颜色目标，不读取法线或颜色采样副本。
+
+透明之后、Bloom 之前（事件 548）：体素故障 → 水平故障/色散。四个后处理子开关由 `ScanPostEffect` 管理，参数更新不会重置开关。水平故障和色散独立启用，有贡献时共用一个采样节点。Full 覆盖允许体素故障单独使用 `VoxelTransitionWeight`；Scan 覆盖保留原 Reveal/Progress 调制。
+
+采样色和目标贡献的分离纹理使用完整浮点精度，避免中间量量化改变原着色结果。独立空间网格不申请这些采样纹理。

@@ -8,6 +8,9 @@ namespace Tsukuyomi.Rendering
     {
         public bool Enabled = true;
         public abstract string Name { get; }
+
+        /// <summary>Request an intermediate color attachment even when no color texture is sampled.</summary>
+        public virtual bool RequiresIntermediateColorTarget => false;
         
         [SerializeField, HideInInspector]
         private InjectionPoint _injectionPoint;

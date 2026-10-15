@@ -37,6 +37,7 @@ namespace Tsukuyomi.Rendering
                 if (frame.HasValue && !frame.Value.URPFrameData.GetOrCreate<ResourceRequirements>().CanRecord(pass))
                     continue;
                 hasPasses = true;
+                requiresIntermediateTexture |= pass.RequiresIntermediateColorTarget;
                 _textureSlots.Clear();
                 pass.CollectTextureSlots(_textureSlots);
                 foreach (TextureSlot slot in _textureSlots)

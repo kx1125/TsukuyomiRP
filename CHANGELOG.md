@@ -4,6 +4,29 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-16
+
+### Added
+
+- Added independent VoxelTransition, ScanPostProcess, XrayRender and SpatialGridRender Passes, with Profile and Volume controls and static camera APIs for project frontends.
+- Added separate surface scan, voxel glitch, horizontal glitch and chromatic split switches, plus explicit renderer registration for highlights and exclusions.
+- Added standalone spatial-grid coverage and an internal camera-local Mesh backend that keeps geometry and resource layouts out of the public API.
+
+### Changed
+
+- Kept effect timing, curves, random inputs, presets and gameplay target categories in the consuming project; the package contains rendering logic and strongly typed parameters.
+- Preserved the original scan composition order and appearance, drawing the spatial grid after scan composition and before transparents, with glitch and chromatic effects before Bloom.
+- Documented runtime control precedence, animation snapshots, camera cleanup and the four feature APIs.
+
+### Fixed
+
+- Request an intermediate color attachment for standalone spatial-grid rendering and isolate camera settings and backend resources.
+
+### Removed
+
+- Removed the empty Editor template and unused PostProcessTestPass and TwoStageFullscreenPass examples.
+- Removed local validation probes, test-runner helpers and repair backups from the package; regression tests are maintained in the consuming project.
+
 ## [0.2.0] - 2026-09-29
 
 ### Added

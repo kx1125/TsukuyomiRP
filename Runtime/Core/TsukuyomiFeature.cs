@@ -11,6 +11,11 @@ namespace Tsukuyomi.Rendering
     {
         public TsukuyomiPipelineProfile Profile;
 
+        public TsukuyomiVoxelTransitionPass VoxelTransition => _voxelTransitionPass ??= new();
+        public TsukuyomiScanPostProcessPass ScanPostProcess => _scanPostProcessPass ??= new();
+        public TsukuyomiXrayRenderPass XrayRender => _scanTargetPass ??= new();
+        public TsukuyomiSpatialGridRenderPass SpatialGridRender => _scanGridPass ??= new();
+
         private static bool s_WarnedPerObjectShadowRenderingLayersDisabled;
 
         private Light _perObjectShadowMainLight;
@@ -34,6 +39,8 @@ namespace Tsukuyomi.Rendering
         private PassRegistry _volumeLightRegistry;
         private PassRegistry _sssSkinRegistry;
         private PassRegistry _postProcessRegistry;
+        private PassRegistry _scanSurfaceRegistry;
+        private PassRegistry _scanCompositeRegistry;
         private ResourceHub _resourceHub;
         private FrameContext _enqueueFrame;
         private readonly List<TsukuyomiBridgePass> _bridgePasses = new();
@@ -51,6 +58,8 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiBridgePass _volumeLightBridgePass;
         private TsukuyomiBridgePass _sssSkinBridgePass;
         private TsukuyomiBridgePass _postProcessBridgePass;
+        private TsukuyomiBridgePass _scanSurfaceBridgePass;
+        private TsukuyomiBridgePass _scanCompositeBridgePass;
         private TsukuyomiContactShadowPass _contactShadowPass;
         private TsukuyomiContactShadowDenoisePass _contactShadowDenoisePass;
         private TsukuyomiDepthPyramidPass _depthPyramidPass;
@@ -66,6 +75,14 @@ namespace Tsukuyomi.Rendering
         private TsukuyomiVolumetricFogPass _volumeLightPass;
         private TsukuyomiSssSkinPass _sssSkinPass;
         private TsukuyomiPostProcessPass _postProcessPass;
+        [NonSerialized] private TsukuyomiVoxelTransitionPass _voxelTransitionPass;
+        [NonSerialized] private TsukuyomiScanPostProcessPass _scanPostProcessPass;
+        [NonSerialized] private TsukuyomiXrayRenderPass _scanTargetPass;
+        [NonSerialized] private TsukuyomiSpatialGridRenderPass _scanGridPass;
+        [NonSerialized] private ScanColorCompositePass _scanMainPass;
+        [NonSerialized] private XrayContributionNode _xrayContributionPass;
+        [NonSerialized] private ScanVoxelGlitchNode _scanVoxelPass;
+        [NonSerialized] private ScanChannelGlitchNode _scanHorizontalPass;
 #if ENABLE_UPSCALER_FRAMEWORK
         private TsukuyomiFsr3OpaqueOnlyCapturePass _fsr3OpaqueOnlyCapturePass;
         private TsukuyomiFsr3ManualMaskPass _fsr3ManualMaskPass;
@@ -102,6 +119,8 @@ namespace Tsukuyomi.Rendering
             _volumeLightRegistry = new PassRegistry();
             _sssSkinRegistry = new PassRegistry();
             _postProcessRegistry = new PassRegistry();
+            _scanSurfaceRegistry = new PassRegistry();
+            _scanCompositeRegistry = new PassRegistry();
             _resourceHub?.Dispose();
             _resourceHub = new ResourceHub();
             _bridgePasses.Clear();
@@ -121,6 +140,18 @@ namespace Tsukuyomi.Rendering
             _volumeLightPass ??= new TsukuyomiVolumetricFogPass();
             _sssSkinPass ??= new TsukuyomiSssSkinPass();
             _postProcessPass ??= new TsukuyomiPostProcessPass();
+            _voxelTransitionPass ??= new TsukuyomiVoxelTransitionPass();
+            _scanPostProcessPass ??= new TsukuyomiScanPostProcessPass();
+            _scanTargetPass ??= new TsukuyomiXrayRenderPass();
+            _scanGridPass ??= new TsukuyomiSpatialGridRenderPass();
+            _scanMainPass?.Dispose();
+            _xrayContributionPass?.Dispose();
+            _scanVoxelPass?.Dispose();
+            _scanHorizontalPass?.Dispose();
+            _scanMainPass = new ScanColorCompositePass(_voxelTransitionPass, _scanPostProcessPass, _scanTargetPass);
+            _xrayContributionPass = new XrayContributionNode(_scanTargetPass);
+            _scanVoxelPass = new ScanVoxelGlitchNode(_scanPostProcessPass);
+            _scanHorizontalPass = new ScanChannelGlitchNode(_scanPostProcessPass);
 #if ENABLE_UPSCALER_FRAMEWORK
             _fsr3OpaqueOnlyCapturePass ??= new TsukuyomiFsr3OpaqueOnlyCapturePass();
             _fsr3ManualMaskPass ??= new TsukuyomiFsr3ManualMaskPass();
@@ -140,6 +171,14 @@ namespace Tsukuyomi.Rendering
             _volumeLightPass.InjectionPoint = InjectionPoint.BeforePostProcess;
             _sssSkinPass.InjectionPoint = InjectionPoint.BeforeOpaque;
             _postProcessPass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _voxelTransitionPass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _scanPostProcessPass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _xrayContributionPass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _scanMainPass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _scanTargetPass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _scanGridPass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _scanVoxelPass.InjectionPoint = InjectionPoint.BeforePostProcess;
+            _scanHorizontalPass.InjectionPoint = InjectionPoint.BeforePostProcess;
 
             _contactShadowRegistry.AddPass(_contactShadowPass);
             _contactShadowDenoiseRegistry.AddPass(_contactShadowDenoisePass);
@@ -155,6 +194,13 @@ namespace Tsukuyomi.Rendering
             _volumeLightRegistry.AddPass(_volumeLightPass);
             _sssSkinRegistry.AddPass(_sssSkinPass);
             _postProcessRegistry.AddPass(_postProcessPass);
+            _scanSurfaceRegistry.AddPass(_voxelTransitionPass);
+            _scanSurfaceRegistry.AddPass(_xrayContributionPass);
+            _scanSurfaceRegistry.AddPass(_scanMainPass);
+            _scanSurfaceRegistry.AddPass(_scanTargetPass);
+            _scanSurfaceRegistry.AddPass(_scanGridPass);
+            _scanCompositeRegistry.AddPass(_scanVoxelPass);
+            _scanCompositeRegistry.AddPass(_scanHorizontalPass);
 
             _contactShadowBridgePass = new TsukuyomiBridgePass(_contactShadowRegistry, _contactShadowPass.InjectionPoint, _resourceHub)
             {
@@ -209,6 +255,14 @@ namespace Tsukuyomi.Rendering
             {
                 renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1
             };
+            _scanSurfaceBridgePass = new TsukuyomiBridgePass(_scanSurfaceRegistry, _scanMainPass.InjectionPoint, _resourceHub)
+            {
+                renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1
+            };
+            _scanCompositeBridgePass = new TsukuyomiBridgePass(_scanCompositeRegistry, _scanVoxelPass.InjectionPoint, _resourceHub)
+            {
+                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 2
+            };
 
             if (Profile != null && Profile.Passes != null)
             {
@@ -241,6 +295,24 @@ namespace Tsukuyomi.Rendering
             renderer.EnqueuePass(_fsr3OpaqueOnlyCapturePass);
             renderer.EnqueuePass(_fsr3ManualMaskPass);
 #endif
+            VolumeStack volumeStack = VolumeManager.instance.stack;
+            _voxelTransitionPass?.UpdateSettings(camera, Profile, volumeStack);
+            _scanPostProcessPass?.UpdateSettings(camera, Profile, volumeStack);
+            _scanTargetPass?.UpdateSettings(camera, Profile, volumeStack);
+            _scanGridPass?.UpdateSettings(camera, Profile, volumeStack);
+            _scanPostProcessPass?.UpdateEffectSettings(camera, Profile, volumeStack);
+            bool openingEnabled = _voxelTransitionPass != null && _voxelTransitionPass.Configure(camera);
+            bool spatialGridEnabled = _scanGridPass != null && _scanGridPass.Configure(camera);
+            bool scanEnabled = _scanMainPass != null && _scanMainPass.Configure(camera);
+            bool targetMaskEnabled = _scanTargetPass != null && _scanTargetPass.Configure(camera, scanEnabled || spatialGridEnabled);
+            bool xrayEnabled = targetMaskEnabled && _xrayContributionPass != null && _xrayContributionPass.Configure(camera);
+            if (openingEnabled || scanEnabled || spatialGridEnabled || xrayEnabled)
+                EnqueueBridge(renderer, _scanSurfaceBridgePass);
+            bool scanVoxelEnabled = _scanVoxelPass != null && _scanVoxelPass.Configure(camera);
+            bool scanHorizontalEnabled = _scanHorizontalPass != null && _scanHorizontalPass.Configure(camera);
+            if (scanVoxelEnabled || scanHorizontalEnabled)
+                EnqueueBridge(renderer, _scanCompositeBridgePass);
+
             if (Profile == null)
             {
                 RestoreMainLightShadowLayerOverride();
@@ -250,7 +322,6 @@ namespace Tsukuyomi.Rendering
                 return;
             }
 
-            VolumeStack volumeStack = VolumeManager.instance.stack;
             TsukuyomiPcssVolume pcssVolume = volumeStack?.GetComponent<TsukuyomiPcssVolume>();
             TsukuyomiPerObjectShadowVolume perObjectShadowVolume = volumeStack?.GetComponent<TsukuyomiPerObjectShadowVolume>();
             TsukuyomiContactShadowVolume contactShadowVolume = volumeStack?.GetComponent<TsukuyomiContactShadowVolume>();
@@ -366,7 +437,8 @@ namespace Tsukuyomi.Rendering
             bool useSharedDepthNormals = RequiresCameraNormals(
                 contactShadowDenoiseEnabled,
                 gtaoEnabled && depthPyramidEnabled,
-                ssgiEnabled && depthPyramidEnabled);
+                ssgiEnabled && depthPyramidEnabled,
+                scanEnabled);
             if (_sssSkinPass != null && _sssSkinPass.Configure(Profile, sssSkinVolume, useSharedDepthNormals))
             {
                 EnqueueBridge(renderer, _sssSkinBridgePass);
@@ -387,11 +459,12 @@ namespace Tsukuyomi.Rendering
                 renderer.EnqueuePass(bridge);
         }
 
-        private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled, bool ssgiEnabled)
+        private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled, bool ssgiEnabled, bool scanEnabled)
         {
             return (contactShadowDenoiseEnabled && PassRegistry.PassRequiresBuiltinTexture(_contactShadowDenoisePass, BuiltinTexture.CameraNormals))
                 || (gtaoEnabled && PassRegistry.PassRequiresBuiltinTexture(_gtaoPass, BuiltinTexture.CameraNormals))
                 || (ssgiEnabled && PassRegistry.PassRequiresBuiltinTexture(_ssgiPass, BuiltinTexture.CameraNormals))
+                || (scanEnabled && PassRegistry.PassRequiresBuiltinTexture(_scanMainPass, BuiltinTexture.CameraNormals))
                 || (_registry != null && _registry.RequiresBuiltinTexture(BuiltinTexture.CameraNormals));
         }
         private RenderPassEvent MapInjectionPointToEvent(InjectionPoint point)
@@ -540,6 +613,26 @@ namespace Tsukuyomi.Rendering
             _postProcessPass?.Dispose();
             _postProcessPass = null;
             _postProcessBridgePass = null;
+            _voxelTransitionPass?.Dispose();
+            _scanPostProcessPass?.Dispose();
+            _xrayContributionPass?.Dispose();
+            _scanMainPass?.Dispose();
+            _scanTargetPass?.Dispose();
+            _scanGridPass?.Dispose();
+            _scanVoxelPass?.Dispose();
+            _scanHorizontalPass?.Dispose();
+            _voxelTransitionPass = null;
+            _scanPostProcessPass = null;
+            _xrayContributionPass = null;
+            _scanTargetPass = null;
+            _scanGridPass = null;
+            _scanVoxelPass = null;
+            _scanHorizontalPass = null;
+            _scanCompositeBridgePass = null;
+            _scanCompositeRegistry = null;
+            _scanMainPass = null;
+            _scanSurfaceBridgePass = null;
+            _scanSurfaceRegistry = null;
             _sssSkinPass?.Dispose();
             _sssSkinPass = null;
             _sssSkinBridgePass = null;
@@ -551,12 +644,5 @@ namespace Tsukuyomi.Rendering
         }
     }
 }
-
-
-
-
-
-
-
 
 

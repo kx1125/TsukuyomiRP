@@ -32,6 +32,23 @@ namespace Tsukuyomi.Rendering
     [CreateAssetMenu(menuName = "TsukuyomiRpP/Pipeline Profile", fileName = "TsukuyomiPipelineProfile")]
     public class TsukuyomiPipelineProfile : ScriptableObject
     {
+        [Header("VoxelTransition")]
+        public bool EnableVoxelTransition;
+        public VoxelTransitionParameters VoxelTransition = VoxelTransitionParameters.Default;
+
+        [Header("ScanPostProcess")]
+        public bool EnableScanPostProcess;
+        public ScanPostProcessParameters ScanPostProcess = ScanPostProcessParameters.Default;
+        public ScanPostEffect ScanPostEffects = ScanPostEffect.All;
+
+        [Header("XrayRender")]
+        public bool EnableXrayRender;
+        public XrayRenderParameters XrayRender = XrayRenderParameters.Default;
+
+        [Header("SpatialGridRender")]
+        public bool EnableSpatialGridRender;
+        public SpatialGridParameters SpatialGridRender = SpatialGridParameters.Default;
+
         [Header("Planar Reflection")]
         public bool EnablePlanarReflection;
 
@@ -303,6 +320,7 @@ namespace Tsukuyomi.Rendering
         public float SssSkinDitherIntensity = 0.0f;
 
         public Texture SssSkinNoiseTexture;
+
         /// <summary>
         /// Polymorphic list of passes configured via the Graph Editor.
         /// Serialized using Unity's SerializeReference.
@@ -319,10 +337,3 @@ namespace Tsukuyomi.Rendering
         public string GraphLayoutData;
     }
 }
-
-
-
-
-
-
-

@@ -331,6 +331,7 @@ namespace Tsukuyomi.Rendering
         [Header("SSS Skin")]
         public bool EnableSssSkin;
 
+        [Tooltip("Use RGBA16Float lighting buffers instead of R11G11B10Float when supported.")]
         public bool SssSkinHighPrecision;
 
         public LayerMask SssSkinLayerMask;

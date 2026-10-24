@@ -495,6 +495,7 @@ namespace Tsukuyomi.Rendering.Editor
                 {
                     EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinLayerMask)));
                     EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinQuality)));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinHighPrecision)));
                     EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinScatteringRadius)));
                     EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinScatteringIterations)));
                     EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(TsukuyomiPipelineProfile.SssSkinShaderIterations)));

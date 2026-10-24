@@ -596,12 +596,13 @@ namespace Tsukuyomi.Rendering
 
         private static GraphicsFormat GetLightingFormat(bool highPrecision)
         {
-            if (highPrecision && SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_SFloat, GraphicsFormatUsage.Render))
-                return GraphicsFormat.R32G32B32A32_SFloat;
-            if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, GraphicsFormatUsage.Render))
+            // RGB lighting does not use alpha. Prefer packed HDR unless higher precision is requested.
+            if (highPrecision && SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, GraphicsFormatUsage.Render))
                 return GraphicsFormat.R16G16B16A16_SFloat;
             if (SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, GraphicsFormatUsage.Render))
                 return GraphicsFormat.B10G11R11_UFloatPack32;
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, GraphicsFormatUsage.Render))
+                return GraphicsFormat.R16G16B16A16_SFloat;
             return GraphicsFormat.R8G8B8A8_UNorm;
         }
 

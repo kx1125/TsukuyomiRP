@@ -37,7 +37,7 @@ namespace Tsukuyomi.Rendering
         public ClampedFloatParameter ditherScale = new(1.0f, 0.0f, 32.0f);
         public ClampedFloatParameter ditherIntensity = new(0.0f, 0.0f, 1.0f);
         public TextureParameter noiseTexture = new(null);
-        [Tooltip("Use RGBA32Float lighting buffers when supported; otherwise use RGBA16Float.")]
+        [Tooltip("Use RGBA16Float lighting buffers instead of R11G11B10Float when supported.")]
         public BoolParameter highPrecision = new(false);
     }
 

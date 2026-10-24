@@ -1,6 +1,9 @@
 #ifndef TSUKUYOMI_SPECULAR_PBR_META_INCLUDED
 #define TSUKUYOMI_SPECULAR_PBR_META_INCLUDED
-#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiSpecularPBRInput.hlsl"
+#ifndef TSUKUYOMI_MATERIAL_INPUT
+#define TSUKUYOMI_MATERIAL_INPUT "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiSpecularPBRInput.hlsl"
+#endif
+#include TSUKUYOMI_MATERIAL_INPUT
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UniversalMetaPass.hlsl"
 half4 TsukuyomiSpecularPBRMetaFragment(Varyings input) : SV_Target
 {

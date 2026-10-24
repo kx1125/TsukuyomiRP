@@ -1,7 +1,17 @@
 #ifndef TSUKUYOMI_SPECULAR_PBR_DEPTH_NORMALS_PASS_INCLUDED
 #define TSUKUYOMI_SPECULAR_PBR_DEPTH_NORMALS_PASS_INCLUDED
 
-#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiSpecularPBRInput.hlsl"
+#ifndef TSUKUYOMI_MATERIAL_INPUT
+#define TSUKUYOMI_MATERIAL_INPUT "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/TsukuyomiSpecularPBRInput.hlsl"
+#endif
+#include TSUKUYOMI_MATERIAL_INPUT
+
+#ifndef TSUKUYOMI_DEPTH_ALPHA
+#define TSUKUYOMI_DEPTH_ALPHA(uv, pixel) Alpha(SampleAlbedoAlpha(uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap)).a, _BaseColor, _Cutoff)
+#endif
+#ifndef TSUKUYOMI_DEPTH_NORMAL
+#define TSUKUYOMI_DEPTH_NORMAL(uv) SampleSpecularPBRNormal(uv)
+#endif
 
 #if defined(LOD_FADE_CROSSFADE)
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/LODCrossFade.hlsl"
@@ -56,7 +66,7 @@ void TsukuyomiSpecularPBRDepthNormalsFragment(
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
 #if defined(_ALPHATEST_ON)
-    Alpha(SampleAlbedoAlpha(input.uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap)).a, _BaseColor, _Cutoff);
+    TSUKUYOMI_DEPTH_ALPHA(input.uv,input.positionCS.xy);
 #endif
 
 #if defined(LOD_FADE_CROSSFADE)
@@ -66,7 +76,7 @@ void TsukuyomiSpecularPBRDepthNormalsFragment(
 #if defined(_NORMALMAP) || defined(ENABLE_DETAIL_NORMALMAP)
     float tangentSign = input.tangentWS.w;
     float3 bitangent = tangentSign * cross(input.normalWS.xyz, input.tangentWS.xyz);
-    half3 normalTS = SampleSpecularPBRNormal(input.uv);
+    half3 normalTS = TSUKUYOMI_DEPTH_NORMAL(input.uv);
     float3 normalWS = TransformTangentToWorld(normalTS, half3x3(input.tangentWS.xyz, bitangent.xyz, input.normalWS.xyz));
 #else
     float3 normalWS = input.normalWS;

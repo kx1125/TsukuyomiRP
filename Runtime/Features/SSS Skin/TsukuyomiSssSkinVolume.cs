@@ -18,6 +18,12 @@ namespace Tsukuyomi.Rendering
     [DisplayInfo(name = "Sss Skin Volume")]
     public sealed class TsukuyomiSssSkinVolume : VolumeComponent
     {
+        [HideInInspector] // Retained only for serialized asset migration.
+        public BoolParameter studioCompatibility = new(false);
+        [HideInInspector] // Retained only for serialized asset migration.
+        public ClampedFloatParameter studioWorldScale = new(.1f,.0001f,10f);
+        [HideInInspector] // Retained only for serialized asset migration.
+        public ClampedFloatParameter studioReferenceFieldOfView = new(60f,1f,179f);
         public BoolParameter enable = new(false, BoolParameter.DisplayType.EnumPopup);
         public TsukuyomiSssSkinQualityParameter quality = new(TsukuyomiSssSkinQuality.High);
         public ClampedFloatParameter scatteringRadius = new(1.0f, 0.0f, 10.0f);
@@ -25,16 +31,19 @@ namespace Tsukuyomi.Rendering
         public ClampedIntParameter shaderIterations = new(12, 1, 32);
         public ClampedFloatParameter depthTest = new(0.3f, 0.0001f, 5.0f);
         public ClampedFloatParameter normalTest = new(0.3f, 0.001f, 2.0f);
-        public ClampedFloatParameter maxDistance = new(10.0f, 0.0f, 200.0f);
+        public ClampedFloatParameter maxDistance = new(10.0f, 0.0f, 10000.0f);
         public ColorParameter sssColor = new(Color.yellow, false, false, true);
         public BoolParameter randomizedRotation = new(false, BoolParameter.DisplayType.Checkbox);
-        public ClampedFloatParameter ditherScale = new(1.0f, 0.0f, 5.0f);
-        public ClampedFloatParameter ditherIntensity = new(0.0f, 0.0f, 0.5f);
+        public ClampedFloatParameter ditherScale = new(1.0f, 0.0f, 32.0f);
+        public ClampedFloatParameter ditherIntensity = new(0.0f, 0.0f, 1.0f);
         public TextureParameter noiseTexture = new(null);
+        [Tooltip("Use RGBA16Float lighting buffers instead of R11G11B10Float when supported.")]
+        public BoolParameter highPrecision = new(false);
     }
 
     internal readonly struct TsukuyomiSssSkinResolvedSettings
     {
+        public readonly bool HighPrecision;
         public readonly bool Enabled;
         public readonly LayerMask SkinLayerMask;
         public readonly TsukuyomiSssSkinQuality Quality;
@@ -52,6 +61,7 @@ namespace Tsukuyomi.Rendering
 
         private TsukuyomiSssSkinResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiSssSkinVolume volume)
         {
+            HighPrecision = Resolve(volume?.highPrecision, profile.SssSkinHighPrecision);
             Enabled = profile.EnableSssSkin && Resolve(volume?.enable, true);
             SkinLayerMask = profile.SssSkinLayerMask;
             Quality = Resolve(volume?.quality, profile.SssSkinQuality);

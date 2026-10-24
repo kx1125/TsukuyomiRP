@@ -434,11 +434,8 @@ namespace Tsukuyomi.Rendering
                 EnqueueBridge(renderer, _postProcessBridgePass);
             }
 
-            bool useSharedDepthNormals = RequiresCameraNormals(
-                contactShadowDenoiseEnabled,
-                gtaoEnabled && depthPyramidEnabled,
-                ssgiEnabled && depthPyramidEnabled,
-                scanEnabled);
+            // SSS declares scene depth/normals itself; it no longer depends on AO being enabled.
+            bool useSharedDepthNormals = true;
             if (_sssSkinPass != null && _sssSkinPass.Configure(Profile, sssSkinVolume, useSharedDepthNormals))
             {
                 EnqueueBridge(renderer, _sssSkinBridgePass);

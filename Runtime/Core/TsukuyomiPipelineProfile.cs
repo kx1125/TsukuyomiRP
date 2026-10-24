@@ -287,6 +287,9 @@ namespace Tsukuyomi.Rendering
         [Header("SSS Skin")]
         public bool EnableSssSkin;
 
+        [Tooltip("Use RGBA16Float lighting buffers instead of R11G11B10Float when supported.")]
+        public bool SssSkinHighPrecision;
+
         public LayerMask SssSkinLayerMask;
 
         public TsukuyomiSssSkinQuality SssSkinQuality = TsukuyomiSssSkinQuality.High;
@@ -306,17 +309,17 @@ namespace Tsukuyomi.Rendering
         [Range(0.001f, 2.0f)]
         public float SssSkinNormalTest = 0.3f;
 
-        [Range(0.0f, 200.0f)]
+        [Range(0.0f, 10000.0f)]
         public float SssSkinMaxDistance = 10.0f;
 
         public Color SssSkinColor = Color.yellow;
 
         public bool SssSkinRandomizedRotation;
 
-        [Range(0.0f, 5.0f)]
+        [Range(0.0f, 32.0f)]
         public float SssSkinDitherScale = 1.0f;
 
-        [Range(0.0f, 0.5f)]
+        [Range(0.0f, 1.0f)]
         public float SssSkinDitherIntensity = 0.0f;
 
         public Texture SssSkinNoiseTexture;

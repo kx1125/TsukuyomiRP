@@ -1,6 +1,23 @@
 #ifndef TSUKUYOMI_SPECULAR_PBR_MATH_INCLUDED
 #define TSUKUYOMI_SPECULAR_PBR_MATH_INCLUDED
 
+
+// Both native Skin and texture adapters use the same projected coordinates.
+float2 SpecularPBRScreenUV(float2 positionCS)
+{
+    float2 uv = positionCS / GetScaledScreenParams().xy;
+    TransformNormalizedScreenUV(uv);
+#if defined(UNITY_PRETRANSFORM_TO_DISPLAY_ORIENTATION)
+    switch (UNITY_DISPLAY_ORIENTATION_PRETRANSFORM)
+    {
+        case UNITY_DISPLAY_ORIENTATION_PRETRANSFORM_90: return float2(1 - uv.y, uv.x);
+        case UNITY_DISPLAY_ORIENTATION_PRETRANSFORM_180: return float2(1 - uv.x, 1 - uv.y);
+        case UNITY_DISPLAY_ORIENTATION_PRETRANSFORM_270: return float2(uv.y, 1 - uv.x);
+    }
+#endif
+    return uv;
+}
+
 float3 SpecularPBRRasterNormal(float3 normalWS, float3 viewDirectionWS)
 {
     // A visible rasterized triangle can have a back-facing interpolated or

@@ -4,6 +4,10 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep Rect Light and RT Shadow fallback SRVs valid throughout Editor Play/Edit transitions, preventing D3D12 from skipping OpenPBR and Studio Hair draws after stopping Play mode. Per-camera RT resources are still released on exit.
+
 ## [0.2.0] - 2026-09-29
 
 ### Added

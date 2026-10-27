@@ -1,0 +1,6 @@
+{
+    "name": "Tsukuyomi.Rendering.GlobalBufferTests",
+    "references": ["Tsukuyomi.Rendering"],
+    "includePlatforms": ["Editor"],
+    "optionalUnityReferences": ["TestAssemblies"]
+}

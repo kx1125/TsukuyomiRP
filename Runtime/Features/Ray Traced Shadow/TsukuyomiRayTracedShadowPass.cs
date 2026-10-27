@@ -152,16 +152,13 @@ namespace Tsukuyomi.Rendering
 #if UNITY_EDITOR
         private static void OnPlayModeStateChanged(UnityEditor.PlayModeStateChange state)
         {
+            // Reset bindings before retiring camera resources. Editor cameras can
+            // still draw during the transition, so the empty SRVs and white array
+            // must survive ExitingPlayMode, even with domain reload disabled.
+            s_ShuttingDown = false;
+            ClearGlobals();
             if (state == UnityEditor.PlayModeStateChange.ExitingPlayMode)
-                ReleaseAll();
-            else if (state == UnityEditor.PlayModeStateChange.EnteredEditMode
-                || state == UnityEditor.PlayModeStateChange.EnteredPlayMode)
-            {
-                // Also handles Play mode with domain reload disabled. The fallback
-                // must exist even when this camera has no ray-traced shadow lights.
-                s_ShuttingDown = false;
-                ClearGlobals();
-            }
+                foreach (var pass in s_Instances) pass.ReleaseCameras();
         }
 #endif
         private static void ClearCamera(ScriptableRenderContext context, Camera camera) => ClearGlobals();

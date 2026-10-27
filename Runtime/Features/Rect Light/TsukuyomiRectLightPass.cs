@@ -84,14 +84,11 @@ namespace Tsukuyomi.Rendering
 #if UNITY_EDITOR
         private static void OnPlayModeStateChanged(UnityEditor.PlayModeStateChange state)
         {
-            if (state == UnityEditor.PlayModeStateChange.ExitingPlayMode)
-                ReleaseFallback();
-            else if (state == UnityEditor.PlayModeStateChange.EnteredEditMode
-                || state == UnityEditor.PlayModeStateChange.EnteredPlayMode)
-            {
-                s_ShuttingDown = false;
-                ClearGlobals();
-            }
+            // Editor cameras can draw between ExitingPlayMode and EnteredEditMode.
+            // Keep the fallback alive throughout the transition, including when
+            // domain reload is disabled. Shutdown/reinitialization handles disposal.
+            s_ShuttingDown = false;
+            ClearGlobals();
         }
 #endif
         private static void ClearCamera(ScriptableRenderContext context, Camera camera) => ClearGlobals();

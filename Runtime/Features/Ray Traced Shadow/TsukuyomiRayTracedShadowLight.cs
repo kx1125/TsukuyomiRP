@@ -29,7 +29,11 @@ namespace Tsukuyomi.Rendering
                 var light = Light;
                 return isActiveAndEnabled && gameObject.activeInHierarchy && ShadowMode == RayTracedShadowMode.RayTraced
                     && light && light.isActiveAndEnabled && light.shadows != LightShadows.None
+#if UNITY_EDITOR
                     && light.lightmapBakeType != LightmapBakeType.Baked
+#else
+                    && light.bakingOutput.lightmapBakeType != LightmapBakeType.Baked
+#endif
                     && light.intensity > 0 && float.IsFinite(light.intensity)
                     && light.shadowStrength > 0 && float.IsFinite(SourceRadius) && SourceRadius >= 0
                     && float.IsFinite(AngularDiameter) && AngularDiameter >= 0

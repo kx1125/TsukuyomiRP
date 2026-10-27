@@ -40,7 +40,6 @@ namespace UnityRhi.Dlss.Urp
         private readonly Dictionary<(CameraId cameraId, int eye), DlssNrCameraContext> _contexts = new();
         private readonly Dictionary<(CameraId cameraId, int eye), Camera> _contextCameras = new();
         private readonly List<(CameraId cameraId, int eye)> _deadKeys = new();
-        private bool _warnedUnavailable;
         private bool _warnedHdr;
         private bool _warnedFailure;
         private bool _loggedSrStack;

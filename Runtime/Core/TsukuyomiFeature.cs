@@ -456,14 +456,6 @@ namespace Tsukuyomi.Rendering
                 renderer.EnqueuePass(bridge);
         }
 
-        private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled, bool ssgiEnabled, bool scanEnabled)
-        {
-            return (contactShadowDenoiseEnabled && PassRegistry.PassRequiresBuiltinTexture(_contactShadowDenoisePass, BuiltinTexture.CameraNormals))
-                || (gtaoEnabled && PassRegistry.PassRequiresBuiltinTexture(_gtaoPass, BuiltinTexture.CameraNormals))
-                || (ssgiEnabled && PassRegistry.PassRequiresBuiltinTexture(_ssgiPass, BuiltinTexture.CameraNormals))
-                || (scanEnabled && PassRegistry.PassRequiresBuiltinTexture(_scanMainPass, BuiltinTexture.CameraNormals))
-                || (_registry != null && _registry.RequiresBuiltinTexture(BuiltinTexture.CameraNormals));
-        }
         private RenderPassEvent MapInjectionPointToEvent(InjectionPoint point)
         {
             return point switch

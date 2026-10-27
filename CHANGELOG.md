@@ -4,6 +4,11 @@ All notable changes to this package are documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- Removed twelve unreferenced legacy character and lighting HLSL files and the unused FSR3 mipmap-bias callback implementation.
+- Removed the unused FSR3 settings UI, camera-normal requirement helper, private fields, and commented-out particle and SSGI code.
+
 ## [0.2.1] - 2026-10-16
 
 ### Added

@@ -18,12 +18,6 @@ namespace Tsukuyomi.Rendering
     [DisplayInfo(name = "Sss Skin Volume")]
     public sealed class TsukuyomiSssSkinVolume : VolumeComponent
     {
-        [HideInInspector] // Retained only for serialized asset migration.
-        public BoolParameter studioCompatibility = new(false);
-        [HideInInspector] // Retained only for serialized asset migration.
-        public ClampedFloatParameter studioWorldScale = new(.1f,.0001f,10f);
-        [HideInInspector] // Retained only for serialized asset migration.
-        public ClampedFloatParameter studioReferenceFieldOfView = new(60f,1f,179f);
         public BoolParameter enable = new(false, BoolParameter.DisplayType.EnumPopup);
         public TsukuyomiSssSkinQualityParameter quality = new(TsukuyomiSssSkinQuality.High);
         public ClampedFloatParameter scatteringRadius = new(1.0f, 0.0f, 10.0f);

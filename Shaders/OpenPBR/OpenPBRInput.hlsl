@@ -4,6 +4,11 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/SurfaceInput.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/SurfaceType.hlsl"
 
+// Adapters may add shared material fields without copying the native input.
+#ifndef TSUKUYOMI_OPENPBR_EXTRA_MATERIAL_PROPERTIES
+#define TSUKUYOMI_OPENPBR_EXTRA_MATERIAL_PROPERTIES
+#endif
+
 // Keep the material constant buffer stable across variants for SRP Batcher.
 CBUFFER_START(UnityPerMaterial)
 float4 _BaseMap_ST;
@@ -39,6 +44,7 @@ float4 _OpenPBRFuzzColor;
 float _OpenPBRFuzzRoughness;
 float _OpenPBRCoatNormalScale;
 float _Cull;
+TSUKUYOMI_OPENPBR_EXTRA_MATERIAL_PROPERTIES
 CBUFFER_END
 
 #ifdef UNITY_DOTS_INSTANCING_ENABLED

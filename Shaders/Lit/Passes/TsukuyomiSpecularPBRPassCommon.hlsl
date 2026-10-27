@@ -1,12 +1,7 @@
 #ifndef TSUKUYOMI_SPECULAR_PBR_PASS_COMMON_INCLUDED
 #define TSUKUYOMI_SPECULAR_PBR_PASS_COMMON_INCLUDED
 
-#if defined(STUDIO_SURFACE)
-#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/OpenPBR/TsukuyomiOpenPBRURP.hlsl"
-#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Lighting/TsukuyomiLightingData.hlsl"
-#else
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Lighting/TsukuyomiSpecularPBRLighting.hlsl"
-#endif
 #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/SSGI/TsukuyomiScreenSpaceGlobalIllumination.hlsl"
 
 #if defined(LOD_FADE_CROSSFADE)
@@ -36,7 +31,7 @@ struct TsukuyomiSpecularPBRVaryings
     float2 studioOverlay : TEXCOORD7;
     float3 studioVertexColor : TEXCOORD11;
 #endif
-#if defined(_STUDIO_SKIN) || defined(STUDIO_SURFACE)
+#if defined(_STUDIO_SKIN)
     float3 studioBitangentWS : TEXCOORD12;
 #endif
     float3 positionWS : TEXCOORD1;
@@ -78,7 +73,7 @@ void TsukuyomiSpecularPBRInitializeInputData(TsukuyomiSpecularPBRVaryings input,
 
 #if defined(_NORMALMAP) || defined(ENABLE_DETAIL_NORMALMAP)
     float tangentSign = input.tangentWS.w;
-#if defined(_STUDIO_SKIN) || defined(STUDIO_SURFACE)
+#if defined(_STUDIO_SKIN)
     float3 bitangent = input.studioBitangentWS;
 #else
     float3 bitangent = tangentSign * cross(input.normalWS.xyz, input.tangentWS.xyz);
@@ -185,12 +180,9 @@ TsukuyomiSpecularPBRVaryings TsukuyomiSpecularPBRForwardVertex(TsukuyomiSpecular
     output.normalWS = normalInput.normalWS;
 
     real sign = input.tangentOS.w * GetOddNegativeScale();
-#if defined(_STUDIO_SKIN) || defined(STUDIO_SURFACE)
+#if defined(_STUDIO_SKIN)
     output.tangentWS = half4(normalize(normalInput.tangentWS.xyz), sign);
     output.studioBitangentWS=sign*cross(normalize(normalInput.normalWS),normalize(normalInput.tangentWS));
-#if defined(STUDIO_SURFACE)
-    if(IsStudioHair()) output.studioBitangentWS=normalize(output.studioBitangentWS);
-#endif
 #else
     output.tangentWS = half4(normalInput.tangentWS.xyz, sign);
 #endif
@@ -219,11 +211,11 @@ TsukuyomiSpecularPBRVaryings TsukuyomiSpecularPBRForwardVertex(TsukuyomiSpecular
 
 
 
-TsukuyomiOpenPBRPrepared PrepareSpecularPBR(SurfaceData surfaceData, InputData inputData, TsukuyomiSpecularPBRVaryings input, float anisotropy = 0)
+TsukuyomiOpenPBRPrepared PrepareSpecularPBR(SurfaceData surfaceData, InputData inputData, TsukuyomiSpecularPBRVaryings input)
 {
     TsukuyomiOpenPBRMaterial m = TsukuyomiOpenPBRFromURPSurface(surfaceData);
     m.specularIOR = 1.5;
-    m.anisotropy = anisotropy;
+    m.anisotropy = 0;
     TsukuyomiOpenPBRGeometry g;
     // input.normalWS is a smooth vertex normal, not the rasterized face normal.
     // It needs the same view-hemisphere correction as the shading normal.

@@ -5,10 +5,6 @@
 #define _STUDIO_SKIN 1
 #endif
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/StudioMaterialData.hlsl"
-void StudioDepthAlpha(float2 uv,float2 screenPixel)
-{
-    Alpha(SampleAlbedoAlpha(uv,TEXTURE2D_ARGS(_BaseMap,sampler_BaseMap)).a,_BaseColor,_Cutoff);
-}
 #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/StudioSkinLayers.hlsl"
 half4 SampleSpecularPBRMask(float2 uv)
 {

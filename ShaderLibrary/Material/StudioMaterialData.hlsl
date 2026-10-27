@@ -62,10 +62,7 @@
     M(float4, _VeinColor) \
     M(float4, _StudioSubColor) \
     M(float4, _StudioSubAdjust) \
-    M(float, _StudioAlbedoGain) \
-    M(float, _StudioUnitsPerWorldUnit) \
-    M(float, _StudioPunctualShadowBias) \
-    M(float, _StudioSpotShadowNear)
+    M(float, _StudioAlbedoGain)
 TEXTURE2D(_PBRMask);
 SAMPLER(sampler_PBRMask);
 TEXTURE2D(_DetailNormalMap);
@@ -82,90 +79,6 @@ SAMPLER(sampler_PoreMap);
 SAMPLER(sampler_BodyRegionMap);
 SAMPLER(sampler_FaceBrowMap);
 TEXTURE2D(_FaceBrowMap);
-
-#elif defined(STUDIO_SURFACE)
-#define STUDIO_MATERIAL_PROPERTIES(M, I) \
-    M(float4, _BaseMap_ST) \
-    M(float4, _BaseMap_TexelSize) \
-    I(float4, _BaseColor) \
-    I(float4, _EmissionColor) \
-    I(float, _Cutoff) \
-    I(float, _Roughness) \
-    I(float, _Metallic) \
-    I(float, _BumpScale) \
-    I(float, _BumpTile) \
-    I(float, _DetailNormalMapScale) \
-    I(float, _DetailNormalMapTile) \
-    I(float, _MicroShadowOpacity) \
-    I(float, _IndirectDiffuseIntensity) \
-    I(float, _IndirectSpecularIntensity) \
-    I(float, _HorizonOcclusionPower) \
-    M(float, _Cull) \
-    M(float, _SourceMode) \
-    M(float, _SourceGloss) \
-    M(float4, _AITPattern) \
-    M(float4, _AITDetailUV1) \
-    M(float4, _AITDetailUV2) \
-    M(float4, _AITRotation) \
-    M(float4, _AITDetail1) \
-    M(float4, _AITDetail2) \
-    M(float4, _AITWeatherUV) \
-    M(float4, _SourceDetailMap_ST) \
-    M(float, _AITDither) \
-    M(float, _AITAlphaEx) \
-    M(float, _AITCurvature) \
-    M(float, _AITOcclusion) \
-    M(float, _HairTopPower) \
-    M(float, _HairTipPower) \
-    M(float, _Opacity) \
-    M(float, _WetEffect) \
-    M(float, _HairAnisotropy) \
-    M(float, _HairNoiseStrength) \
-    M(float, _StudioLashes) \
-    M(float, _StudioLashCutout) \
-    M(float4, _ClothBaseTint) \
-    M(float4, _ClothColor2) \
-    M(float4, _ClothColor3) \
-    M(float4, _ClothColor4) \
-    M(float4, _ClothGloss) \
-    M(float4, _ClothGlossWeight) \
-    M(float4, _ClothMetal) \
-    M(float4, _ClothMetalWeight) \
-    M(float, _StudioUnitsPerWorldUnit) \
-    M(float, _StudioPunctualShadowBias) \
-    M(float, _StudioSpotShadowNear) \
-    M(float4, _HairTopColor) \
-    M(float4, _HairTipColor) \
-    M(float4, _HairNoiseMap_ST) \
-    M(float4, _IrisColor) \
-    M(float4, _PupilColor) \
-    M(float4, _HighlightColor) \
-    M(float4, _IrisUV) \
-    M(float4, _PupilUV) \
-    M(float4, _EyeBaseOffset) \
-    M(float, _EyeParallax) \
-    M(float, _EyeEmission) \
-    M(float, _EyeOcclusionStrength)
-TEXTURE2D(_PBRMask);
-SAMPLER(sampler_PBRMask);
-TEXTURE2D(_OcclusionMap);
-SAMPLER(sampler_OcclusionMap);
-TEXTURE2D(_DetailNormalMap);
-TEXTURE2D(_SourceDetailMap);
-TEXTURE2D(_SourceGlossMap);
-SAMPLER(sampler_SourceGlossMap);
-TEXTURE2D(_PoreMap);
-TEXTURE2D(_HairGradeMap);
-TEXTURE2D(_IrisMap);
-SAMPLER(sampler_IrisMap);
-TEXTURE2D(_PupilMap);
-TEXTURE2D(_WetMap);
-TEXTURE2D(_HairNoiseMap);
-SAMPLER(sampler_HairNoiseMap);
-TEXTURE2D(_ClothColorMask);
-TEXTURE2D(_ClothPackedMap);
-TEXTURE2D(_AITDetailMap2);
-TEXTURE2D(_AITWeatherMask);
 
 #elif defined(STUDIO_EYE_SHADOW)
 #define STUDIO_MATERIAL_PROPERTIES(M, I) \
@@ -217,20 +130,6 @@ void SetupStudioMaterialPropertyCaches()
 #define TransmissionShadows studioTransmissionShadows
 #define TransmissionRange studioTransmissionRange
 #define DynamicPassTransmission studioDynamicPassTransmission
-#define _MicroShadowOpacity studio_MicroShadowOpacity
-#define _IndirectDiffuseIntensity studio_IndirectDiffuseIntensity
-#define _IndirectSpecularIntensity studio_IndirectSpecularIntensity
-#define _HorizonOcclusionPower studio_HorizonOcclusionPower
-#elif defined(STUDIO_SURFACE)
-#define _BaseColor studio_BaseColor
-#define _EmissionColor studio_EmissionColor
-#define _Cutoff studio_Cutoff
-#define _Roughness studio_Roughness
-#define _Metallic studio_Metallic
-#define _BumpScale studio_BumpScale
-#define _BumpTile studio_BumpTile
-#define _DetailNormalMapScale studio_DetailNormalMapScale
-#define _DetailNormalMapTile studio_DetailNormalMapTile
 #define _MicroShadowOpacity studio_MicroShadowOpacity
 #define _IndirectDiffuseIntensity studio_IndirectDiffuseIntensity
 #define _IndirectSpecularIntensity studio_IndirectSpecularIntensity

@@ -6,9 +6,6 @@
 #endif
 #include TSUKUYOMI_MATERIAL_INPUT
 
-#ifndef TSUKUYOMI_DEPTH_ALPHA
-#define TSUKUYOMI_DEPTH_ALPHA(uv, pixel) Alpha(SampleAlbedoAlpha(uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap)).a, _BaseColor, _Cutoff)
-#endif
 #ifndef TSUKUYOMI_DEPTH_NORMAL
 #define TSUKUYOMI_DEPTH_NORMAL(uv) SampleSpecularPBRNormal(uv)
 #endif
@@ -66,7 +63,7 @@ void TsukuyomiSpecularPBRDepthNormalsFragment(
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
 #if defined(_ALPHATEST_ON)
-    TSUKUYOMI_DEPTH_ALPHA(input.uv,input.positionCS.xy);
+    Alpha(SampleAlbedoAlpha(input.uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap)).a, _BaseColor, _Cutoff);
 #endif
 
 #if defined(LOD_FADE_CROSSFADE)

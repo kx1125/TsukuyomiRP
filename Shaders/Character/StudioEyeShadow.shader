@@ -2,7 +2,6 @@ Shader "TsukuyomiRP/Character/Studio EyeShadow"
 {
     Properties
     {
-        _StudioShadowSlopeOffset("Studio Shadow Slope Offset", Float) = -1.5
         _StudioEyeShadowScale("Studio Eye Shadow Scale", Float) = .5
         [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend("Source Blend", Float) = 1
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend("Destination Blend", Float) = 0
@@ -24,7 +23,6 @@ Shader "TsukuyomiRP/Character/Studio EyeShadow"
         HLSLINCLUDE
         #define STUDIO_EYE_SHADOW 1
         #define TSUKUYOMI_MATERIAL_INPUT "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/StudioEyeShadowInput.hlsl"
-        #define TSUKUYOMI_DEPTH_ALPHA(uv, pixel) StudioDepthAlpha(uv, pixel)
         #define TSUKUYOMI_DEPTH_NORMAL(uv) half3(0,0,1)
         ENDHLSL
 
@@ -53,9 +51,6 @@ Shader "TsukuyomiRP/Character/Studio EyeShadow"
         {
             Name "ShadowCaster"
             Tags { "LightMode" = "ShadowCaster" }
-            // URP supplies (constant=1, slope=2.5); Studio's GPU state is (1,1).
-            // Per-shader Offset is additive to CommandBuffer.SetGlobalDepthBias.
-            Offset [_StudioShadowSlopeOffset], 0
 
             ZWrite On
             ZTest LEqual
@@ -74,7 +69,7 @@ Shader "TsukuyomiRP/Character/Studio EyeShadow"
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
             #include TSUKUYOMI_MATERIAL_INPUT
-            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Character/Passes/StudioShadowCasterPass.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/ShadowCasterPass.hlsl"
             ENDHLSL
         }
 
@@ -98,7 +93,7 @@ Shader "TsukuyomiRP/Character/Studio EyeShadow"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include TSUKUYOMI_MATERIAL_INPUT
-            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Character/Passes/StudioDepthOnlyPass.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/DepthOnlyPass.hlsl"
             ENDHLSL
         }
 
@@ -111,7 +106,6 @@ Shader "TsukuyomiRP/Character/Studio EyeShadow"
             Cull[_Cull]
 
             HLSLPROGRAM
-            #define STUDIO_GEOMETRIC_SKIN_DEPTH 1
             #include TSUKUYOMI_MATERIAL_INPUT
             #pragma target 4.5
             #pragma vertex TsukuyomiSpecularPBRDepthNormalsVertex

@@ -24,10 +24,6 @@ Shader "TsukuyomiRP/Character/Studio Skin"
         _StudioSubColor("Subsurface Base Color", Color) = (0.96,1,1,1)
         _StudioSubAdjust("Subsurface Hue Contrast Brightness Saturation", Vector) = (0,.5,.5,.5)
         _StudioAlbedoGain("Source Scattered Albedo Gain", Float) = 1.3
-        _StudioUnitsPerWorldUnit("Studio Units Per World Unit", Float) = 10
-        _StudioPunctualShadowBias("Studio Punctual Shadow Bias", Float) = .0015
-        _StudioSpotShadowNear("Studio Spot Shadow Near Plane", Float) = .1
-        _StudioShadowSlopeOffset("Studio Shadow Slope Offset", Float) = -1.5
         _VeinColor("Vein Color", Color) = (0.5686,0.9294,0.949,1)
         _VeinOpacity("Vein Opacity", Range(0,1)) = 0
         _WetMap("Wet Streaks (R), Region (G), Splats (B)", 2D) = "black" {}
@@ -97,7 +93,6 @@ Shader "TsukuyomiRP/Character/Studio Skin"
         HLSLINCLUDE
         #define _STUDIO_SKIN 1
         #define TSUKUYOMI_MATERIAL_INPUT "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/Material/StudioSkinInput.hlsl"
-        #define TSUKUYOMI_DEPTH_ALPHA(uv, pixel) StudioDepthAlpha(uv, pixel)
         #define TSUKUYOMI_DEPTH_NORMAL(uv) half3(0,0,1)
         ENDHLSL
 
@@ -170,9 +165,6 @@ Shader "TsukuyomiRP/Character/Studio Skin"
         {
             Name "ShadowCaster"
             Tags { "LightMode" = "ShadowCaster" }
-            // URP supplies (constant=1, slope=2.5); Studio's GPU state is (1,1).
-            // Per-shader Offset is additive to CommandBuffer.SetGlobalDepthBias.
-            Offset [_StudioShadowSlopeOffset], 0
 
             ZWrite On
             ZTest LEqual
@@ -191,7 +183,7 @@ Shader "TsukuyomiRP/Character/Studio Skin"
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
             #include TSUKUYOMI_MATERIAL_INPUT
-            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Character/Passes/StudioShadowCasterPass.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/ShadowCasterPass.hlsl"
             ENDHLSL
         }
 
@@ -215,7 +207,7 @@ Shader "TsukuyomiRP/Character/Studio Skin"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include TSUKUYOMI_MATERIAL_INPUT
-            #include "Packages/tsukuyomi.render-pipelines.universal/Shaders/Character/Passes/StudioDepthOnlyPass.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/DepthOnlyPass.hlsl"
             ENDHLSL
         }
 

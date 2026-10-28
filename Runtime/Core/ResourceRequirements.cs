@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
@@ -9,33 +8,71 @@ namespace Tsukuyomi.Rendering
 {
     public enum ResourceRequirementStatus { NotRequested, Pending, Ready, MissingProducer, Unsupported, OrderConflict }
 
-    /// <summary>One packed min-depth variant. Mip count is a coverage request; compatible requests share a full pyramid.</summary>
-    public readonly struct DepthPyramidRequest : IEquatable<DepthPyramidRequest>
+    /// <summary>A pass-defined request, resolved by that pass's resource producer.</summary>
+    public readonly struct ResourceRequest<T> where T : struct
     {
-        public readonly BuiltinTexture Source;
-        public readonly RenderPassEvent GenerationEvent;
-        public readonly GraphicsFormat Format;
-        public readonly int CheckerboardMipCount;
-        public readonly int MipCount;
+        public readonly RenderPassBase Consumer;
+        public readonly RenderPassEvent ConsumerEvent;
+        public readonly T Request;
+        public readonly ResourceRequirementStatus Status;
+        internal ResourceRequest(RenderPassBase consumer, RenderPassEvent consumerEvent, in T request, ResourceRequirementStatus status)
+        { Consumer = consumer; ConsumerEvent = consumerEvent; Request = request; Status = status; }
+    }
 
-        public DepthPyramidRequest(int mipCount, BuiltinTexture source = BuiltinTexture.CameraDepthTexture,
-            RenderPassEvent generationEvent = RenderPassEvent.AfterRenderingPrePasses,
-            GraphicsFormat format = GraphicsFormat.R32_SFloat, int checkerboardMipCount = 0)
+    internal interface IResourceRequestSet
+    {
+        int Count { get; }
+        ResourceRequirementStatus GetStatus(RenderPassBase consumer);
+        void Complete();
+        void ReportFailures();
+        void Clear();
+    }
+
+    /// <summary>Typed, reused storage. Providers classify only requests they understand.</summary>
+    public sealed class ResourceRequestSet<T> : IResourceRequestSet where T : struct
+    {
+        private readonly List<ResourceRequest<T>> _entries = new();
+        private int _reportedFailures;
+        public int Count => _entries.Count;
+        public ResourceRequest<T> this[int index] => _entries[index];
+        internal void Add(RenderPassBase consumer, RenderPassEvent stage, in T request)
+            => _entries.Add(new ResourceRequest<T>(consumer, stage, request, ResourceRequirementStatus.Pending));
+        public void SetStatus(int index, ResourceRequirementStatus status)
         {
-            Source = source;
-            GenerationEvent = generationEvent;
-            Format = format;
-            CheckerboardMipCount = checkerboardMipCount;
-            MipCount = mipCount;
+            var entry = _entries[index];
+            _entries[index] = new ResourceRequest<T>(entry.Consumer, entry.ConsumerEvent, entry.Request, status);
         }
-
-        public bool Equals(DepthPyramidRequest other) => Source == other.Source && GenerationEvent == other.GenerationEvent
-            && Format == other.Format && CheckerboardMipCount == other.CheckerboardMipCount;
-        public override bool Equals(object obj) => obj is DepthPyramidRequest other && Equals(other);
-        public override int GetHashCode() => HashCode.Combine((int)Source, (int)GenerationEvent, (int)Format, CheckerboardMipCount);
-        internal bool Supported => Source == BuiltinTexture.CameraDepthTexture
-            && GenerationEvent == RenderPassEvent.AfterRenderingPrePasses && Format == GraphicsFormat.R32_SFloat
-            && CheckerboardMipCount == 0 && MipCount > 0 && MipCount <= 15;
+        public ResourceRequirementStatus GetStatus(RenderPassBase consumer)
+        {
+            var result = ResourceRequirementStatus.NotRequested;
+            foreach (var entry in _entries)
+            {
+                if (!ReferenceEquals(entry.Consumer, consumer)) continue;
+                result = entry.Status;
+                if (result != ResourceRequirementStatus.Ready) return result;
+            }
+            return result;
+        }
+        void IResourceRequestSet.Complete()
+        {
+            for (int i = 0; i < _entries.Count; i++)
+                if (_entries[i].Status == ResourceRequirementStatus.Pending)
+                    SetStatus(i, ResourceRequirementStatus.MissingProducer);
+        }
+        void IResourceRequestSet.ReportFailures()
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            foreach (var entry in _entries)
+            {
+                if (entry.Status <= ResourceRequirementStatus.Ready) continue;
+                int bit = 1 << (int)entry.Status;
+                if ((_reportedFailures & bit) != 0) continue;
+                _reportedFailures |= bit;
+                Debug.LogWarning($"Tsukuyomi resource {typeof(T).Name}: {entry.Status} for '{entry.Consumer.Name}'. The consumer will be skipped.");
+            }
+#endif
+        }
+        void IResourceRequestSet.Clear() => _entries.Clear();
     }
 
     public readonly ref struct ResourceRequirementCollector
@@ -49,27 +86,26 @@ namespace Tsukuyomi.Rendering
             _consumer = consumer;
             _consumerEvent = consumerEvent;
         }
-        public void RequireDepthPyramid() => RequireDepthPyramid(new DepthPyramidRequest(mipCount: 15));
-        public void RequireDepthPyramid(in DepthPyramidRequest request) => _requirements.Add(_consumer, _consumerEvent, request);
+        public void Require<T>(in T request) where T : struct
+            => _requirements.GetRequests<T>().Add(_consumer, _consumerEvent, request);
     }
 
     /// <summary>Owned by the current URP camera invocation. Contains no transient graph handles.</summary>
     public sealed class ResourceRequirements : ContextItem
     {
-        private struct Entry
-        {
-            public RenderPassBase Consumer;
-            public RenderPassEvent ConsumerEvent;
-            public DepthPyramidRequest Request;
-            public ResourceRequirementStatus Status;
-        }
-        private readonly List<Entry> _entries = new();
-        private int _reportedFailures;
+        private readonly Dictionary<Type, IResourceRequestSet> _requests = new();
         public ulong Invocation { get; private set; }
         public Camera Camera { get; private set; }
-        public int DepthPyramidMipCount { get; private set; }
-        public bool NeedsDepthPyramid { get; private set; }
-        public int RequestCount => _entries.Count;
+        public int RequestCount
+        {
+            get { int count = 0; foreach (var set in _requests.Values) count += set.Count; return count; }
+        }
+        public ResourceRequestSet<T> GetRequests<T>() where T : struct
+        {
+            if (!_requests.TryGetValue(typeof(T), out var set))
+            { set = new ResourceRequestSet<T>(); _requests.Add(typeof(T), set); }
+            return (ResourceRequestSet<T>)set;
+        }
 
         // Called for EVERY AddRenderPasses, including repeat renders within one Time.frameCount.
         public void Begin(Camera camera)
@@ -85,41 +121,16 @@ namespace Tsukuyomi.Rendering
             pass.CollectResourceRequirements(frame, new ResourceRequirementCollector(this, pass, consumerEvent));
         }
 
-        internal void Add(RenderPassBase consumer, RenderPassEvent consumerEvent, in DepthPyramidRequest request)
-        {
-            _entries.Add(new Entry { Consumer = consumer, ConsumerEvent = consumerEvent, Request = request,
-                Status = ResourceRequirementStatus.Pending });
-        }
-
-        // First classify independent requests. Unsupported variants do not poison compatible consumers.
-        public bool ResolveDepthPyramid(RenderPassEvent producerEvent, bool producerAvailable, bool cameraSupported)
-        {
-            NeedsDepthPyramid = false;
-            DepthPyramidMipCount = 0;
-            for (int i = 0; i < _entries.Count; i++)
-            {
-                var entry = _entries[i];
-                entry.Status = !cameraSupported || !entry.Request.Supported ? ResourceRequirementStatus.Unsupported
-                    : !producerAvailable ? ResourceRequirementStatus.MissingProducer
-                    : producerEvent != entry.Request.GenerationEvent || producerEvent >= entry.ConsumerEvent
-                        ? ResourceRequirementStatus.OrderConflict : ResourceRequirementStatus.Ready;
-                _entries[i] = entry;
-                if (entry.Status == ResourceRequirementStatus.Ready)
-                {
-                    NeedsDepthPyramid = true;
-                    DepthPyramidMipCount = Mathf.Max(DepthPyramidMipCount, entry.Request.MipCount);
-                }
-            }
-            return NeedsDepthPyramid;
-        }
+        internal void Complete() { foreach (var set in _requests.Values) set.Complete(); }
 
         public ResourceRequirementStatus GetStatus(RenderPassBase consumer)
         {
             var status = ResourceRequirementStatus.NotRequested;
-            for (int i = 0; i < _entries.Count; i++)
+            foreach (var set in _requests.Values)
             {
-                if (!ReferenceEquals(_entries[i].Consumer, consumer)) continue;
-                status = _entries[i].Status;
+                var result = set.GetStatus(consumer);
+                if (result == ResourceRequirementStatus.NotRequested) continue;
+                status = result;
                 if (status != ResourceRequirementStatus.Ready) return status;
             }
             return status;
@@ -133,24 +144,12 @@ namespace Tsukuyomi.Rendering
 
         internal void ReportFailures()
         {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            for (int i = 0; i < _entries.Count; i++)
-            {
-                var status = _entries[i].Status;
-                if (status <= ResourceRequirementStatus.Ready) continue;
-                int bit = 1 << (int)status;
-                if ((_reportedFailures & bit) != 0) continue;
-                _reportedFailures |= bit;
-                Debug.LogWarning($"Tsukuyomi Depth Pyramid: {status} for '{_entries[i].Consumer.Name}'. The consumer will be skipped.");
-            }
-#endif
+            foreach (var set in _requests.Values) set.ReportFailures();
         }
 
         public override void Reset()
         {
-            _entries.Clear();
-            NeedsDepthPyramid = false;
-            DepthPyramidMipCount = 0;
+            foreach (var set in _requests.Values) set.Clear();
             Camera = null;
         }
     }

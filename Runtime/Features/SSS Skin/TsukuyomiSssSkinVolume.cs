@@ -59,10 +59,10 @@ namespace Tsukuyomi.Rendering
         public readonly float DitherIntensity;
         public readonly Texture NoiseTexture;
 
-        private TsukuyomiSssSkinResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiSssSkinVolume volume)
+        private TsukuyomiSssSkinResolvedSettings(SssSkinPass profile, TsukuyomiSssSkinVolume volume)
         {
             HighPrecision = Resolve(volume?.highPrecision, profile.SssSkinHighPrecision);
-            Enabled = profile.EnableSssSkin && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             SkinLayerMask = profile.SssSkinLayerMask;
             Quality = Resolve(volume?.quality, profile.SssSkinQuality);
             ScatteringRadius = Resolve(volume?.scatteringRadius, profile.SssSkinScatteringRadius);
@@ -80,7 +80,7 @@ namespace Tsukuyomi.Rendering
 
         public bool IsActive => Enabled && SkinLayerMask.value != 0;
 
-        public static TsukuyomiSssSkinResolvedSettings From(TsukuyomiPipelineProfile profile, TsukuyomiSssSkinVolume volume)
+        public static TsukuyomiSssSkinResolvedSettings From(SssSkinPass profile, TsukuyomiSssSkinVolume volume)
         {
             return new TsukuyomiSssSkinResolvedSettings(profile, volume);
         }

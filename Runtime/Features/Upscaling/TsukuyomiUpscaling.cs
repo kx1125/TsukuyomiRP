@@ -262,7 +262,7 @@ namespace Tsukuyomi.Rendering
         private static void Shutdown()
         {
             s_ShuttingDown = true;
-            UnityRhi.Dlss.Urp.DlssNrRenderFeature.ShutdownManagedFeatures();
+            UnityRhi.Dlss.Urp.DlssNrBackend.ShutdownAll();
             TsukuyomiUnifiedUpscaler.ShutdownAll();
             DrainRetiredResources(true); Active = null; CurrentCamera = null;
         }

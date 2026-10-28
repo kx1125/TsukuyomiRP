@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -6,25 +7,53 @@ using UnityEngine.Rendering.Universal;
 
 namespace Tsukuyomi.Rendering
 {
-    internal sealed class TsukuyomiPostProcessPass : GraphFeaturePass
+    [Serializable]
+    [UnityEngine.Scripting.APIUpdating.MovedFrom(true, "Tsukuyomi.Rendering", "Tsukuyomi.Rendering", "PostProcessPlugin")]
+    public abstract class PostProcessPassDefinition : RenderPassBase
+    {
+        public override bool AllowMultiple => true;
+        [NonSerialized] private TsukuyomiPostProcessEffect _effect;
+        internal TsukuyomiPostProcessEffect Effect => _effect;
+        [field: NonSerialized] internal bool Prepared { get; private set; }
+        internal abstract TsukuyomiPostProcessEffect CreateEffect();
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => Prepared = !context.Frame.CameraData.isPreviewCamera && TsukuyomiRenderPipelineResourcesProvider.TryGet(out var resources)
+                && _effect.Configure(this, context.Volumes, resources);
+        public override void Deactivate(Camera camera) => Prepared = false;
+        public override void Dispose() { _effect?.Dispose(); _effect = null; }
+        public override void Build(PassPlanBuilder plan)
+        {
+            _effect = CreateEffect();
+            string group = NodeId;
+            // This shader implements precisely Bloom -> Tonemapping. Never commute user effects.
+            if (this is TonemappingPass && plan.PreviousDefinition is BloomPass bloom
+                && bloom.InjectionPoint == InjectionPoint) group = bloom.NodeId;
+            plan.Service("post/" + group, () => new TsukuyomiPostProcessPass()).Add(this);
+        }
+    }
+
+    internal sealed class TsukuyomiPostProcessPass : GraphFeaturePass, IRenderPassService
     {
         private const int UberCompositePass = 0;
 
         [Read(BuiltinTexture.ActiveColor)]
         public TextureSlot color = TextureSlot.Read("Color", BuiltinTexture.ActiveColor);
 
-        private readonly TsukuyomiPostProcessEffect[] _effects =
-        {
-            new TsukuyomiCustomBloomEffect(),
-            new TsukuyomiTonemappingEffect()
-        };
+        private TsukuyomiPostProcessEffect[] _effects = System.Array.Empty<TsukuyomiPostProcessEffect>();
+        private readonly List<PostProcessPassDefinition> _definitions = new();
 
         private readonly List<TsukuyomiPostProcessEffect> _activeEffects = new();
         // Recording scratch only. Every value is copied to a native node before another camera records.
-        private readonly TextureHandle[] _effectOutputs;
+        private TextureHandle[] _effectOutputs;
 
-        public TsukuyomiPostProcessPass() => _effectOutputs = new TextureHandle[_effects.Length];
-        private TsukuyomiPipelineProfile _profile;
+        internal void Add(PostProcessPassDefinition definition) => _definitions.Add(definition);
+        public override void Build(PassPlanBuilder plan)
+        {
+            _effects = new TsukuyomiPostProcessEffect[_definitions.Count];
+            for (int i = 0; i < _effects.Length; i++) _effects[i] = _definitions[i].Effect;
+            _effectOutputs = new TextureHandle[_effects.Length];
+            plan.Add(this, PassPlanBuilder.EventFor(_definitions[0].InjectionPoint), () => Prepared);
+        }
         private Material _uberMaterial;
         private bool _ownsUberMaterial;
 
@@ -35,23 +64,20 @@ namespace Tsukuyomi.Rendering
 
         public override string Name => "Tsukuyomi Post Processing";
 
-        public bool Configure(TsukuyomiPipelineProfile profile, VolumeStack volumeStack)
+        internal bool Prepared { get; private set; }
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => Prepared = Configure();
+        public override void Deactivate(Camera camera) => Prepared = false;
+        private bool Configure()
         {
-            _profile = profile;
             _activeEffects.Clear();
-
-            if (profile == null)
-                return false;
-
-            if (!profile.EnableTsukuyomiPostProcessing)
-                return false;
 
             if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources))
                 return false;
 
             for (int i = 0; i < _effects.Length; i++)
             {
-                if (_effects[i].Configure(profile, volumeStack, resources))
+                if (_definitions[i].Prepared)
                     _activeEffects.Add(_effects[i]);
             }
 
@@ -64,17 +90,12 @@ namespace Tsukuyomi.Rendering
         public override bool IsActive(in FrameContext frame)
         {
             return base.IsActive(frame)
-                && _profile != null
-                && _profile.EnableTsukuyomiPostProcessing
                 && _uberMaterial != null
                 && _activeEffects.Count > 0;
         }
 
-        public void Dispose()
+        public override void Dispose()
         {
-            for (int i = 0; i < _effects.Length; i++)
-                _effects[i].Dispose();
-
             if (_ownsUberMaterial)
                 CoreUtils.Destroy(_uberMaterial);
 
@@ -157,7 +178,8 @@ namespace Tsukuyomi.Rendering
             _ownsUberMaterial = false;
             if (resources.PostProcessUberMaterial != null)
             {
-                _uberMaterial = resources.PostProcessUberMaterial;
+                _uberMaterial = new Material(resources.PostProcessUberMaterial) { hideFlags = HideFlags.HideAndDontSave };
+                _ownsUberMaterial = true;
                 return true;
             }
 

@@ -12,105 +12,298 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: af9c99167c04c5d42a83befff9521b0e, type: 3}
   m_Name: TsukuyomiPipelineProfile
   m_EditorClassIdentifier: Tsukuyomi.Rendering::Tsukuyomi.Rendering.TsukuyomiPipelineProfile
-  EnablePlanarReflection: 1
-  PlanarReflectionRenderTextureScale: 0.5
-  PlanarReflectionLayerMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  EnablePCSS: 1
-  PcssFindBlockerSampleCount: 89
-  PcssPcfSampleCount: 36
-  PcssAngularDiameter: 1.94
-  PcssBlockerSearchAngularDiameter: 0.62
-  PcssMinFilterMaxAngularDiameter: 0.001
-  PcssMaxPenumbraSize: 0.41
-  PcssMaxSamplingDistance: 0.06
-  PcssMinFilterSizeTexels: 0.74
-  PcssPenumbraMaskScale: 18
-  EnablePerObjectShadow: 1
-  PerObjectShadowRenderingLayer:
-    serializedVersion: 0
-    m_Bits: 2
-  PerObjectShadowDepthBits: 32
-  PerObjectShadowTileResolution: 2048
-  PerObjectShadowLengthOffset: 500
-  EnableContactShadow: 1
-  ContactShadowComputeShader: {fileID: 0}
-  ContactShadowDenoiserComputeShader: {fileID: 0}
-  ContactShadowLength: 0.096
-  ContactShadowDistanceScaleFactor: 0.307
-  ContactShadowMaxDistance: 50
-  ContactShadowMinDistance: 0
-  ContactShadowFadeDistance: 5
-  ContactShadowFadeInDistance: 0
-  ContactShadowRayBias: 0.2
-  ContactShadowThicknessScale: 0.15
-  ContactShadowDenoiser: 0
-  ContactShadowSampleCount: 10
-  ContactShadowFilterSize: 16
-  EnableGTAO: 1
-  GtaoDownSample: 1
-  GtaoIntensity: 2.45
-  GtaoDirectLightingStrength: 0
-  GtaoRadius: 1.31
-  GtaoThickness: 0.001
-  GtaoSpatialBilateralAggressiveness: 0
-  GtaoBlurSharpness: 0
-  GtaoStepCount: 6
-  GtaoMaximumRadiusInPixels: 62
-  GtaoDirectionCount: 6
-  EnableVolumeLight: 1
-  VolumeLightDistance: 64
-  VolumeLightBaseHeight: 0
-  VolumeLightMaximumHeight: 50
-  VolumeLightEnableGround: 0
-  VolumeLightGroundHeight: 0
-  VolumeLightDensity: 0.2
-  VolumeLightAttenuationDistance: 128
-  VolumeLightEnableProbeVolumeContribution: 0
-  VolumeLightProbeVolumeContributionWeight: 1
-  VolumeLightEnableMainLightContribution: 1
-  VolumeLightAnisotropy: 0.4
-  VolumeLightScattering: 0.15
-  VolumeLightTint: {r: 1, g: 1, b: 1, a: 1}
-  VolumeLightEnableAdditionalLightsContribution: 0
-  VolumeLightMaxSteps: 128
-  VolumeLightBlurIterations: 2
-  VolumeLightTransmittanceThreshold: 0.01
-  EnableTsukuyomiPostProcessing: 1
-  EnableCustomBloom: 1
-  CustomBloomThreshold: 0.7
-  CustomBloomIntensity: 0.75
-  CustomBloomLumRangeScale: 0.2
-  CustomBloomPreFilterScale: 2.5
-  CustomBloomBlurCompositeWeight: {x: 0.3, y: 0.3, z: 0.26, w: 0.15}
-  CustomBloomTint: {r: 1, g: 1, b: 1, a: 0}
-  EnableTonemapping: 1
-  TonemappingMode: 0
-  TonemappingMaxBrightness: 1
-  TonemappingContrast: 1.11
-  TonemappingLinearSectionStart: 0.2
-  TonemappingLinearSectionLength: 0.4
-  TonemappingBlackPow: 1.29
-  TonemappingBlackMin: 0
-  EnableSssSkin: 1
-  SssSkinLayerMask:
-    serializedVersion: 2
-    m_Bits: 8
-  SssSkinQuality: 0
-  SssSkinScatteringRadius: 1
-  SssSkinScatteringIterations: 3
-  SssSkinShaderIterations: 12
-  SssSkinDepthTest: 0.3
-  SssSkinNormalTest: 0.3
-  SssSkinMaxDistance: 10
-  SssSkinColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  SssSkinRandomizedRotation: 0
-  SssSkinDitherScale: 1
-  SssSkinDitherIntensity: 0
-  SssSkinNoiseTexture: {fileID: 0}
-  Passes: []
+  _schemaVersion: 1
+  _revision: 2
+  Passes:
+  - rid: 1000
+  - rid: 1001
+  - rid: 1002
+  - rid: 1003
+  - rid: 1004
+  - rid: 1005
+  - rid: 1006
+  - rid: 1007
+  - rid: 1008
+  - rid: 1009
+  - rid: 1010
+  - rid: 1011
+  - rid: 1012
+  - rid: 1013
+  - rid: 1014
+  - rid: 1015
   GraphLayoutData: 
   references:
     version: 2
-    RefIds: []
+    RefIds:
+    - rid: 1000
+      type: {class: PlanarReflectionPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 3d45d145504b4acfad11360ab283ded7
+        Enabled: 1
+        _injectionPoint: 1
+        PlanarReflectionRenderTextureScale: 0.5
+        PlanarReflectionLayerMask:
+          serializedVersion: 2
+          m_Bits: 4294967295
+    - rid: 1001
+      type: {class: ContactShadowPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: dd76bf140aac42efbfae50a811f9dcf9
+        Enabled: 1
+        _injectionPoint: 1
+        ContactShadowLength: 0.096
+        ContactShadowDistanceScaleFactor: 0.307
+        ContactShadowMaxDistance: 50
+        ContactShadowMinDistance: 0
+        ContactShadowFadeDistance: 5
+        ContactShadowFadeInDistance: 0
+        ContactShadowRayBias: 0.2
+        ContactShadowThicknessScale: 0.15
+        ContactShadowDenoiser: 0
+        ContactShadowSampleCount: 10
+        ContactShadowFilterSize: 16
+    - rid: 1002
+      type: {class: GtaoPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: bc70b72b4cec4a60a5801f63a599270c
+        Enabled: 1
+        _injectionPoint: 1
+        GtaoDownSample: 1
+        GtaoIntensity: 2.45
+        GtaoDirectLightingStrength: 0
+        GtaoRadius: 1.31
+        GtaoThickness: 0.001
+        GtaoSpatialBilateralAggressiveness: 0
+        GtaoBlurSharpness: 0
+        GtaoStepCount: 6
+        GtaoMaximumRadiusInPixels: 62
+        GtaoDirectionCount: 6
+    - rid: 1003
+      type: {class: SsgiPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 1f7775d5acc1498ea0ead516da698a53
+        Enabled: 0
+        _injectionPoint: 1
+        SsgiHalfResolution: 1
+        SsgiDepthBufferThickness: 0.1
+        SsgiMaxRaySteps: 64
+        SsgiRayMissFallback: 3
+        SsgiEnableProbeVolumes: 1
+        SsgiDenoise: 1
+        SsgiDenoiserRadius: 0.6
+        SsgiSecondDenoiser: 0
+        SsgiHalfResolutionDenoiser: 1
+    - rid: 1004
+      type: {class: PerObjectShadowPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 21e553479b1f4559b704ee0440e71b32
+        Enabled: 1
+        _injectionPoint: 1
+        PerObjectShadowRenderingLayer:
+          serializedVersion: 0
+          m_Bits: 2
+        PerObjectShadowDepthBits: 32
+        PerObjectShadowTileResolution: 2048
+        PerObjectShadowLengthOffset: 500
+    - rid: 1005
+      type: {class: PcssPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 08c6191930a54e50b405288d4a496699
+        Enabled: 1
+        _injectionPoint: 1
+        PcssFindBlockerSampleCount: 89
+        PcssPcfSampleCount: 36
+        PcssAngularDiameter: 1.94
+        PcssBlockerSearchAngularDiameter: 0.62
+        PcssMinFilterMaxAngularDiameter: 0.001
+        PcssMaxPenumbraSize: 0.41
+        PcssMaxSamplingDistance: 0.06
+        PcssMinFilterSizeTexels: 0.74
+        PcssPenumbraMaskScale: 18
+    - rid: 1006
+      type: {class: SssSkinPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 0f358516632c4607a69b01928178259e
+        Enabled: 1
+        _injectionPoint: 1
+        SssSkinHighPrecision: 0
+        SssSkinLayerMask:
+          serializedVersion: 2
+          m_Bits: 8
+        SssSkinQuality: 0
+        SssSkinScatteringRadius: 1
+        SssSkinScatteringIterations: 3
+        SssSkinShaderIterations: 12
+        SssSkinDepthTest: 0.3
+        SssSkinNormalTest: 0.3
+        SssSkinMaxDistance: 10
+        SssSkinColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+        SssSkinRandomizedRotation: 0
+        SssSkinDitherScale: 1
+        SssSkinDitherIntensity: 0
+        SssSkinNoiseTexture: {fileID: 0}
+    - rid: 1007
+      type: {class: VolumeLightPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: c1c8e0e791754f53906aeb7248f7fa5a
+        Enabled: 1
+        _injectionPoint: 4
+        VolumeLightDistance: 64
+        VolumeLightBaseHeight: 0
+        VolumeLightMaximumHeight: 50
+        VolumeLightEnableGround: 0
+        VolumeLightGroundHeight: 0
+        VolumeLightDensity: 0.2
+        VolumeLightAttenuationDistance: 128
+        VolumeLightEnableProbeVolumeContribution: 0
+        VolumeLightProbeVolumeContributionWeight: 1
+        VolumeLightEnableMainLightContribution: 1
+        VolumeLightAnisotropy: 0.4
+        VolumeLightScattering: 0.15
+        VolumeLightTint: {r: 1, g: 1, b: 1, a: 1}
+        VolumeLightEnableAdditionalLightsContribution: 0
+        VolumeLightMaxSteps: 128
+        VolumeLightBlurIterations: 2
+        VolumeLightTransmittanceThreshold: 0.01
+    - rid: 1008
+      type: {class: VoxelTransitionPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 9847763b5a304588a89f1f910297f970
+        Enabled: 0
+        _injectionPoint: 4
+        VoxelTransition:
+          Coverage:
+            Mode: 0
+            OriginWS: {x: 0, y: 0, z: 0}
+            Progress: 1
+            Blend: 1
+            WorldProgress: 1
+            ScreenProgress: 1
+            MaxRange: 100
+            RingWidth: 5
+            NoiseStrength: 2
+          CellSize: 5
+          SamplingStrength: 1
+          DistortionStrength: 1
+          SamplingCompleted: 1
+    - rid: 1009
+      type: {class: ScanPostProcessPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 4005a31a5c2442938a3ece7d040851ad
+        Enabled: 0
+        _injectionPoint: 4
+        ScanPostProcess:
+          Coverage:
+            Mode: 0
+            OriginWS: {x: 0, y: 0, z: 0}
+            Progress: 1
+            Blend: 1
+            WorldProgress: 1
+            ScreenProgress: 1
+            MaxRange: 100
+            RingWidth: 5
+            NoiseStrength: 2
+          CellSize: 5
+          Desaturation: 1
+          TintStrength: 1
+          OutlineStrength: 1
+          FresnelStrength: 1
+          SurfaceGridStrength: 1
+          FlashStrength: 0.05
+          PulseSpeed: 2
+          BasicIntensity: 0.8
+          GridSubdivisions: 4
+          Flash: 0
+          Reveal: 1
+          Random01: 0
+          VoxelStrength: 1
+          VoxelTransitionWeight: 1
+          HorizontalGlitch: 0
+          ChromaticSplit: 0
+          GlitchStrength: 1
+          AccentColor: {r: 0, g: 0.5, b: 1, a: 1}
+          TintColor: {r: 0, g: 0.05, b: 0.1, a: 1}
+          DebugView: 0
+        ScanPostEffects: 15
+    - rid: 1010
+      type: {class: XrayRenderPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 4f5f9d0fa6104d59b9e4f9ba918bce64
+        Enabled: 0
+        _injectionPoint: 4
+        XrayRender:
+          Coverage:
+            Mode: 0
+            OriginWS: {x: 0, y: 0, z: 0}
+            Progress: 1
+            Blend: 1
+            WorldProgress: 1
+            ScreenProgress: 1
+            MaxRange: 100
+            RingWidth: 5
+            NoiseStrength: 2
+          CellSize: 5
+          Intensity: 1
+          PrimaryColor: {r: 0, g: 0.5, b: 1, a: 1}
+          SecondaryColor: {r: 1, g: 0.1, b: 0.005, a: 1}
+    - rid: 1011
+      type: {class: SpatialGridRenderPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: ab0a7ea97044427bbc76c3abfcd5592f
+        Enabled: 0
+        _injectionPoint: 4
+        SpatialGridRender:
+          OriginWS: {x: 0, y: 0, z: 0}
+          Spacing: 5
+          Radius: 40
+          LineWidth: 0.025
+          PointSize: 0.12
+          Intensity: 1
+          Color: {r: 0, g: 0.5, b: 1, a: 1}
+          Coverage: 0
+          Blend: 1
+          TransitionProgress: 1
+          WorldProgress: 1
+          ScreenProgress: 1
+          MaxRange: 100
+          RingWidth: 5
+          NoiseStrength: 2
+          PulseSpeed: 2
+    - rid: 1012
+      type: {class: BloomPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 9f13be48d1844b6bb7f07dfb27eee3b1
+        Enabled: 1
+        _injectionPoint: 4
+        CustomBloomThreshold: 0.7
+        CustomBloomIntensity: 0.75
+        CustomBloomLumRangeScale: 0.2
+        CustomBloomPreFilterScale: 2.5
+        CustomBloomBlurCompositeWeight: {x: 0.3, y: 0.3, z: 0.26, w: 0.15}
+        CustomBloomTint: {r: 1, g: 1, b: 1, a: 0}
+    - rid: 1013
+      type: {class: TonemappingPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: 90f72bba15ee47e1827057a2896a3306
+        Enabled: 1
+        _injectionPoint: 4
+        TonemappingMode: 0
+        TonemappingMaxBrightness: 1
+        TonemappingContrast: 1.11
+        TonemappingLinearSectionStart: 0.2
+        TonemappingLinearSectionLength: 0.4
+        TonemappingBlackPow: 1.29
+        TonemappingBlackMin: 0
+    - rid: 1014
+      type: {class: Fsr3MasksPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: ce95e7f737794b629170484e2e530b3c
+        Enabled: 1
+        _injectionPoint: 4
+    - rid: 1015
+      type: {class: NeuralRenderingPass, ns: Tsukuyomi.Rendering, asm: Tsukuyomi.Rendering}
+      data:
+        _nodeId: e582a3803ed5418da1f272b80888d42b
+        Enabled: 1
+        _injectionPoint: 5
+        FinalCameraInStackOnly: 1

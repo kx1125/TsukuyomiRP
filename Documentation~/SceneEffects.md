@@ -1,23 +1,23 @@
 # Scene effect APIs
 
-`TsukuyomiFeature` owns four independent camera-local rendering features:
+Profile Pass nodes assemble four independent camera-local effects:
 
-| Read-only entry | Public type | Rendering responsibility |
+| Profile node | Public API type | Rendering responsibility |
 | --- | --- | --- |
 | `VoxelTransition` | `TsukuyomiVoxelTransitionPass` | Original color reference, world-voxel sampled color, distorted color and screen-expansion weight |
 | `ScanPostProcess` | `TsukuyomiScanPostProcessPass` | Surface scan/grid, reveal, flash, voxel glitch, horizontal glitch and chromatic split |
 | `XrayRender` | `TsukuyomiXrayRenderPass` | Explicit renderer registration, target mask/private depth and highlight contribution |
 | `SpatialGridRender` | `TsukuyomiSpatialGridRenderPass` | World-space lattice points and connecting lines |
 
-The renderer owns these instances internally. Frontends call the static Pass APIs; no `RendererFeature` reference or runtime asset lookup is needed. Do not add these built-in instances to `Profile.Passes`.
+Add the corresponding Pass nodes through Graph Editor and click **Save & Apply**. Each renderer owns its runtime instances. Frontends call the static Pass APIs without a RendererFeature reference. The shared mask and composition are automatic helpers.
 
 ## Profile, Volume and runtime controls
 
-The Profile inspector exposes **VoxelTransition**, **ScanPostProcess**, **XrayRender** and **SpatialGridRender**, each with an enable switch and strongly typed parameters. New Profiles default to disabled. Add the corresponding `TsukuyomiRP/<feature>` Volume override to adjust individual parameters. Only checked Volume parameters override the Profile; inactive Volume components use Profile defaults. Scan, voxel glitch, horizontal glitch and chromatic split have separate Volume switches.
+New Profiles are empty. After adding **VoxelTransition**, **ScanPostProcess**, **XrayRender** or **SpatialGridRender** in Graph Editor and saving, the Profile Inspector exposes that node's Enabled switch and parameters. Add the corresponding `TsukuyomiRP/<feature>` Volume override to adjust individual parameters. Only checked Volume parameters override the node; inactive Volume components use node defaults. Scan, voxel glitch, horizontal glitch and chromatic split have separate Volume switches.
 
-Precedence is **Profile → checked Volume overrides → explicit static camera overrides**. A static enable override can enable a module even without Profile settings. Parameter overrides do not implicitly enable it. `ClearCamera(camera)` removes runtime overrides and returns control to Profile/Volume; it does not force the panel-controlled module off.
+Precedence is **node defaults → checked Volume overrides → explicit static camera overrides**, subject to the node's Enabled master gate. An absent or disabled node never runs, even if a static API or Volume requests activation. Parameter overrides do not implicitly enable it. `ClearCamera(camera)` removes runtime overrides and returns control to the node/Volume; it does not force the panel-controlled module off. A shared exclusion mask can run without an Xray node, but never renders Xray highlights in that case.
 
-All four Pass types expose inherited static `SetCameraEnabled`, `SetCameraParameters`, `SetCameraAnimation`, `HasCameraOverrides` and `ClearCamera`. `SetCameraParameters` copies a full parameter struct. `SetCameraAnimation` copies only origin, progress, blend and externally evaluated animated contributions, preserving live panel appearance, range and coverage mode. The static state exists before renderer creation and survives renderer recreation. It is isolated by camera and reset on subsystem registration, including Play Mode with domain reload disabled. Clear retired camera controls explicitly; destroyed camera keys are also pruned while resolving settings.
+All four Pass types expose inherited static `SetCameraEnabled`, `SetCameraParameters`, `SetCameraAnimation`, `HasCameraOverrides` and `ClearCamera`. `SetCameraParameters` copies a full parameter struct. `SetCameraAnimation` copies only origin, progress, blend and externally evaluated animated contributions, preserving live panel appearance, range and coverage mode. The static state exists before renderer creation and survives renderer recreation. It is isolated by camera and reset on subsystem registration and when returning to Edit Mode, including Play Mode with domain reload disabled. Clear retired camera controls explicitly; destroyed camera keys are also pruned while resolving settings.
 
 For an authored scan, set panel coverage to `Scan`; publish a `ScanAnimationParameters` snapshot each frame. Independent grid usage defaults to `Full`. A frontend timeline should avoid publishing complete rendering parameters every frame so artists can continue adjusting the panels.
 
@@ -78,6 +78,6 @@ Registration is copied. Positive numeric tags select the primary palette (1) or 
 
 Before transparents: target/excluded masks → voxel transition sampling → Xray contribution → shared color composition → spatial grid. Shared composition retains surface effects + target contribution, screen mix, flash, overall fade and exclusion, in that order. Spatial grid uses only the color attachment, scene depth and optional exclusion mask. It requests an intermediate color attachment explicitly, including when no other effect is enabled.
 
-After transparents and before Bloom: voxel glitch → horizontal/chromatic sampling. Bloom and tonemapping remain scheduled by the existing pipeline feature.
+After transparents and before Bloom: voxel glitch → horizontal/chromatic sampling. Bloom and tonemapping are independent Profile Pass nodes; compatible adjacent nodes can share post-process composition.
 
 The separated sampled colors and target contribution use full float precision to preserve the original shader calculation before final color storage. These transient buffers are allocated only when their modules record; standalone spatial grid needs none of them.

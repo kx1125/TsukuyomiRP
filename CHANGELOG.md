@@ -2,10 +2,31 @@
 
 All notable changes to this package are documented in this file.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-28
+
+### Added
+
+- Added Profile-authored Pass nodes with stable IDs, rendering stages, Enabled switches and serialized parameters. New Profiles start empty; Graph Editor discovers Pass types and applies validated drafts.
+- Added generic execution plans, resource requirements, shared auxiliary services, native ScriptableRenderPass adaptation and automatic type preservation for independently authored Pass assemblies.
+- Added the common `PrepareRecording` lifecycle method for resolving settings before activity checks, resource requests and recording.
+
+### Changed
+
+- Moved built-in effects, Scene Scan composition, post-processing, FSR3 masks and Neural Rendering into Profile-controlled Passes. RendererFeature now manages configuration, scheduling and lifecycle without hardcoded effect assembly.
+- Consolidated effect preparation into the corresponding Pass files and migrated the LookDev sample Profile to node configuration.
+- Made node Enabled the master gate for Profile, Volume and explicit camera controls. Shared helpers are requested only by enabled consumers; they do not implicitly enable other effects.
+- Updated the development guide for independent Pass integration, camera isolation, dependency ordering and resource ownership.
+
+### Fixed
+
+- Fixed parameter editing and live updates in the Profile Inspector and Graph Editor, pending field submission on Save & Apply, external-change conflicts, Undo/Redo identity and Inspector foldout spacing.
+- Isolated runtime settings, Volume results, histories and resources across cameras and Renderers sharing a Profile; corrected dynamic ordering and supported Camera Stack, Scene View, Preview and repeated-render handling.
+- Restored global state and released retired resources when nodes or their final consumers are disabled or removed, Profiles change, or cameras are destroyed.
+- Handled RendererFeature disable/re-enable, Play Mode transitions with or without domain reload, script reload and shutdown; reset Scene Scan camera state when returning to Edit Mode.
 
 ### Removed
 
+- Removed fixed Pass registration, obsolete effect assembly and redundant preparation wrappers. Temporary migration and validation code is excluded from the runtime package.
 - Removed twelve unreferenced legacy character and lighting HLSL files and the unused FSR3 mipmap-bias callback implementation.
 - Removed the unused FSR3 settings UI, camera-normal requirement helper, private fields, and commented-out particle and SSGI code.
 

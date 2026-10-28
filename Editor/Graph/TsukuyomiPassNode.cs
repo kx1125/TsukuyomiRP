@@ -10,13 +10,15 @@ namespace Tsukuyomi.Rendering.Editor
     public class TsukuyomiPassNode : Node
     {
         public Type PassType { get; private set; }
-        public RenderPassBase PassInstance { get; }
+        public RenderPassBase PassInstance { get; private set; }
+        internal void BindDefinition(RenderPassBase definition)
+        { PassInstance = definition; PassType = definition.GetType(); title = definition.Name; }
 
         public TsukuyomiPassNode(Type passType, RenderPassBase passInstance = null)
         {
             PassType = passType;
             PassInstance = passInstance ?? (RenderPassBase)Activator.CreateInstance(passType);
-            title = passType.Name;
+            title = PassInstance.Name;
             AddToClassList("tsukuyomi-pass-node");
             style.minWidth = 220;
             style.borderTopWidth = 1;
@@ -28,14 +30,6 @@ namespace Tsukuyomi.Rendering.Editor
             style.borderLeftColor = new Color(0.22f, 0.22f, 0.22f);
             style.borderRightColor = new Color(0.22f, 0.22f, 0.22f);
             
-            var inExec = Port.Create<Edge>(Orientation.Horizontal, Direction.Input, Port.Capacity.Multi, typeof(bool));
-            inExec.portName = "In";
-            inputContainer.Add(inExec);
-
-            var outExec = Port.Create<Edge>(Orientation.Horizontal, Direction.Output, Port.Capacity.Single, typeof(bool));
-            outExec.portName = "Out";
-            outputContainer.Add(outExec);
-
             GenerateResourcePorts();
         }
 
@@ -93,6 +87,7 @@ namespace Tsukuyomi.Rendering.Editor
 
         private static string GetPassKind(Type type)
         {
+            if (typeof(RenderPassDefinition).IsAssignableFrom(type)) return "Effect Pass";
             if (typeof(GraphFeaturePass).IsAssignableFrom(type)) return "Graph Feature (0..N nodes)";
             if (typeof(PostPass).IsAssignableFrom(type)) return "Post Pass";
             if (typeof(RasterPass).IsAssignableFrom(type)) return "Raster Pass";

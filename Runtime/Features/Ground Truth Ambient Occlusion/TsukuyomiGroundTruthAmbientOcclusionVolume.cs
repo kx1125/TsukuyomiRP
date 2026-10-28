@@ -38,10 +38,10 @@ namespace Tsukuyomi.Rendering
         public bool IsActive => Enabled && Intensity > 0.0f && Radius > 0.0f;
 
         private TsukuyomiGroundTruthAmbientOcclusionResolvedSettings(
-            TsukuyomiPipelineProfile profile,
+            GtaoPass profile,
             TsukuyomiGroundTruthAmbientOcclusionVolume volume)
         {
-            Enabled = profile.EnableGTAO && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             DownSample = Resolve(volume?.downSample, profile.GtaoDownSample);
             Intensity = Resolve(volume?.intensity, profile.GtaoIntensity);
             DirectLightingStrength = Resolve(volume?.directLightingStrength, profile.GtaoDirectLightingStrength);
@@ -55,7 +55,7 @@ namespace Tsukuyomi.Rendering
         }
 
         public static TsukuyomiGroundTruthAmbientOcclusionResolvedSettings From(
-            TsukuyomiPipelineProfile profile,
+            GtaoPass profile,
             TsukuyomiGroundTruthAmbientOcclusionVolume volume)
         {
             return new TsukuyomiGroundTruthAmbientOcclusionResolvedSettings(profile, volume);

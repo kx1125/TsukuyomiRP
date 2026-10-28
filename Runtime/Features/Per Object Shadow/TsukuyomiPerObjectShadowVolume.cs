@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine.Rendering;
 
 namespace Tsukuyomi.Rendering
@@ -20,15 +20,15 @@ namespace Tsukuyomi.Rendering
         public readonly TsukuyomiPerObjectShadowTileResolution TileResolution;
         public readonly float ShadowLengthOffset;
 
-        private TsukuyomiPerObjectShadowResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiPerObjectShadowVolume volume)
+        private TsukuyomiPerObjectShadowResolvedSettings(PerObjectShadowPass profile, TsukuyomiPerObjectShadowVolume volume)
         {
-            Enabled = profile.EnablePerObjectShadow && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             DepthBits = Resolve(volume?.depthBits, profile.PerObjectShadowDepthBits);
             TileResolution = Resolve(volume?.tileResolution, profile.PerObjectShadowTileResolution);
             ShadowLengthOffset = Resolve(volume?.shadowLengthOffset, profile.PerObjectShadowLengthOffset);
         }
 
-        public static TsukuyomiPerObjectShadowResolvedSettings From(TsukuyomiPipelineProfile profile, TsukuyomiPerObjectShadowVolume volume)
+        public static TsukuyomiPerObjectShadowResolvedSettings From(PerObjectShadowPass profile, TsukuyomiPerObjectShadowVolume volume)
         {
             return new TsukuyomiPerObjectShadowResolvedSettings(profile, volume);
         }

@@ -38,9 +38,9 @@ namespace Tsukuyomi.Rendering
         public readonly float BlackPow;
         public readonly float BlackMin;
 
-        private TsukuyomiTonemappingResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiTonemappingVolume volume)
+        private TsukuyomiTonemappingResolvedSettings(TonemappingPass profile, TsukuyomiTonemappingVolume volume)
         {
-            Enabled = profile.EnableTonemapping && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             Mode = Resolve(volume?.mode, profile.TonemappingMode);
             MaxBrightness = Resolve(volume?.maxBrightness, profile.TonemappingMaxBrightness);
             Contrast = Resolve(volume?.contrast, profile.TonemappingContrast);
@@ -56,7 +56,7 @@ namespace Tsukuyomi.Rendering
 
         public Vector4 Params1 => new(BlackPow, BlackMin, 0.0f, 0.0f);
 
-        public static TsukuyomiTonemappingResolvedSettings From(TsukuyomiPipelineProfile profile, TsukuyomiTonemappingVolume volume)
+        public static TsukuyomiTonemappingResolvedSettings From(TonemappingPass profile, TsukuyomiTonemappingVolume volume)
         {
             return new TsukuyomiTonemappingResolvedSettings(profile, volume);
         }

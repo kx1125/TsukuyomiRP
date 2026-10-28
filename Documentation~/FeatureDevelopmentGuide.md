@@ -1,679 +1,167 @@
-# TsukuyomiRP Feature 开发说明
+# Tsukuyomi Profile Pass 开发指南
 
-本文档基于 TsukuyomiRP 当前全部功能，总结后续增加渲染 Feature 时应遵循的架构与开发约定。当前实现包括 Planar Reflection、PCSS Shadow、Per Object Shadow、Contact Shadow、Depth Pyramid、GTAO、Volume Light、SSS Skin、自定义后处理链和 FSR3 Upscaler。
+## 配置和使用
 
-## 当前 Feature 总结
+`TsukuyomiFeature` 只负责配置同步、相机准备、运行时生命周期和计划入队。所有效果来自 `TsukuyomiPipelineProfile.Passes`；Profile 只保存节点配置和布局，没有效果专用字段或固定装配路径。
 
-| Feature | 实现形态 | 核心依赖 | 主要参考价值 |
-| --- | --- | --- | --- |
-| Planar Reflection | `RasterPass` + 场景组件 | 活动反射平面、额外相机矩阵、Renderer List | 场景组件注册、全局纹理清理、独立绘制视角 |
-| Contact Shadow | `ComputePass` + 可选独立降噪 Pass | Camera Depth；降噪还需要 Camera Normals | Compute 输出、同帧跨 Pass 资源、条件化子 Pass |
-| Depth Pyramid | `ComputePass`，按消费者声明共享生产 | Camera Depth、Mip 布局 Buffer | 需求合并、生产顺序检查与分层深度 |
-| GTAO | `UnsafePass` + Restore Pass | Depth Pyramid、Camera Normals、全局 Keyword | Feature 依赖链、全局状态恢复 |
-| PCSS Shadow | `UnsafePass` + Restore Pass | 主光阴影、深度、Contact/Per Object Shadow 状态 | Forward/Deferred 动态排序、多 Feature 协作 |
-| Per Object Shadow | 原生 `ScriptableRenderPass` | 主方向光、Rendering Layers、场景 Renderer 注册 | 不适合 Bridge 抽象时的例外路径、外部状态恢复 |
-| Volume Light | `GraphFeaturePass` 录制一个强类型 Unsafe 节点 + 局部光组件 | Depth、主光/附加光、可选 Probe Volume | 多阶段屏幕效果、场景组件管理 |
-| SSS Skin | `UnsafePass` | Layer Mask、深度/法线、专用 Shader Pass | 选择性 Renderer 绘制、共享 Depth Normals |
-| Post Processing | `GraphFeaturePass` 调度 Effect 节点与 Uber 合成 | Active Color、Volume Stack | 显式 Effect 输出依赖、池化合成参数 |
-| FSR3 | URP `AbstractUpscaler` | Color、Depth、Motion Vectors、跨帧 History | 不经过 `TsukuyomiFeature` 的管线扩展、时域资源生命周期 |
+新建 Profile 默认没有效果。在 Inspector 打开 Graph Editor，双击渲染阶段，在菜单中添加Pass，然后点击 **Save & Apply**。Profile Inspector 只显示已添加节点的 Enabled 和参数。节点按阶段内纵向位置排序；复制会生成新 ID。自动生产者和恢复 Pass 可在节点参数下的 **Compiled passes and dependencies** 中查看。
 
-因此新增能力前，先判断它属于：固定管线 Feature、可排序通用 Pass、后处理 Effect、原生 URP Pass，还是 Upscaler。不要默认所有功能都注册成同一种 Bridge Pass。
+Graph Editor 编辑的是草稿。修改 Inspector 后，已有草稿必须 Reload，不能覆盖外部新配置。Undo/Redo、复制和重新打开通过稳定 NodeId 对应参数。缺失Pass类型时禁止应用和迁移，先恢复程序集，避免丢失序列化数据。
 
-## 目标原则
+选中节点后可直接编辑参数及 Enabled；编辑只改变草稿，点击 **Save & Apply** 才写入 Profile 并生效。保存会提交当前输入框尚未提交的值，Profile Inspector 随后显示新配置。展开参数面板不会标记配置修改。若 Profile Inspector 已有新修改，保存会提示 Reload 并保留双方数据，不会用旧草稿覆盖它。
 
-- 不修改官方 URP 包。
-- 新 Feature 放在 TsukuyomiRP 包内独立目录中，避免和 RenderGraph 封装核心代码混在一起。
-- 固定管线能力放在 `Rendering Features` 中配置；可组合、可排序的通用 Pass 放在 `Passes` list 中。
-- 资源通过 `TsukuyomiRenderPipelineResources` 预加载，不在运行时使用 `Shader.Find`，也不要求用户手动在 RendererFeature 面板上配置 shader。
-- 管线级默认参数来自 `TsukuyomiPipelineProfile`，场景差异通过 Volume Override 覆盖。SceneScan 四个渲染功能通过相机级参数 API 驱动，项目预设与时序由项目模块管理。
-- 优先接入 TsukuyomiRP 的 RenderGraph 封装：`GraphFeaturePass`、`RasterPass`、`ComputePass`、`UnsafePass`、`TextureSlot`、`ResourceHub`。
-- Feature 有依赖时显式表达启用条件和队列顺序；不要依赖字段声明顺序或偶然的 enqueue 顺序。
-- 修改全局 keyword、全局纹理、Rendering Layer 或灯光状态的 Feature，关闭、缺少 Profile 和 `Dispose()` 时都必须恢复状态。
+**Enabled 是装配总开关。** 未添加或关闭节点不会创建其运行时，也不会参与依赖请求。Volume 和静态相机 API 只能控制已启用节点。参数顺序为节点默认值、有效 Volume override、显式相机覆盖。运行时修改节点参数后调用 `profile.NotifyChanged()`；总开关也可用 `profile.SetNodeEnabled(id, enabled)`。
 
-## 推荐目录结构
+## 最小 Pass
 
-运行时代码按 Feature 独立建目录：
-
-```text
-Packages/tsukuyomi.render-pipelines.universal/
-  Runtime/
-    Features/
-      My Feature/
-        TsukuyomiMyFeaturePass.cs
-        TsukuyomiMyFeatureVolume.cs
-        TsukuyomiMyFeatureResources.cs        可选
-        TsukuyomiMyFeatureComponent.cs        可选
-  Shaders/
-    My Feature/
-      MyFeature.shader
-      MyFeature.compute
-      MyFeature.mat
-  ShaderLibrary/
-    MyFeatureCommon.hlsl
-    MyFeatureSampling.hlsl
-```
-
-约定：
-
-- Feature 自己的 C# 文件放在 `Runtime/Features/<Feature Name>/`。
-- Feature 自己的 shader、compute、material 放在 `Shaders/<Feature Name>/`。
-- 可复用或工具性质的 HLSL 放在 `ShaderLibrary/`，例如采样、深度重建、blur、upsample、shadow helper。
-- 不要把具体 Feature 代码放进 `Runtime/Core`、`Runtime/Passes`、`Runtime/Resources`。这些目录只放框架封装。
-
-## 配置来源
-
-每个固定管线 Feature 通常有两层配置。
-
-第一层是全局默认值，写在 `TsukuyomiPipelineProfile`：
+Pass放在自己的目录或独立程序集，引用 `Tsukuyomi.Rendering`、Core RP 和 URP Runtime。不要向 Feature、Profile、Bridge、中央资源类或统一 Inspector 添加具体效果分支。
 
 ```csharp
-public bool EnableMyFeature;
+using System;
+using Tsukuyomi.Rendering;
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.Universal;
 
-[Range(0.0f, 1.0f)]
-public float MyFeatureIntensity = 0.5f;
-```
-
-第二层是场景覆盖，写 Volume Component：
-
-```csharp
-[Serializable]
-[VolumeComponentMenu("Tsukuyomi RP/My Feature")]
-public sealed class TsukuyomiMyFeatureVolume : VolumeComponent
+[Serializable, InjectionPoint(InjectionPoint.BeforePostProcess)]
+public sealed class MyPass : PostPass
 {
-    public BoolParameter enabled = new(false);
-    public ClampedFloatParameter intensity = new(0.5f, 0.0f, 1.0f);
-}
-```
+    public Shader Shader;
+    [Range(0, 1)] public float Intensity = 1;
+    [NonSerialized] private Material _material;
+    [NonSerialized] private float _intensity;
+    public override string Name => "My Pass";
+    public MyPass() => InjectionPoint = InjectionPoint.BeforePostProcess;
 
-推荐再写一个 resolved settings 结构，把 Profile 默认值和 Volume override 合并：
-
-```csharp
-internal readonly struct TsukuyomiMyFeatureResolvedSettings
-{
-    public readonly bool Enabled;
-    public readonly float Intensity;
-
-    public bool IsActive => Enabled && Intensity > 0.0f;
-
-    public static TsukuyomiMyFeatureResolvedSettings From(
-        TsukuyomiPipelineProfile profile,
-        TsukuyomiMyFeatureVolume volume)
+    public override void Initialize()
     {
-        return new TsukuyomiMyFeatureResolvedSettings(
-            Resolve(volume?.enabled, profile.EnableMyFeature),
-            Resolve(volume?.intensity, profile.MyFeatureIntensity));
+        if (Shader) _material = CoreUtils.CreateEngineMaterial(Shader);
     }
-
-    private static T Resolve<T>(VolumeParameter<T> parameter, T fallback)
+    public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
     {
-        return parameter != null && parameter.overrideState ? parameter.value : fallback;
+        _intensity = Mathf.Clamp01(Intensity);
+        // 在这里继续解析 context.Volumes 和显式相机覆盖。
     }
-}
-```
+    public override bool IsActive(in FrameContext frame)
+        => Enabled && _material && _intensity > 0;
 
-这样 pass 中只依赖 resolved settings，不直接散落读取 Profile 和 Volume。
-
-## 资源预加载
-
-默认 shader、compute、material、texture 放进 `TsukuyomiRenderPipelineResources`。
-
-新增字段：
-
-```csharp
-[Header("My Feature")]
-[SerializeField]
-private Shader myFeatureShader;
-
-[SerializeField]
-private Material myFeatureMaterial;
-
-public Shader MyFeatureShader => myFeatureShader;
-public Material MyFeatureMaterial => myFeatureMaterial;
-public bool HasMyFeatureResources => myFeatureShader != null || myFeatureMaterial != null;
-```
-
-资源资产维护在：
-
-```text
-Packages/tsukuyomi.render-pipelines.universal/Runtime/Data/TsukuyomiRenderPipelineResources.asset
-```
-
-运行时获取资源：
-
-```csharp
-if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources))
-    return false;
-
-Material material = resources.MyFeatureMaterial;
-if (material == null && resources.MyFeatureShader != null)
-    material = CoreUtils.CreateEngineMaterial(resources.MyFeatureShader);
-```
-
-要求：
-
-- 不新增 `Shader.Find`。
-- 不让用户在 `TsukuyomiFeature` 面板上拖 shader。
-- 如果必须临时创建 material，pass 需要在 `Dispose()` 中释放自己创建的 material。
-- package 内置资源变更后，需要更新 `TsukuyomiRenderPipelineResources.asset` 的引用。
-
-## RenderGraph Pass 选择
-
-优先级建议：
-
-- `GraphFeaturePass`：需要录制零到多个原生节点的 Feature，依次创建并关闭强类型节点的 Builder。
-- `RasterPass`：普通 raster 渲染、fullscreen material pass、renderer list。
-- `ComputePass`：纯 compute dispatch，读写 texture/buffer 明确。
-- `UnsafePass`：需要 `SetRenderTarget`、多阶段 blit、全局关键字、全局纹理，或需要在单个 RenderGraph pass 内维持多个内部绘制阶段。
-- `PostPass`：简单后处理，输入 active color，输出新的 active color。
-
-PCSS 使用 `UnsafePass`；Volume Light 通过 `GraphFeaturePass` 录制一个 Unsafe 节点，两者目前都保留内部多阶段命令顺序。
-
-Contact Shadow 使用 `ComputePass`，因为它是 compute 生成资源，denoise 也可以独立 compute pass。
-
-当前代码还提供以下选择依据：
-
-- Planar Reflection 使用 `RasterPass`，因为核心工作是用自定义视图/投影矩阵构建 Renderer List 并绘制场景。
-- Depth Pyramid 使用 `ComputePass`；GTAO 使用 `UnsafePass` 消费它，并用单独 Raster Restore Pass 恢复全局 keyword。
-- SSS Skin 使用 `UnsafePass`，因为它包含选定 Renderer 绘制、多个模糊阶段和最终合成。
-- Per Object Shadow 直接继承 `ScriptableRenderPass`。当功能高度依赖 URP 的 `RenderingData`、灯光索引或必须在 `AddRenderPasses()` 中动态设置 `renderPassEvent` 时，可以采用该例外，但仍必须实现 RenderGraph 记录和资源释放。
-- FSR3 不是 Renderer Feature Pass，而是 `AbstractUpscaler`。只有真正属于 URP Upscaling Filter 阶段、需要时域抖动与分辨率协商的功能才使用这条路径。
-
-### 后处理 Effect 路径
-
-Bloom、Tonemapping 这类参与同一后处理链的功能，应实现 `TsukuyomiPostProcessEffect`，由 `TsukuyomiPostProcessPass` 统一调度。Bloom 在独立节点生成辅助纹理，Tonemapping 提供合成参数，最终在 Uber 节点处理 Active Color。
-
-Effect 应负责：
-
-- 从 Profile 与对应 Volume 解析启用状态和参数；
-- 声明 `Name`，并在不可用或资源缺失时返回 inactive；
-- 记录自己的 RenderGraph/CommandBuffer 工作，但不持有其他 Effect 的临时纹理；
-- 若拥有运行时创建的 Material 或持久资源，实现释放逻辑并由 PostProcess Pass 统一调用。
-
-这种路径显式声明 Effect 输出与 Uber 合成的依赖，并通过一次 Uber 绘制交接新的 Active Color。
-
-## TextureSlot 用法
-
-`TextureSlot` 用于声明 pass 对内置渲染资源的需求，`TsukuyomiBridgePass.ConfigureInputFromTextureSlots()` 会根据 slot 自动调用 URP 的 `ConfigureInput`。
-
-示例：
-
-```csharp
-[Read(BuiltinTexture.CameraDepthTexture)]
-public TextureSlot depth = TextureSlot.Read("Depth", BuiltinTexture.CameraDepthTexture);
-
-[Read(BuiltinTexture.ActiveColor)]
-public TextureSlot color = TextureSlot.Read("Color", BuiltinTexture.ActiveColor);
-```
-
-在 `Record()` 中解析：
-
-```csharp
-TextureHandle cameraDepth = context.GetTexture(depth);
-TextureHandle cameraColor = context.GetTexture(color);
-```
-
-注意：
-
-- 需要 URP 生成 depth、normal、opaque texture 时，声明对应 `TextureSlot` 即可。
-- 不再额外添加一套 `RequiredInputs`，避免同一需求有两套状态源。
-- 临时 RenderGraph texture 不需要声明为 `TextureSlot`，直接用 `context.RenderGraph.CreateTexture()` 创建。
-- 跨 pass 共享的同帧资源应使用 `FrameResources`/`TsukuyomiFrameResourceRegistry` 的命名资源机制；跨帧持久资源使用 `ResourceHub`。
-
-## 跨 Pass 资源
-
-### 每帧分配与参数保存
-
-- 内置 Pass 覆写 `CollectTextureSlots(List<TextureSlot>)`，把当前 slot 值加入调用方提供的列表，避免反射装箱。动态 slot 每次都应重新读取。未覆写的自定义 Pass 继续使用反射回退；派生类新增 slot 时也要更新这个方法。
-- `FrameContext` 是只读结构体，`IsActive(in FrameContext)`、`Setup(in FrameContext)` 的调用方式不变。可选值使用 `FrameContext?`；不要依赖原来的引用类型身份。
-- `FrameResources` 由当前相机的 `ContextContainer` 复用。每个 Bridge 录制前会从 URP 刷新附件；录制过程中替换颜色仍通过 `PassRecorder.SwapActiveColor`。执行回调应保存具体 handle，不要保存这个可变视图。
-- 每个录制操作从 `context.GetOrCreateData<T>()` 获取自己的参数对象，完整赋值后调用 `context.SetRenderFunc(data, static (state, graphContext) => { ... }, sampler)`。框架直接把对应快照传给回调，并负责可选的 profiling scope；回调内不需要再次查找数据。这个对象随 RenderGraph PassData 池化，所有会被回调读取的字段都必须赋值，包括关闭功能时的默认值。
-- 直接给快照字段赋值，避免仅为转存而创建一套同名局部变量。需要多步计算的局部变量可以保留。只在成功声明依赖、准备好参数后注册回调；提前退出时框架保持空回调。不要传入 Feature 实例或静态共享的可变参数对象。
-- `RasterPassContext`、`ComputePassContext`、`UnsafePassContext` 和 `PostPassContext` 均支持上述接口。旧版 `PassData.GetOrCreateData<T>()` 与非泛型 `SetRenderFunc(...)` 仍然可用。单个图 Pass 使用多个数据类型时，缓存继续分别保留每种类型；执行阶段不做字典查询。
-- 固定数组放入上述参数对象，逐次填充；不要把不同相机或尚未执行的 Pass 的数据写到同一个静态数组。全局缓存仅适合不可变内容，并应限制容量。
-- 后处理 Effect 在 `RecordGraph` 中录制自己的节点并返回输出纹理；该方法在 Uber builder 打开前调用。合成参数类型继承 `TsukuyomiPostProcessData` 并覆写 `SetupUber`，在 `Record` 中通过 `context.GetOrCreateData<T>()` 获取快照，再调用 `context.AddUberSetup(data)` 注册。Plan 每次录制会清空合成参数列表，Effect 需要重新添加当前启用的参数。同一 Plan 每种参数类型对应一个对象，需要独立参数的不同操作应使用不同类型。
-
-命名资源由生产者通过 `Write` / `ReadWrite` slot 创建，消费者通过 `Read` slot 查询。生产者没有运行时，查询返回无效 Handle，消费者应在绑定资源前退出；读取不会隐式创建纹理或 Buffer。同名资源描述符不兼容时抛出异常，包括尺寸模式、缩放、格式、采样、清除及 Buffer usage 等设置。
-
-全局纹理必须在生产者 Builder 上使用 `SetGlobalTextureAfterPass` 发布，并由消费者通过 `UseGlobalTexture` 或显式 Handle 声明读取。仅在执行函数里调用 `SetGlobalTexture` 不会建立依赖；`AllowGlobalStateModification` 和禁止裁剪也不会延长资源生命周期。对 URP 自带输入（例如 AO），同时更新相应的 `UniversalResourceData` 字段。
-
-同一帧跨 pass 共享资源时，以相同 name 作为标记，由 TsukuyomiRP 的 frame resource registry 管理。适合 Contact Shadow 这类先生成、后消费的纹理。
-
-跨帧持久资源使用 `ResourceHub`：
-
-```csharp
-RTHandle history = context.ResourceHub.GetOrCreateHistoryTexture("MyFeatureHistory", descriptor);
-GraphicsBuffer buffer = context.ResourceHub.GetOrCreateBuffer("MyFeatureBuffer", count, stride);
-```
-
-约定：
-
-- 临时中间纹理优先放在当前 RenderGraph pass 内。
-- 同帧跨 pass 共享使用稳定 name。
-- 跨帧 history/buffer 使用 `ResourceHub`，并依赖 `TsukuyomiFeature.Dispose()` 统一释放。
-
-Bridge 提供的 `context.ResourceHub` / `FrameContext.Resources` 已按相机隔离。直接使用根 Hub 时先调用 `ForCamera(camera)`；根 Hub 的直接资源接口用于显式共享资源。纹理使用完整的 `RenderTextureDescriptor`，尺寸或配置变化时重建；Buffer 的 count/stride 变化时也会重建。`GetOrCreateHistoryTexture(..., out bool reallocated)` 用于识别新历史，首次使用前必须初始化；`HistoryTextureHelper.ImportHistoryTexture` 会为新分配的历史安排首次清除。相机切换视角或发生时间不连续时调用该相机 Hub 的 `ResetHistory()`。
-
-### PostPass 与附件约定
-
-- `Read(ActiveColor)` / `Read(CameraColorTexture)` 自动请求中间颜色纹理；`Read(OpaqueTexture)` 才请求 URP 的 opaque copy。
-- 深度附件使用 `SetRenderAttachmentDepth`，不会占用颜色附件索引。只读深度附件同样支持。需要覆盖默认推断时，使用 `TextureSlot.WithBinding(TextureBinding.DepthAttachment / ColorAttachment / Texture)`。
-- 通过 `context.SetRenderFunc(...)` 提交执行函数，可直接传静态委托。Context 会重置池化 PassData，并为提前退出提供可裁剪的空回调；PostPass 只有实际提交了执行函数才交接新颜色。缺少材质等可提前判断的条件应放入 `IsActive`。
-- `FullscreenBlit.BlitAndSwap(context, ...)` 在当前 PostPass 的附件上录制一次 blit。`PassRecorder.AddBlitAndSwapColorPass(...)` 则添加完整的独立 Pass，必须在没有打开 Builder 时调用；该方法现在返回 `void` 并负责释放 Builder。
-- 对尚未完成 resolve 的相机，Bridge 将临时颜色输出写回 URP 的持久相机栈目标。Backbuffer 不能作为普通颜色输入采样；到达最终 Backbuffer 后不会继续运行声明了颜色采样需求的 Pass。
-- `IsActive` 会在入队前及录图时检查，入队检查应基于相机/配置，不应要求此时尚未生成的 RenderGraph 纹理。
-- Profile 列表的增加、删除及重排会在下一次 `AddRenderPasses` 同步，Enabled / Priority / InjectionPoint 的变化也会更新调度缓存。
-
-`context.SetRenderFunc` 的参数使用 Unity 原生 `BaseRenderFunc<TsukuyomiPassData, TContext>`，避免每次录图包装委托。现有 lambda 和方法组调用无需调整；显式声明为 `Action<...>` 的变量需改为对应的 `BaseRenderFunc<...>`。PostPass 应通过 `context.SetRenderFunc` 提交回调，使框架能判断输出是否有效。
-
-## 接入 TsukuyomiFeature
-
-固定管线 Feature 需要在 `TsukuyomiFeature` 中注册独立 registry 和 bridge pass。
-
-基本步骤：
-
-1. 添加字段：
-
-```csharp
-private PassRegistry _myFeatureRegistry;
-private TsukuyomiBridgePass _myFeatureBridgePass;
-private TsukuyomiMyFeaturePass _myFeaturePass;
-```
-
-2. 如果需要全局 keyword，在 `OnEnable()` 初始化，不要在静态字段初始化中调用 `GlobalKeyword.Create()`：
-
-```csharp
-private void OnEnable()
-{
-    TsukuyomiMyFeaturePass.InitializeKeywords();
-}
-```
-
-3. 在 `Create()` 中创建 pass、设置 injection point、注册 bridge：
-
-```csharp
-_myFeatureRegistry = new PassRegistry();
-_myFeaturePass ??= new TsukuyomiMyFeaturePass();
-_myFeaturePass.InjectionPoint = InjectionPoint.BeforeOpaque;
-_myFeatureRegistry.AddPass(_myFeaturePass);
-
-_myFeatureBridgePass = new TsukuyomiBridgePass(
-    _myFeatureRegistry,
-    _myFeaturePass.InjectionPoint,
-    _resourceHub)
-{
-    renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 1
-};
-```
-
-4. 在 `AddRenderPasses()` 中合并 Volume 配置，并按 `Configure()` 返回值决定是否 enqueue：
-
-```csharp
-VolumeStack volumeStack = VolumeManager.instance.stack;
-TsukuyomiMyFeatureVolume myFeatureVolume = volumeStack?.GetComponent<TsukuyomiMyFeatureVolume>();
-
-if (_myFeaturePass != null && _myFeaturePass.Configure(Profile, myFeatureVolume))
-{
-    EnqueueBridge(renderer, _myFeatureBridgePass);
-}
-```
-
-5. 在 `Dispose()` 中释放 pass 持有的运行时资源：
-
-```csharp
-_myFeaturePass?.Dispose();
-_myFeaturePass = null;
-_myFeatureBridgePass = null;
-```
-
-6. 若 Feature 修改了 TsukuyomiRP 之外的状态，补齐所有退出路径：
-
-- `Profile == null`；
-- Feature 或 Volume 被关闭；
-- 活动灯光、Renderer 或场景组件改变；
-- Renderer Feature 重建或 `Dispose()`；
-- 相机/渲染路径不再支持该功能。
-
-Planar Reflection 的全局纹理、Per Object Shadow 修改过的 Renderer/主光 Rendering Layers，以及 PCSS/GTAO 的全局 keyword 都属于必须显式恢复的状态。
-
-### FSR3 / Upscaler 接入例外
-
-Upscaler 不注册到 `TsukuyomiFeature`。当前 FSR3 的路径是：
-
-1. 在 `ENABLE_UPSCALER_FRAMEWORK` 条件下继承 `AbstractUpscaler`；
-2. 通过 `UpscalerRegistry.Register<T>()` 注册名称；
-3. 在 Project Settings 中保存项目级配置，而不是使用 Volume；
-4. 在 RenderGraph 中声明 Color、Depth、Motion Vectors、Output 的真实读写；
-5. 按相机维护 history/context，并在分辨率、帧连续性或相机状态变化时重置；
-6. 切换或禁用时恢复之前的 URP Upscaler，销毁所有实例；
-7. 缺少编译宏时提供明确警告，不能静默显示为已启用。
-
-新 Upscaler 还必须明确 `isTemporal`、Sharpening、XR、Camera Stack、TAA 冲突及动态分辨率能力，不能直接复用普通后处理的假设。
-
-## 插入队列约定
-
-包内已有功能的插入位置：
-
-| Feature | Bridge Pass Event | Injection Point | 说明 |
-| --- | --- | --- | --- |
-| Planar Reflection | `BeforeRenderingOpaques - 1` | `BeforeOpaque` | Opaque 前生成反射纹理，并在关闭时清理全局反射状态 |
-| Depth Pyramid | `AfterRenderingPrePasses` | `BeforeOpaque` | GTAO 启用时生成；当前不是独立用户开关 |
-| Contact Shadow | `AfterRenderingPrePasses + 1` | `BeforeOpaque` | depth prepass 后生成 contact shadow |
-| GTAO | `AfterRenderingPrePasses + 2` | `BeforeOpaque` | 消费 Depth Pyramid，并输出环境遮蔽全局状态 |
-| Contact Shadow Denoise | `AfterRenderingPrePasses + 3` | `BeforeOpaque` | 在 contact shadow 后执行 spatial denoise |
-| Per Object Shadow | deferred: `BeforeRenderingGbuffer - 1`; forward: `AfterRenderingPrePasses` 或 `+2` | 原生 `ScriptableRenderPass` | 必须在 PCSS 前完成；Contact Shadow 开启时动态后移 |
-| PCSS Screen Space Shadow | deferred: `BeforeRenderingGbuffer`; forward: `AfterRenderingPrePasses + 1` 或 `+4` | `BeforeOpaque` | 在依赖的 Contact/Per Object Shadow 后开启 screen space shadow keyword |
-| PCSS Restore Keywords | `BeforeRenderingTransparents` | `BeforePostProcess` | 透明物体前关闭 screen space shadow keyword |
-| Volume Light | `BeforeRenderingPostProcessing - 3` | `BeforePostProcess` | 在后处理前合成体积光 |
-| SSS Skin | `AfterRenderingPrePasses + 5` | `BeforeOpaque` | 在共享 depth/normal 输入就绪后处理指定 Layer |
-| GTAO Restore Keywords | `BeforeRenderingPostProcessing - 1` | `BeforePostProcess` | 后处理前恢复 GTAO 全局 keyword |
-| Tsukuyomi Post Processing | `BeforeRenderingPostProcessing - 1` | `BeforePostProcess` | 调度 Custom Bloom、Tonemapping 等 Effect 链 |
-
-新增 Feature 时先判断依赖：
-
-- 依赖 depth/normal：通常放在 prepass 后。
-- 影响 opaque lighting：通常放在 opaque 前或 gbuffer 前。
-- 只合成屏幕效果：通常放在 post process 前。
-- 需要恢复 keyword/global state：恢复点应靠近状态不再需要的位置，不要拖到 frame 末尾。
-- 依赖其他 Feature 输出：先计算完整依赖图，再根据 Forward/Deferred 路径动态排序；不要用固定 `+1` 猜测。
-- 与另一个 Pass 使用同一事件值时，不依赖隐式稳定顺序，优先分配明确偏移或合并调度。
-
-## Pass 编写模板
-
-```csharp
-internal sealed class TsukuyomiMyFeaturePass : UnsafePass
-{
-    [Read(BuiltinTexture.CameraDepthTexture)]
-    public TextureSlot depth = TextureSlot.Read("Depth", BuiltinTexture.CameraDepthTexture);
-
-    private TsukuyomiPipelineProfile _profile;
-    private TsukuyomiMyFeatureResolvedSettings _settings;
-    private Material _material;
-    private bool _ownsMaterial;
-
-    public override string Name => "My Feature";
-
-    public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
-    {
-        slots.Add(depth);
-    }
-
-    private sealed class RenderData
+    private sealed class Data
     {
         public Material Material;
-        public TsukuyomiMyFeatureResolvedSettings Settings;
+        public TextureHandle Source;
+        public float Intensity;
     }
-
-    public bool Configure(TsukuyomiPipelineProfile profile, TsukuyomiMyFeatureVolume volume)
+    public override void Render(in PostPassContext context, TextureHandle source, TextureHandle destination)
     {
-        _profile = profile;
-        if (profile == null)
-            return false;
-
-        _settings = TsukuyomiMyFeatureResolvedSettings.From(profile, volume);
-        if (!_settings.IsActive)
-            return false;
-
-        if (_material != null)
-            return true;
-
-        if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources))
-            return false;
-
-        _material = resources.MyFeatureMaterial;
-        if (_material == null && resources.MyFeatureShader != null)
+        var data = context.GetOrCreateData<Data>();
+        data.Material = _material;
+        data.Source = source;
+        data.Intensity = _intensity;
+        context.SetRenderFunc(data, static (snapshot, ctx) =>
         {
-            _ownsMaterial = true;
-            _material = CoreUtils.CreateEngineMaterial(resources.MyFeatureShader);
-        }
-
-        return _material != null;
-    }
-
-    public override bool IsActive(in FrameContext frame)
-    {
-        return base.IsActive(frame) && _profile != null && _settings.IsActive && _material != null;
-    }
-
-    public override void Record(in UnsafePassContext context)
-    {
-        TextureHandle cameraDepth = context.GetTexture(depth);
-        if (!cameraDepth.IsValid())
-            return;
-
-        context.Builder.UseTexture(cameraDepth, AccessFlags.Read);
-        context.Builder.AllowGlobalStateModification(true);
-
-        var recordData = context.GetOrCreateData<RenderData>();
-        recordData.Material = _material;
-        recordData.Settings = _settings;
-
-        context.SetRenderFunc(recordData, static (state, graphContext) =>
-        {
-            state.Material.SetFloat("_Intensity", state.Settings.Intensity);
-            // draw / dispatch / blit
+            snapshot.Material.SetFloat("_Intensity", snapshot.Intensity);
+            Blitter.BlitTexture(ctx.cmd, snapshot.Source, new Vector4(1, 1, 0, 0), snapshot.Material, 0);
         });
     }
-
-    public void Dispose()
+    public override void Deactivate(Camera camera) => _intensity = 0;
+    public override void Dispose()
     {
-        if (_ownsMaterial)
-            CoreUtils.Destroy(_material);
-
+        CoreUtils.Destroy(_material);
         _material = null;
-        _ownsMaterial = false;
     }
 }
 ```
 
-## RenderGraph 资源与全屏绘制
+普通效果只需这一个类和自己的 Shader。`RasterPass`、`ComputePass`、`UnsafePass`、`PostPass`、`GraphFeaturePass` 都继承同一个 `PrepareRecording` 接口。基类默认创建当前 Pass 的运行时，并按节点阶段加入计划，不需要额外 Definition 或 Runtime 文件。
 
-### 创建资源时声明访问方式
+Profile 中的实例是配置模板；PassSession 克隆 Profile 后才创建计划和调用生命周期。可序列化字段只保存参数与资源资产引用，材质、History、活动相机和解析结果使用非序列化运行时字段，不能写回 Profile。需要兼容既有序列化字段或拆分复杂配置时，仍可选择 `RenderPassDefinition.CreateRuntime()`；配置和实际 Pass 可以放在同一个文件里。
 
-四类 Pass Context 都提供 `GraphResources`。需要在当前 pass 采样或读写的纹理，可以把创建/导入与依赖声明合并：
+一个用户节点也可覆盖 `Build` 声明多个 Pass。`Build` 只声明结构，不创建 GPU 资源、不修改全局状态；编辑器也会调用它进行校验。`Initialize` 才分配资源。
 
-```csharp
-var graphResources = context.GraphResources;
-TextureDesc desc = TextureDescriptors.Color2D(width, height,
-    GraphicsFormat.R16G16B16A16_SFloat, "My Intermediate",
-    FilterMode.Bilinear, randomWrite: true);
-TextureHandle intermediate = graphResources.CreateTexture(desc, AccessFlags.ReadWrite);
-TextureHandle history = graphResources.ImportTexture(historyRT, AccessFlags.Read);
-graphResources.UseTexture(cameraDepth, AccessFlags.Read);
-graphResources.UseBuffer(offsets, AccessFlags.Read);
-```
+原生 `ScriptableRenderPass` 也在 `Build` 中创建，不要放进 Profile Pass 的字段初始化器：其构造函数可能调用 `ShaderTagId` 等 Unity API，而 Profile 的序列化过程不能调用这些 API。此类运行时字段应标记 `NonSerialized`。
 
-- `GraphResources` 是栈上的轻量视图，只能在当前 builder 的录制期使用。它直接调用原生 RenderGraph API，没有额外的资源列表或逐帧委托。
-- 访问权限由业务明确传入。上述创建/导入操作已登记依赖，不需要再次 `Builder.UseTexture`。
-- `UseTexture` / `UseBuffer` 忽略无效的可选 handle；必需输入仍应先验证，再创建和登记输出资源。它们不负责决定 Feature 是否执行。
-- Raster 使用 `context.ColorAttachment(desc / handle, index, access)` 和 `context.DepthAttachment(handle, access)`。附件与采样/UAV 声明分开，不能只根据 Write 自动推断用途；原生附件接口仍可使用。
-- 现有 `RenderGraph`、`Builder` API 保留，可用于自定义导入参数、特殊纹理和其他原生能力。
-- `TextureDescriptors.Color2D` 创建无深度、无 MSAA 的普通二维纹理，默认 Point、不清除、不开启 random write。尺寸和格式由业务决定；需要 XR、array、mip 或继承相机描述符时，直接构造 `TextureDesc`。
-- `TsukuyomiPostProcessBuildContext.CreateTexture(desc, access)` 提供相同的创建并登记能力。旧的单参数版本只创建资源。
+运行时无逐帧类型扫描或 JSON 克隆；结构只在 Profile 版本、开关、节点或阶段变化时重建。Editor 用 TypeCache 自动发现公开、非抽象、可序列化且有默认构造函数的 `RenderPassBase` 派生类；允许阶段由 InjectionPoint 属性声明。默认单例，只有资源按节点隔离的Pass才覆盖 `AllowMultiple => true`。
 
-### 单次全屏后处理
+独立程序集只需引用运行时接口，自行提供 Pass、Shader 和必要的辅助服务。`PassLinkerProcessor` 自动生成保留定义及直接配置 Pass 的 link.xml，无需维护中央类型名单。
 
-`PostPass` 已经绑定 source/destination。只需要一次材质绘制时：
+## 计划和依赖
 
-```csharp
-public override void Render(in PostPassContext context, TextureHandle source, TextureHandle destination)
-{
-    context.Blit(material, passIndex: 0);
-}
-```
+- `plan.Add(pass, event, active, resolveStage)` 将 Raster、Compute、Unsafe、Post 或 GraphFeature Pass 接入通用 Bridge。
+- `plan.AddNative(pass, event, active, resolveStage)` 接入原生 URP ScriptableRenderPass，仍遵守依赖与生命周期。
+- `plan.Provides(handle, key)` 声明能力输出；`plan.Requires(handle, key, optional)` 声明输入；`plan.After(consumer, producer, optional)` 声明直接顺序。
+- `plan.Service(key, factory)` 获取共享辅助运行时；Key 必须包含格式、布局、阶段等兼容条件。只在存在已启用消费者时创建，一个兼容 Key 只有一个实例。
+- `plan.PrepareAfter<T>()` 声明 CPU 配置解析顺序，可使用能力接口。先调用效果的 `PrepareRecording`，再准备共享服务，然后收集所有 Pass 的资源需求，最后调用 `ResolveResources`。活动判断和录制使用最终解析结果。使用独立 Runtime 时，其 `Prepare` 先于它注册的子 Pass 的 `PrepareRecording`。
+- `context.Find<T>()` 或 `context.Collect<T>(list)` 获取能力接口。用接口连接Pass，不在框架中匹配具体效果类型。
 
-此调用设置当前 pass 的执行回调，沿用 `PostPass` 的目标替换逻辑。材质、shader pass 索引或 source/destination 无效时不会登记绘制；多次有效调用会替换回调，不会追加多次绘制。需要多个图节点时使用 `GraphFeaturePass`；单个节点的自定义回调继续使用 `GetOrCreateData<T>` 和 `SetRenderFunc`。
+资源需求同样使用开放接口：Pass 在 `CollectResourceRequirements` 中调用 `requirements.Require(new MyRequest(...))`，辅助服务在 `ResolveResources` 中通过 `context.Requirements.GetRequests<MyRequest>()` 读取请求，并用 `SetStatus` 标记结果。`MyRequest` 是效果自己定义的结构体，合并兼容请求和支持条件由生产者处理；未解析请求会阻止对应消费者执行。框架不需要新增资源种类字段、分支或专用收集方法。
 
-### 多节点 Feature
+调度先满足阶段边界和依赖，再按图中顺序稳定排序。必需生产者不存在、循环依赖、静态阶段冲突、非法阶段、重复 ID 和单例冲突均阻止应用。动态资源/平台不足则跳过受影响分支。可选依赖不因生产者关闭而关闭消费者；存在且参与执行时仍满足顺序约束。
 
-`GraphFeaturePass` 在一个注入位置录制 0～N 个原生节点。Bridge 调用它时没有打开 builder；跨注入位置的功能仍使用多个入口。现有 SerializeReference 类型及单 Pass API 保持兼容。
+动态阶段按每次相机调用解析；阶段变化时复用已编译依赖重新排序，同阶段使用 Profile 中的顺序，不能沿用上一相机的入队顺序。阶段不变时复用排序结果，不重建计划。
 
-```csharp
-public override void RecordGraph(in FeatureGraphContext graph)
-{
-    var source = graph.GetTexture(color);
-    if (!source.IsValid() || material == null) return;
-    var horizontal = graph.AddFullscreen(source, material, 0, HorizontalSampler);
-    var output = graph.AddFullscreen(horizontal, material, 1, VerticalSampler);
-    graph.SetActiveColor(output);
-}
-```
+恢复全局 GPU 状态必须声明为有序 RenderGraph Pass，例如主 Pass 后的 keyword 恢复。CPU 外部对象修改要在 `Deactivate` 恢复。`Deactivate` 在相机完成后也被调用，应幂等，不能释放仍被已录制工作引用的 GPU 资源。
 
-- `AddFullscreen` 完成颜色目标创建、源 Read、附件 WriteAll 和静态绘制回调。材质、源或 shader pass 无效时返回原输入。调用前应验证整条分支需要的所有资源。
-- `Copy` 创建一次颜色拷贝节点；两种操作只接受可采样的 2D/array 颜色，depth、raw MSAA 和 cubemap 返回原输入。它们不会自行替换 ActiveColor。`SetActiveColor` 仅更新引用，不复制纹理；Backbuffer 上不替换目标。Bridge 保留阶段间资源刷新及 Camera Stack 颜色收尾。
-- 通用绘制要求材质参数在执行前稳定；逐节点变化的参数应存入 TData 并在自定义回调中绑定。不要在录制两个节点时依次改同一个 Material，期待它自动成为两份快照。
-- `TextureDescriptors.ColorLike` 保留源的尺寸模式、array/XR 布局和动态缩放策略，去除深度、MSAA、mip、UAV 和 memoryless。它用于颜色绘制；自定义 mip/viewport/MSAA 采样使用原生节点。
+核心框架不识别 Bloom、PCSS 或 Scene Scan 类型。共享屏幕阴影、Scene Scan 合成和后处理融合都属于效果模块。阴影之间通过 `IContactShadowProvider`、`IPerObjectShadowProvider` 和 `IPcssShadowSettingsProvider` 连接。关闭 PCSS 不会关闭 Contact Shadow 所需的基础阴影合成，也不会使 PCSS 自动启用。
 
-强类型节点直接使用 Unity 的池化 TData：
+第三方Pass需要内置 Depth Pyramid 时，在 Build 中调用 `DepthPyramidDependency.Require(plan, consumer)`，并在消费 Pass 的 `CollectResourceRequirements` 中声明 `RequireDepthPyramid(request)`。服务合并兼容请求，`ResolveResources` 在所有效果及服务参数解析之后处理这些请求；无需修改框架注册表。
 
-```csharp
-var depth = graph.GetTexture(depthSlot);
-if (!depth.IsValid() || compute == null) return;
-using (var node = graph.AddCompute<TraceData>("GI.Trace", TraceSampler))
-{
-    node.Data.Depth = node.ReadTexture(depth);
-    node.Data.Output = node.Resources.CreateTexture(desc, AccessFlags.Write);
-    node.Data.Compute = compute;
-    node.Data.Settings = settings;
-    node.SetRenderFunc(static (data, context) => ExecuteTrace(data, context));
-}
-```
+## RenderGraph 录制
 
-`AddRaster<T>` / `AddCompute<T>` / `AddUnsafe<T>` 返回栈上 using 作用域，分别保留原生 Builder。关闭当前作用域后再创建下一节点。必需输入检查放在 Add 之前；每个节点必须设置执行回调，新接口不安装空回调来掩盖错误，Unity 的 RenderGraph 验证负责报告未设置回调或嵌套 builder。TData 每节点独立，池化复用前必须覆盖回调读取的全部字段；不要缓存节点或跨图保存 TextureHandle。
+优先使用现有 `RasterPass`、`ComputePass`、`UnsafePass`、`PostPass`、`GraphFeaturePass` 封装。`GraphFeaturePass` 适合一个效果中的多节点算法，多个跨阶段工作则用 Build 声明多个计划项。
 
-旧 Context 与新节点共享 `PassResourceBuilder`。`ReadTexture(slot / handle)` 和 `ReadBuffer(slot / handle)` 合并解析及 Read 声明。命名资源读取只查询已生产的结果，即使误传了可写 slot 也不会读时创建。可选无效 handle 不登记依赖。`ImportTexture(rt, access, importParams)` 保留原生导入选项。
+通过 TextureSlot/BufferSlot 声明资源读写；使用 ContextItem 或Pass自己的资源对象共享当次相机调用的数据，禁止缓存 TextureHandle 到下一帧。需要颜色采样时声明 ActiveColor 读取和 intermediate target，避免采样 backbuffer。
 
-### 公共 Depth Pyramid 需求
+PostPass 使用 `context.Blit(material)` 或 `context.SetRenderFunc`，不要直接向 Builder 设置回调绕过输出有效性标记。提前返回时不能把尚未写入的目标当作后续颜色输入。
 
-Feature 在参数配置完成后声明派生资源需求：
+RenderGraph 延后执行。回调引用的数据必须是该录制节点拥有的快照；使用 `GetOrCreateData<T>()` 取池化数据并覆盖所有参与回调的字段，使用 static 回调避免捕获运行时的可变字段。不得让不同节点共用会在录制过程中修改绑定的材质实例。
 
-```csharp
-public override void CollectResourceRequirements(in FrameContext frame,
-    in ResourceRequirementCollector requirements)
-{
-    requirements.RequireDepthPyramid();
-    // 或 requirements.RequireDepthPyramid(new DepthPyramidRequest(mipCount: 8));
-}
-```
+## 资源和生命周期
 
-`ResourceRequirements` 属于本次 URP 相机调用，每次 AddRenderPasses 都 Begin/清空，使用递增 Invocation 区分同帧重复渲染；不保存临时 handle。请求 key 表达深度来源、生产事件、格式、checkerboard 布局。兼容请求合并 mip 覆盖范围；当前生产者生成完整的 packed min-depth pyramid。首版支持 CameraDepthTexture / AfterRenderingPrePasses / R32_SFloat / 普通 2D / 无 checkerboard，其他变体独立返回 Unsupported，不影响支持的请求。
+`Initialize` 每个运行时实例调用一次。`PrepareRecording` 每次相机渲染调用一次，包括同帧重复渲染，并且先于 `IsActive` 和资源需求收集；不要按帧号跳过它。这里解析参数、准备材质和 CPU 状态，不读取尚未生成的 RenderGraph 纹理句柄。原有 `Setup` 仍在录制时调用，不承担准备阶段的参数解析。
 
-生产者必须早于消费者，且在声明的阶段生产。缺失生产者、不支持或顺序冲突通过 `GetStatus(pass)` 返回，开发版统一诊断并跳过对应消费者；录制时业务仍须检查实际资源 handle。生产者的 TextureSlot 同时配置 URP Depth 输入。所有需求关闭时不安排 Depth Pyramid。新增普通 slot 不会隐式触发派生资源生产。
+相机类型和 Camera Stack 限制也应在准备阶段落实，避免不支持的相机仍请求资源或执行恢复 Pass。内置屏幕效果及 Scene Scan 跳过 Preview；Scene View 保留支持的效果，第一人称和 SSGI 保持各自的 Game/Base 相机限制。Neural Rendering 的 FinalCameraInStackOnly 在准备阶段生效。中间相机替换活动颜色时，Bridge 会将结果写回 Camera Stack 共用的原颜色目标。
 
-### History 与流程迁移
+通过 `plan.Add` 注册的子 Pass 自动参与初始化、准备、资源解析、停用、相机释放和最终释放。同一所有者内的同一个实例只调用一次；主 Pass 同时作为计划项时也不会重复调用。子 Pass 按注册顺序准备，因此有 CPU 准备依赖时需按依赖顺序注册；GPU 执行顺序仍由阶段和 `plan.After` 决定。不要再从 Runtime 手动调用这些子 Pass 的生命周期。原生 `ScriptableRenderPass` 的内部资源仍由其所属运行时管理。
 
-- `BufferedTextureHistory` 复用 URP CameraHistoryItem，封装双缓冲描述符比较及重分配；URP 继续拥有轮换和最终释放。算法负责每项 ID 的 Reset、camera cut、连续帧、参数签名及 jitter 有效性。
-- `TextureDescriptors.HistoryColor` 接受显式尺寸，保留相机布局；floor/ceil 由算法选择。`HistoryTextureHelper.ImportPair` 只导入 previous/current 并声明 Read/Write，不轮换、不接管所有权。
-- SSGI 已复用上述辅助函数，原有 temporal 有效性判断不变。GTAO/SSGI 通过需求钩子请求同一 Depth Pyramid。
-- 体积光先迁为一个强类型 Unsafe 节点，保留内部命令顺序。后处理 Effect 的 `RecordGraph` 在 Uber builder 打开前录制；Bloom 生成和 Uber 合成是两个原生节点，Uber 通过显式 Read 依赖 Bloom 输出。Bloom 内部紧密相关的 draw 仍合并，SSGI 暂保留原节点边界。
-- 后处理 Uber plan 仅保存本节点的参数快照；恢复 keyword 的操作继续在执行阶段进行。状态恢复节点不依赖共享 active bool。
+Pass自己声明 Shader、ComputeShader、Material 或资源 ScriptableObject 引用；新增效果不向 `TsukuyomiRenderPipelineResources` 加字段。迁移的内置Pass可以继续使用既有资源资产。不要修改资产材质；创建实例并由运行时 Dispose。
 
-### 框架回归
+`context.Frame.Resources` 已按 Feature、节点、相机隔离，可用于 `GetOrCreateHistoryTexture`、`GetOrCreateBuffer`。共享辅助服务有独立资源作用域。删除、关闭或切换 Profile 后，旧 Session 在渲染上下文结束时释放；相机销毁时调用 ReleaseCamera 并释放对应资源。原生 RHI/NGX 后端仍使用其延迟回收机制。
 
-渲染包不包含本地验证脚本。回归测试由接入项目的 Editor 测试程序集维护，通过 Unity Test Runner 运行，不随渲染包发布。测试覆盖资源依赖、裁剪、同类型快照、跨图复用、旧 API 混用、附件声明、跳过、需求合并/冲突与预热后分配；实际 CPU/GPU、Camera Stack、XR 和 IL2CPP 仍需要对应场景验证。
+相机结束清理只针对本次已准备、尚未结束的渲染调用，已退役 Session 也会收到对应回调。不能因某个相机曾使用过该 Session，就在其他 Renderer 渲染它时再次恢复全局状态。上下文结束还会回收已销毁相机的资源，并处理没有后续入队的 Profile 变更。`ReleaseCamera`、`Dispose` 应释放自身持有的资源；不要在延迟回收时无条件重置全局 Shader 状态，以免覆盖新实例的状态。
 
-## Shader 和 HLSL 约定
+共享辅助 Pass 只由已装配的消费者创建。关闭或删除最后一个 Profile 消费者后，新 Session 不再包含该服务，旧服务及其材质、相机资源在上下文结束后释放。Volume 或相机 API 暂时关闭所有消费者时，服务停止调度并清理当次状态；Session 可以保留可复用材质，重新启用时继续使用。Depth Pyramid 的全局纹理与缓冲绑定、阴影合成的临时纹理与启用标志必须在 `Deactivate` 清理；Scene Scan 的排除 Mask 请求也只属于当次相机调用，不能当作持久配置保留。
 
-- Shader 名称优先使用 `Hidden/Tsukuyomi/...`，资源引用必须通过 preload asset。
-- Feature 专属 shader 放在 `Shaders/<Feature Name>/`。
-- 工具 HLSL 放在 `ShaderLibrary/`，include 使用 package 绝对路径：
+RendererFeature 的开关也约束直接调用 `AddRenderPasses`。录制中的 Session 在上下文结束后释放；Editor 空闲时禁用 Feature，不必等待另一次渲染即可清理。重复 `Create` 只保留一组事件订阅，已完成渲染的旧 Session 可立即释放。Feature 自身禁用、销毁、脚本重载及 Play Mode 退出均清理运行时；关闭 Domain Reload 时也会在模式切换边界清理并恢复。运行时缓存不参与热重载序列化，恢复后的首次入队会重新创建 Session；即使没有再次调用 `Create`，也会补齐生命周期订阅。
 
-```hlsl
-#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/MyFeatureCommon.hlsl"
-```
+Scene Scan 的静态相机 API 覆盖、子效果开关及渲染器注册在进入 Play Mode 和返回 Edit Mode 时重置，避免关闭 Domain Reload 后继续使用上一轮运行的控制状态。单独禁用或重新启用 Feature 不清除这些显式相机请求。
 
-- 新增工具型 HLSL 时，优先放到 `ShaderLibrary/`，避免散落在具体 Feature shader 目录下。
-- 注意 Unity/URP 版本差异：`Blit.hlsl` 可能已经声明 `_BlitTexture_TexelSize`，不要重复声明。
-- 如果 shader 依赖官方 URP 内部函数，先确认当前 `Library/PackageCache/com.unity.render-pipelines.universal...` 中对应函数签名。
+使用 URP HistoryManager 的Pass要声明为单例，并校验 History 所有者；Renderer 切换时不能复用另一运行时留下的历史。多实例必须避免全局纹理、按类型 History 或静态可变设置冲突。
 
-## Editor 面板
+URP 会按相机渲染调用交换 History 缓冲；同帧重复渲染不能简单复用前一次的历史有效标志。SSGI 仅在帧号连续且参数、尺寸等条件兼容时使用历史，同帧重复、帧号跳跃和重置会使历史失效。
 
-`TsukuyomiPipelineProfileEditor` 将配置分两类：
+资源不足要让该节点 active=false；缺失可恢复资源可在 `PrepareRecording` 重试。初始化或准备的异常只标记对应运行时失效；不得使其他节点依赖未生产的输入。清理代码必须幂等。
 
-- `Rendering Features`：固定管线功能，例如 PCSS、Contact Shadow、Volume Light。
-- `Passes` list：用户可配置、可组合、可排序的 pass。
+## 内置模块边界
 
-新增固定 Feature 时：
+- 内置效果不再通过独立 Runtime 类转发准备调用。PCSS、Per Object Shadow、FSR3 和 Neural Rendering 由配置 Pass 自己实现 `Build`、`PrepareRecording` 和清理；其他效果的配置与录制实现位于同一个效果文件，原有序列化类型和字段保留。
+- Depth Pyramid 由 GTAO/SSGI 请求，同相机、同兼容条件合并；无消费者不运行。
+- Contact Shadow 节点包含生成和可选降噪；PCSS 与 Per Object Shadow 是独立节点，共享辅助阴影合成。
+- VoxelTransition、ScanPostProcess、XrayRender、SpatialGridRender 是四个节点。公共排除 Mask 可以独立执行，不会因此打开 Xray 高亮。
+- SceneEffectPass 只装配这些节点的共享执行计划。各录制 Pass 独立准备自己的设置和材质；排除 Mask 的消费者状态在所有准备完成后通过 `ResolveResources` 汇总。共享合成 Pass 拥有未单独排程的 Scan 参数控制器，并负责调用其准备和清理；静态相机 API 的名称保持兼容。
+- Bloom 与 Tonemapping 是独立节点。相邻且顺序为 Bloom → Tonemapping 时，后处理模块合并 Uber 绘制；反序或插入其他效果时分别绘制。新后处理可以独立实现，不必修改 Uber Shader。
+- Bloom、Tonemapping 的参数和材质由各自 Pass 的 `PrepareRecording` 准备；共享后处理 Pass 只组合已准备的输出，并持有自己的 Uber 材质，不再代替各效果解析参数或释放其资源。
+- FSR3 主超分由 URP UpscalerRegistry 管理；Profile 中的 FSR3 Pass只提供辅助 Mask。第一人称绘制信息通过 `IRenderMaskViewProvider` 提供，支持多个有效提供者。
+- DLSS Neural Rendering 由 Profile 节点管理，后端能力和 Volume 决定是否运行。编译通过不能代替 DLSS 实机验证。
 
-- 在 `Rendering Features` 下增加 foldout。
-- 参数默认折叠，只露出启用开关。
-- 使用 `SerializedProperty` 绘制，避免直接改对象字段。
-- UI 风格对齐 Unity Renderer Data / Volume Profile：清晰分组、可折叠、有分割线。
+## 序列化兼容
 
-## 验证清单
+项目主 Profile 和 LookDev 示例已转换为节点配置；一次性迁移工具和旧平铺字段已清理。原始资产备份及迁移报告保留在 `Artifacts/ProfilePlugins/Migration`。不支持的 schema 和丢失的类型会阻止编辑器提交。
 
-新增 Feature 后按顺序检查：
+功能类型统一以 Pass 命名；`MovedFrom` 仅保留旧序列化类型名称，用于恢复先前保存的节点。节点 ID 与参数不随类型重命名改变。`LegacyPassDefinition` 是现有可序列化自定义 Pass 的通用适配入口，不装配任何内置效果。
 
-1. C# 编译通过。
-2. Unity Console 无 error/warning。
-3. `TsukuyomiRenderPipelineResources.asset` 已引用 shader/compute/material。
-4. 代码中没有新增 `Shader.Find`。
-5. Volume Component 能在 Volume Profile 的 Add Override 中找到。
-6. Frame Debugger 中 pass 名称清晰，阶段结构符合设计。
-7. RenderGraph 模式下资源读写声明正确，没有隐式读写冲突。
-8. 关闭 Feature 时不会 enqueue pass，也不会残留 keyword/global texture 状态。
-9. 开启 Feature 时 Profile 默认参数生效；Volume override 能覆盖场景参数。
-10. 如果创建了临时 material、RTHandle、GraphicsBuffer，`Dispose()` 中能释放。
-11. Forward 与 Deferred 下的动态 `renderPassEvent` 均经过验证，依赖 Feature 的先后关系不随开关组合改变。
-12. `Profile == null`、Volume 关闭、切换 Renderer/Quality 和退出 Play Mode 时，全局 keyword、全局纹理、Rendering Layers 与外部对象状态均恢复。
-13. 多相机、Camera Stack、Scene View、Preview Camera 和反射相机不会错误共享 history 或重复执行不支持的 Feature。
-14. 后处理 Effect 不活动时会重置 Uber Material keyword/参数，避免上一相机或上一帧状态泄漏。
-15. Upscaler 验证 history reset、运动矢量、分辨率切换、TAA 冲突、缺少编译宏和不支持 XR 的降级行为。
+## 验证
 
-## 常见问题
+本次重构的测试程序集、示例效果和临时验证代码已清理。运行所需的结构检查、缺失资源处理和类型保留逻辑仍然存在。
 
-### TextureSlot 已声明资源，为什么还需要 Builder.UseTexture？
-
-`TextureSlot` 用来声明 Feature 对 URP 输入的需求，并帮助 bridge pass 调用 `ConfigureInput`。`Builder.UseTexture` 是 RenderGraph 当前 pass 的真实资源读写声明。两者职责不同，都需要。使用 `GraphResources` 的创建/导入接口时，后者已经在框架内部完成。
-
-### 为什么不再添加 RequiredInputs？
-
-`TextureSlot` 已经承担“标记需要哪些内置渲染资源”的职责。再加一套 `RequiredInputs` 会产生重复状态源，容易出现面板、pass、URP input 三处不同步。
-
-### keyword restore 是否一定要单独 pass？
-
-不一定。只有当某个 Feature 开启了会影响后续渲染阶段的全局 keyword，且必须在另一个渲染阶段前恢复时，才需要 restore pass。PCSS 需要在透明物体前关闭 screen space shadow keyword，所以保留 restore pass。
-
-### 一个 Feature 内部多个阶段要不要拆多个 RenderGraph pass？
-
-看渲染路径和资源生命周期。PCSS 的 Penumbra 和 ScreenSpaceShadows 属于同一个屏幕空间阴影流程，放在同一个 `Screen Space Shadows` pass 内分阶段绘制。Volume Light 也在一个 pass 内维持 Downsample/Raymarch/Blur/Upsample/Composite 阶段。Compute 生成和 denoise 这种天然独立、需要跨 pass 消费的流程，可以拆成多个 pass。
-
-
-## SceneScan 四个独立渲染功能
-
-`TsukuyomiPipelineProfile` 和 `TsukuyomiRP` Volume 面板分别提供 VoxelTransition、ScanPostProcess、XrayRender、SpatialGridRender 的开关与参数。前端调用对应 Pass 的静态相机 API，不持有 RendererFeature。Renderer 内部仍提供只读 Pass 入口；不要把同一实例再添加到 `Profile.Passes`。
-
-四个 Pass 均提供静态 `SetCameraEnabled`、强类型 `SetCameraParameters`、`SetCameraAnimation`、`HasCameraOverrides` 和 `ClearCamera`。优先级为 Profile 默认值、已勾选的 Volume 字段、显式相机覆盖；修改参数不会隐式启用功能。动画 API 只更新外部曲线结果，不会覆盖面板外观、范围或覆盖模式。项目负责时序、曲线、随机输入与目标业务分类；节点记录时把解析参数复制到 RenderGraph 数据中。
-
-```csharp
-var grid = SpatialGridParameters.Default;
-grid.OriginWS = origin.position;
-TsukuyomiSpatialGridRenderPass.SetCameraParameters(camera, grid);
-TsukuyomiSpatialGridRenderPass.SetCameraEnabled(camera, true);
-
-TsukuyomiScanPostProcessPass.SetCameraParameters(camera, ScanPostProcessParameters.Default);
-TsukuyomiScanPostProcessPass.SetCameraEnabled(camera, true);
-TsukuyomiScanPostProcessPass.SetCameraEffectEnabled(camera, ScanPostEffect.VoxelGlitch, false);
-TsukuyomiScanPostProcessPass.SetCameraEffectEnabled(camera, ScanPostEffect.HorizontalGlitch, true);
-TsukuyomiScanPostProcessPass.SetCameraEffectEnabled(camera, ScanPostEffect.ChromaticSplit, false);
-
-TsukuyomiXrayRenderPass.SetCameraRenderers(camera, new[] {
-    new RendererMaskEntry(targetRenderer, 1),
-    new RendererMaskEntry(excludedRenderer, 0, RendererMaskRole.Excluded)
-});
-TsukuyomiXrayRenderPass.SetCameraParameters(camera, XrayRenderParameters.Default);
-TsukuyomiXrayRenderPass.SetCameraEnabled(camera, true);
-```
-
-`SpatialGridParameters.Default` 使用完整覆盖，间距 5、半径 40、线宽 0.025、点尺寸 0.12。`SpatialGridCoverage.Full` 绕过扫描覆盖；`Blend` 仍控制淡入，脉冲仍由参数驱动。组合扫描在面板使用 `Scan` 模式，项目通过 `ScanAnimationParameters` 传入原点、原始进度、World/Screen 进度和 Blend；Range、RingWidth、NoiseStrength、PulseSpeed 等保持由 Profile/Volume 调整。表面网格属于 `ScanPostEffect.Scan`，与独立空间网格分开管理。
-
-空间网格内部的 `ISpatialGridBackend` 负责配置、录制 RenderGraph 节点与释放资源。当前每个相机拥有独立的 `SpatialGridMeshBackend`、材质和 Mesh 缓存。后端保留原格点对齐、球形覆盖、墙后衰减、加色混合、排除与脉冲；每轴半格点数限制 1–8、半径限制 1–40、有效半径同时不超过 `halfCount * spacing`。这些限制和顶点/索引布局不进入公共 API。
-
-默认网格为 17³：4,913 个点、13,872 条连接线、75,140 个顶点、37,570 个三角形，一次 Mesh 绘制。`SetCameraEnabled(camera, false)` 强制停止录制但保留设置/缓存；`ClearCamera(camera)` 移除运行时覆盖并恢复面板控制；`TsukuyomiSpatialGridRenderPass.ReleaseCameraResources(camera)` 单独释放该相机的后端缓存；`Dispose` 释放渲染器资源和解析状态，静态相机控制保留到显式清理或子系统重置。粒子与 Compute 后端以后替换内部实现，项目调用保持不变。
-
-VoxelTransition 保留原图引用，输出体素采样色、仅扭曲色和屏幕扩张权重。关闭时共享合成使用原图与屏幕权重 1。XrayRender 拥有目标 Mask、私有目标深度和高亮贡献；Renderer 注册按值复制，正整数标签 1 使用 PrimaryColor，其他正标签使用 SecondaryColor。排除标签在 Xray 高亮关闭时仍可供空间网格和颜色合成使用。
-
-透明之前（事件 449）：Mask → VoxelTransition → Xray contribution → 公共颜色合成 → SpatialGrid。公共合成保持表面效果 + 目标贡献、屏幕混合、闪光、整体淡入/排除的顺序。空间网格仅声明颜色附件、场景深度与可选排除 Mask，并通过 `RequiresIntermediateColorTarget` 独立请求中间颜色目标，不读取法线或颜色采样副本。
-
-透明之后、Bloom 之前（事件 548）：体素故障 → 水平故障/色散。四个后处理子开关由 `ScanPostEffect` 管理，参数更新不会重置开关。水平故障和色散独立启用，有贡献时共用一个采样节点。Full 覆盖允许体素故障单独使用 `VoxelTransitionWeight`；Scan 覆盖保留原 Reveal/Progress 调制。
-
-采样色和目标贡献的分离纹理使用完整浮点精度，避免中间量量化改变原着色结果。独立空间网格不申请这些采样纹理。
+提交效果前还需要真实 RenderGraph 录制和画面检查，覆盖 Game/Scene View/Preview、Camera Stack、同帧重复渲染、切换 Profile/Renderer、退出播放与资源释放。记录 CPU/GPU 基线。FSR3/DLSS 的硬件路径必须另行记录测试设备和结果。

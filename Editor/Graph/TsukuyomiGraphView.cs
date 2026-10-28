@@ -29,8 +29,22 @@ namespace Tsukuyomi.Rendering.Editor
         public event Action<InjectionPoint> OnNodeDoubleClicked;
         public event Action<IEnumerable<ISelectable>> OnSelectionChanged;
         public event Action OnGraphChanged;
+        public event Action OnBeforeGraphChanged;
+        public event Action<RenderPassBase> OnPassAdded;
+        public Func<Type, bool> CanAddType;
+        public Func<string, RenderPassBase> ResolveDefinition;
+        public bool SuppressChanges { get; set; }
 
         private GridBackground _grid;
+
+        internal static Vector2 AuthoredPosition(GraphElement element)
+        {
+            // Inline positions update during a drag before UI Toolkit's next layout calculation.
+            var position = element.GetPosition().position;
+            if (element.style.left.keyword == StyleKeyword.Undefined) position.x = element.style.left.value.value;
+            if (element.style.top.keyword == StyleKeyword.Undefined) position.y = element.style.top.value.value;
+            return position;
+        }
 
         public TsukuyomiGraphView()
         {
@@ -54,7 +68,9 @@ namespace Tsukuyomi.Rendering.Editor
 
             graphViewChanged = change =>
             {
-                OnGraphChanged?.Invoke();
+                if (SuppressChanges) return change;
+                OnBeforeGraphChanged?.Invoke();
+                schedule.Execute(() => OnGraphChanged?.Invoke());
                 return change;
             };
 
@@ -114,7 +130,8 @@ namespace Tsukuyomi.Rendering.Editor
                 evt.menu.AppendSeparator();
 
                 var types = UnityEditor.TypeCache.GetTypesDerivedFrom<RenderPassBase>()
-                    .Where(p => p.IsPublic && !p.IsAbstract)
+                    .Where(p => p.IsPublic && !p.IsAbstract && !p.ContainsGenericParameters && p.IsSerializable
+                        && p.GetConstructor(Type.EmptyTypes) != null && PassEditorTypes.CanRunInPlayer(p))
                     .OrderBy(p => p.Name);
 
                 foreach (var type in types)
@@ -125,9 +142,10 @@ namespace Tsukuyomi.Rendering.Editor
 
                     if (attributes.Any(a => a.Point == point))
                     {
-                        evt.menu.AppendAction($"Add Pass/{GetPassCategory(type)}/{type.Name}", (action) => {
+                        var definition = (RenderPassBase)Activator.CreateInstance(type);
+                        evt.menu.AppendAction($"Add Pass/{definition.MenuPath}", (action) => {
                             CreatePassNode(type, evt.mousePosition, true);
-                        });
+                        }, _ => CanAddType == null || CanAddType(type) ? DropdownMenuAction.Status.Normal : DropdownMenuAction.Status.Disabled);
                     }
                 }
             }
@@ -141,15 +159,19 @@ namespace Tsukuyomi.Rendering.Editor
             Type type,
             Vector2 position,
             bool convertMousePosition,
-            RenderPassBase passInstance = null)
+            RenderPassBase passInstance = null, bool notifyAdded = false)
         {
+            if (convertMousePosition || notifyAdded) OnBeforeGraphChanged?.Invoke();
             var node = new TsukuyomiPassNode(type, passInstance);
+            if (CurrentDetailPoint.HasValue) node.PassInstance.InjectionPoint = CurrentDetailPoint.Value;
+            if (convertMousePosition || notifyAdded) OnPassAdded?.Invoke(node.PassInstance);
             var finalPosition = convertMousePosition ? contentViewContainer.WorldToLocal(position) : position;
             node.SetPosition(new Rect(finalPosition, Vector2.zero));
             AddElement(node);
             ClearSelection();
             AddToSelection(node);
             OnSelectionChanged?.Invoke(selection);
+            if (convertMousePosition || notifyAdded) OnGraphChanged?.Invoke();
             return node;
         }
 
@@ -190,11 +212,12 @@ namespace Tsukuyomi.Rendering.Editor
             var clipboard = new ClipboardData();
             foreach (TsukuyomiPassNode node in elements.OfType<TsukuyomiPassNode>())
             {
+                var definition = ResolveDefinition?.Invoke(node.PassInstance.NodeId) ?? node.PassInstance;
                 clipboard.Passes.Add(new ClipboardPassData
                 {
-                    TypeName = node.PassType.AssemblyQualifiedName,
-                    PassJson = JsonUtility.ToJson(node.PassInstance),
-                    Position = node.GetPosition().position
+                    TypeName = definition.GetType().AssemblyQualifiedName,
+                    PassJson = JsonUtility.ToJson(definition),
+                    Position = AuthoredPosition(node)
                 });
             }
 
@@ -214,7 +237,8 @@ namespace Tsukuyomi.Rendering.Editor
             foreach (ClipboardPassData passData in clipboard.Passes)
             {
                 Type type = Type.GetType(passData.TypeName);
-                if (type == null || !typeof(RenderPassBase).IsAssignableFrom(type) || type.IsAbstract)
+                if (type == null || !typeof(RenderPassBase).IsAssignableFrom(type) || type.IsAbstract
+                    || !PassEditorTypes.CanRunInPlayer(type))
                     continue;
 
                 bool supportsPoint = type.GetCustomAttributes<InjectionPointAttribute>(true)
@@ -222,14 +246,16 @@ namespace Tsukuyomi.Rendering.Editor
                 if (!supportsPoint)
                     continue;
 
+                if (CanAddType != null && !CanAddType(type)) continue;
                 var pass = (RenderPassBase)Activator.CreateInstance(type);
                 JsonUtility.FromJsonOverwrite(passData.PassJson, pass);
+                pass.RenewNodeId();
                 pass.InjectionPoint = CurrentDetailPoint.Value;
                 TsukuyomiPassNode node = CreatePassNode(
                     type,
                     passData.Position + new Vector2(30.0f, 30.0f),
                     false,
-                    pass);
+                    pass, true);
                 AddToSelection(node);
             }
 
@@ -238,6 +264,7 @@ namespace Tsukuyomi.Rendering.Editor
 
         private static string GetPassCategory(Type type)
         {
+            if (typeof(RenderPassDefinition).IsAssignableFrom(type)) return "Effects";
             if (typeof(PostPass).IsAssignableFrom(type)) return "Post";
             if (typeof(RasterPass).IsAssignableFrom(type)) return "Raster";
             if (typeof(GraphFeaturePass).IsAssignableFrom(type)) return "Graph Feature";

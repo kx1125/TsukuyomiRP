@@ -6,6 +6,17 @@ namespace Tsukuyomi.Rendering
 {
     internal sealed class TsukuyomiScreenSpaceGlobalIlluminationHistory : BufferedTextureHistory
     {
+        private object _passOwner;
+        internal void BindOwner(object owner)
+        {
+            if (ReferenceEquals(_passOwner, owner)) return;
+            Reset(); _passOwner = owner;
+        }
+        internal void ReleaseOwner(object owner)
+        {
+            if (!ReferenceEquals(_passOwner, owner)) return;
+            Reset(); _passOwner = null;
+        }
         private int _normalId;
         private int _gi0Id;
         private int _gi1Id;

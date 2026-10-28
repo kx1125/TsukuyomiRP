@@ -11,35 +11,26 @@ namespace Tsukuyomi.Rendering
     public class TsukuyomiBridgePass : ScriptableRenderPass
     {
         private readonly System.Collections.Generic.List<TextureSlot> _textureSlots = new();
-        private readonly PassRegistry _registry;
-        private readonly InjectionPoint _injectionPoint;
+        private readonly RenderPassBase _pass;
         private readonly ResourceHub _resourceHub;
 
-        public TsukuyomiBridgePass(PassRegistry registry, InjectionPoint injectionPoint, ResourceHub resourceHub)
+        public TsukuyomiBridgePass(RenderPassBase pass, ResourceHub resourceHub)
         {
-            _registry = registry;
-            _injectionPoint = injectionPoint;
+            _pass = pass;
             _resourceHub = resourceHub;
         }
 
         public bool ConfigureInputFromTextureSlots(FrameContext? frame = null)
         {
             ScriptableRenderPassInput inputs = ScriptableRenderPassInput.None;
-            bool hasPasses = false;
             requiresIntermediateTexture = false;
-
-            var passes = _registry.GetPasses(_injectionPoint);
-            for (int i = 0; i < passes.Count; i++)
+            bool active = _pass.Enabled && (!frame.HasValue || (_pass.IsActive(frame.Value)
+                && frame.Value.URPFrameData.GetOrCreate<ResourceRequirements>().CanRecord(_pass)));
+            if (active)
             {
-                RenderPassBase pass = passes[i];
-                if (frame.HasValue && !pass.IsActive(frame.Value))
-                    continue;
-                if (frame.HasValue && !frame.Value.URPFrameData.GetOrCreate<ResourceRequirements>().CanRecord(pass))
-                    continue;
-                hasPasses = true;
-                requiresIntermediateTexture |= pass.RequiresIntermediateColorTarget;
+                requiresIntermediateTexture = _pass.RequiresIntermediateColorTarget;
                 _textureSlots.Clear();
-                pass.CollectTextureSlots(_textureSlots);
+                _pass.CollectTextureSlots(_textureSlots);
                 foreach (TextureSlot slot in _textureSlots)
                 {
                     inputs |= ToRenderPassInput(slot);
@@ -48,12 +39,11 @@ namespace Tsukuyomi.Rendering
             }
 
             ConfigureInput(inputs);
-            return hasPasses;
+            return active;
         }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
-            var passes = _registry.GetPasses(_injectionPoint);
             var cameraData = frameData.Get<UniversalCameraData>();
             ResourceHub cameraResources = cameraData.camera ? _resourceHub?.ForCamera(cameraData.camera) : _resourceHub;
             var frameContext = new FrameContext(frameData, cameraResources);
@@ -64,12 +54,12 @@ namespace Tsukuyomi.Rendering
 
             var lightData = frameData.Get<UniversalLightData>();
 
-            for (int i = 0; i < passes.Count; i++)
+            if (_pass.Enabled)
             {
-                RenderPassBase pass = passes[i];
-                if (!pass.IsActive(frameContext)) continue;
-                if (!frameData.GetOrCreate<ResourceRequirements>().CanRecord(pass)) continue;
-                if (frameResources.IsActiveTargetBackBuffer && SamplesCameraColor(pass)) continue;
+                RenderPassBase pass = _pass;
+                if (!pass.IsActive(frameContext)) return;
+                if (!frameData.GetOrCreate<ResourceRequirements>().CanRecord(pass)) return;
+                if (frameResources.IsActiveTargetBackBuffer && SamplesCameraColor(pass)) return;
 
                 pass.Setup(frameContext);
 
@@ -133,9 +123,7 @@ namespace Tsukuyomi.Rendering
 
         internal void CollectResourceRequirements(ResourceRequirements requirements, in FrameContext frame)
         {
-            var passes = _registry.GetPasses(_injectionPoint);
-            for (int i = 0; i < passes.Count; i++)
-                requirements.Collect(passes[i], renderPassEvent, frame);
+            requirements.Collect(_pass, renderPassEvent, frame);
         }
 
         private static ScriptableRenderPassInput ToRenderPassInput(TextureSlot slot)

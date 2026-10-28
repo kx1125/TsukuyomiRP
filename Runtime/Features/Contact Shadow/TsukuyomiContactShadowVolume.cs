@@ -46,9 +46,9 @@ namespace Tsukuyomi.Rendering
         public readonly int SampleCount;
         public readonly int FilterSize;
 
-        private TsukuyomiContactShadowResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiContactShadowVolume volume)
+        private TsukuyomiContactShadowResolvedSettings(ContactShadowPass profile, TsukuyomiContactShadowVolume volume)
         {
-            Enabled = profile.EnableContactShadow && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             Length = Resolve(volume?.length, profile.ContactShadowLength);
             DistanceScaleFactor = Resolve(volume?.distanceScaleFactor, profile.ContactShadowDistanceScaleFactor);
             MaxDistance = Resolve(volume?.maxDistance, profile.ContactShadowMaxDistance);
@@ -62,7 +62,7 @@ namespace Tsukuyomi.Rendering
             FilterSize = Resolve(volume?.filterSize, profile.ContactShadowFilterSize);
         }
 
-        public static TsukuyomiContactShadowResolvedSettings From(TsukuyomiPipelineProfile profile, TsukuyomiContactShadowVolume volume)
+        public static TsukuyomiContactShadowResolvedSettings From(ContactShadowPass profile, TsukuyomiContactShadowVolume volume)
         {
             return new TsukuyomiContactShadowResolvedSettings(profile, volume);
         }

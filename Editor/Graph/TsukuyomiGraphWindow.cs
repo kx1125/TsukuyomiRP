@@ -1,803 +1,359 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
 using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using Tsukuyomi.Rendering;
 
 namespace Tsukuyomi.Rendering.Editor
 {
-    public class TsukuyomiGraphWindow : EditorWindow
+    public sealed class TsukuyomiGraphWindow : EditorWindow
     {
-        private const float SidebarWidth = 280f;
-        private const float InspectorWidth = 340f;
-
-        [System.Serializable]
-        public class PassNodeData
-        {
-            public string TypeName;
-            public Vector2 Position;
-
-            [NonSerialized]
-            public RenderPassBase PassInstance;
-        }
-
-        private sealed class PassInspectorHost : ScriptableObject
-        {
-            [SerializeReference]
-            public RenderPassBase Pass;
-        }
-
-        [System.Serializable]
-        public class InjectionPointNodeData
-        {
-            public InjectionPoint Point;
-            public Vector2 Position;
-            public List<PassNodeData> ChildPasses = new();
-        }
-
-        [System.Serializable]
-        public class GraphData
-        {
-            public List<InjectionPointNodeData> InjectionPoints = new();
-        }
+        [Serializable] public sealed class NodeLayout { public string NodeId; public Vector2 Position; }
+        [Serializable] public sealed class StageLayout { public InjectionPoint Point; public Vector2 Position; }
+        [Serializable] public sealed class GraphLayout
+        { public List<NodeLayout> Nodes = new(); public List<StageLayout> Stages = new(); }
+        [SerializeField] private TsukuyomiPipelineProfile _profile;
+        [SerializeField] private TsukuyomiPipelineProfile _draft;
+        private SerializedObject _serializedDraft;
+        private SerializedObject _serializedProfile;
+        private TsukuyomiGraphView _view;
+        private VisualElement _inspector;
+        private Label _status;
+        private InjectionPoint? _point;
+        [SerializeField] private string _selectedId;
+        [SerializeField] private int _loadedRevision;
+        [SerializeField] private string _loadedProfileState;
+        [SerializeField] private string _savedDraftState;
+        [SerializeField] private string _observedDraftState;
+        private bool _profileChanged;
+        private bool _rebuilding;
 
         public static void Open(TsukuyomiPipelineProfile profile)
         {
-            var window = GetWindow<TsukuyomiGraphWindow>();
-            window.titleContent = new GUIContent("Tsukuyomi Graph");
-            window.minSize = new Vector2(900, 520);
-            window.SetProfile(profile);
+            var window = GetWindow<TsukuyomiGraphWindow>(); window.titleContent = new GUIContent("Tsukuyomi Graph");
+            window.SetProfile(profile); window.Show();
         }
-
-        private TsukuyomiGraphView _graphView;
-        private TsukuyomiPipelineProfile _profile;
-
-        private ObjectField _profileField;
-        private Label _breadcrumbLabel;
-        private Label _selectionLabel;
-        private Label _statsLabel;
-        private Label _statusLabel;
-        private ToolbarButton _backButton;
-        private ToolbarButton _saveButton;
-        private ToolbarButton _inspectorButton;
-        private TwoPaneSplitView _graphInspectorSplitView;
-        private VisualElement _inspectorPanel;
-        private ScrollView _inspectorContent;
-        private PassInspectorHost _inspectorHost;
-        private SerializedObject _inspectorObject;
-        private TsukuyomiPassNode _selectedPassNode;
-
-        private GraphData _graphData = new GraphData();
-        private InjectionPoint? _currentDetailPoint;
-        private bool _suppressGraphChanges;
-        private bool _inspectorVisible = true;
-
         public void SetProfile(TsukuyomiPipelineProfile profile)
         {
-            if (_profile == profile)
-                return;
-
-            if (!ResolveUnsavedChanges())
-            {
-                _profileField?.SetValueWithoutNotify(_profile);
-                return;
-            }
-
-            _profile = profile;
-            if (_profileField != null)
-                _profileField.SetValueWithoutNotify(profile);
-
-            LoadGraph();
-            UpdateChrome();
+            if (_profile == profile && _draft != null) return;
+            if (!ResolveUnsavedChanges()) return;
+            _profile = profile; LoadDraft();
         }
-
         public void CreateGUI()
         {
-            Undo.undoRedoPerformed -= OnUndoRedo;
-            Undo.undoRedoPerformed += OnUndoRedo;
-
-            if (_inspectorHost == null)
-            {
-                _inspectorHost = CreateInstance<PassInspectorHost>();
-                _inspectorHost.hideFlags = HideFlags.DontSave;
-                _inspectorObject = new SerializedObject(_inspectorHost);
-            }
-
-            saveChangesMessage = "The Tsukuyomi graph contains changes that have not been baked to the selected profile.";
+            Undo.undoRedoPerformed -= OnUndoRedo; Undo.undoRedoPerformed += OnUndoRedo;
             rootVisualElement.Clear();
-            rootVisualElement.style.flexGrow = 1;
-
-            BuildToolbar();
-            BuildBody();
-            BuildStatusBar();
-
-            rootVisualElement.RegisterCallback<KeyDownEvent>(evt =>
-            {
-                if ((evt.ctrlKey || evt.commandKey) && evt.keyCode == KeyCode.S)
-                {
-                    BakeGraph();
-                    evt.StopPropagation();
-                }
-            });
-
-            LoadGraph();
-            UpdateChrome();
-
-            rootVisualElement.schedule.Execute(() => _graphView?.FrameAllNodes()).ExecuteLater(50);
-        }
-
-        private void BuildToolbar()
-        {
             var toolbar = new Toolbar();
-            toolbar.style.height = 22;
-
-            _profileField = new ObjectField
+            var picker = new ObjectField { objectType = typeof(TsukuyomiPipelineProfile), value = _profile };
+            picker.style.width = 280;
+            picker.RegisterValueChangedCallback(e =>
             {
-                objectType = typeof(TsukuyomiPipelineProfile),
-                allowSceneObjects = false,
-                label = "Profile"
-            };
-            _profileField.style.width = 320;
-            _profileField.RegisterValueChangedCallback(evt => SetProfile(evt.newValue as TsukuyomiPipelineProfile));
-            toolbar.Add(_profileField);
-
-            _backButton = new ToolbarButton(SwitchToMainView) { text = "Back" };
-            toolbar.Add(_backButton);
-
-            toolbar.Add(new ToolbarSpacer());
-
-            var frameButton = new ToolbarButton(() => _graphView?.FrameAllNodes()) { text = "Frame All" };
-            toolbar.Add(frameButton);
-
-            _inspectorButton = new ToolbarButton(ToggleInspector) { text = "Graph Inspector" };
-            toolbar.Add(_inspectorButton);
-
-            _saveButton = new ToolbarButton(BakeGraph) { text = "Save & Bake" };
-            toolbar.Add(_saveButton);
-
+                SetProfile(e.newValue as TsukuyomiPipelineProfile);
+                picker.SetValueWithoutNotify(_profile);
+            });
+            toolbar.Add(picker);
+            toolbar.Add(new ToolbarButton(BakeGraph) { text = "Save & Apply" });
+            toolbar.Add(new ToolbarButton(() => { if (ResolveUnsavedChanges()) LoadDraft(); }) { text = "Reload" });
+            toolbar.Add(new ToolbarButton(() => { CommitPendingEdits(); SynchronizeVisiblePasses(); CaptureLayout(); _point = null; Rebuild(); }) { text = "All Stages" });
+            toolbar.Add(new ToolbarButton(() => _view?.FrameAllNodes()) { text = "Frame All" });
             rootVisualElement.Add(toolbar);
-        }
-
-        private void BuildBody()
-        {
-            var splitView = new TwoPaneSplitView(0, SidebarWidth, TwoPaneSplitViewOrientation.Horizontal);
-            splitView.style.flexGrow = 1;
-
-            splitView.Add(BuildSidebar());
-
-            _graphInspectorSplitView = new TwoPaneSplitView(1, InspectorWidth, TwoPaneSplitViewOrientation.Horizontal);
-            _graphInspectorSplitView.style.flexGrow = 1;
-            _graphInspectorSplitView.Add(BuildGraphPanel());
-            _graphInspectorSplitView.Add(BuildGraphInspector());
-            splitView.Add(_graphInspectorSplitView);
-            rootVisualElement.Add(splitView);
-        }
-
-        private VisualElement BuildGraphInspector()
-        {
-            _inspectorPanel = new VisualElement { name = "TsukuyomiGraphInspector" };
-            _inspectorPanel.style.flexGrow = 1;
-            _inspectorPanel.style.backgroundColor = new Color(0.18f, 0.18f, 0.18f);
-            _inspectorPanel.style.borderLeftWidth = 1;
-            _inspectorPanel.style.borderLeftColor = new Color(0.08f, 0.08f, 0.08f);
-
-            var title = MakeSectionTitle("Graph Inspector");
-            title.style.marginLeft = 10;
-            title.style.marginTop = 10;
-            _inspectorPanel.Add(title);
-
-            _inspectorContent = new ScrollView(ScrollViewMode.Vertical);
-            _inspectorContent.style.flexGrow = 1;
-            _inspectorContent.style.paddingLeft = 10;
-            _inspectorContent.style.paddingRight = 10;
-            _inspectorContent.style.paddingBottom = 10;
-            _inspectorContent.RegisterCallback<SerializedPropertyChangeEvent>(OnInspectorPropertyChanged);
-            _inspectorPanel.Add(_inspectorContent);
-
-            ShowInspectorMessage("Select a pass node to edit its settings.");
-            return _inspectorPanel;
-        }
-
-        private VisualElement BuildSidebar()
-        {
-            var sidebar = new VisualElement { name = "TsukuyomiGraphSidebar" };
-            sidebar.style.flexGrow = 1;
-            sidebar.style.paddingLeft = 8;
-            sidebar.style.paddingRight = 8;
-            sidebar.style.paddingTop = 8;
-            sidebar.style.paddingBottom = 8;
-            sidebar.style.backgroundColor = new Color(0.18f, 0.18f, 0.18f);
-            sidebar.style.borderRightWidth = 1;
-            sidebar.style.borderRightColor = new Color(0.08f, 0.08f, 0.08f);
-
-            sidebar.Add(MakeSectionTitle("Navigation"));
-            _breadcrumbLabel = MakeInfoLabel();
-            sidebar.Add(_breadcrumbLabel);
-
-            sidebar.Add(MakeSectionTitle("Selection"));
-            _selectionLabel = MakeInfoLabel();
-            sidebar.Add(_selectionLabel);
-
-            sidebar.Add(MakeSectionTitle("Graph"));
-            _statsLabel = MakeInfoLabel();
-            sidebar.Add(_statsLabel);
-
-            var help = MakeInfoLabel();
-            help.text = "Double-click an injection point to edit its passes. Right-click in a detail view to add a pass.";
-            help.style.whiteSpace = WhiteSpace.Normal;
-            sidebar.Add(MakeSectionTitle("Hints"));
-            sidebar.Add(help);
-
-            return sidebar;
-        }
-
-        private VisualElement BuildGraphPanel()
-        {
-            var graphPanel = new VisualElement { name = "TsukuyomiGraphPanel" };
-            graphPanel.style.flexGrow = 1;
-            graphPanel.style.backgroundColor = new Color(0.13f, 0.13f, 0.13f);
-
-            _graphView = new TsukuyomiGraphView
+            _status = new Label(); _status.style.paddingLeft = 8; rootVisualElement.Add(_status);
+            var body = new VisualElement(); body.style.flexDirection = FlexDirection.Row; body.style.flexGrow = 1;
+            _view = new TsukuyomiGraphView(); _view.style.flexGrow = 1;
+            _view.OnNodeDoubleClicked += point => { CommitPendingEdits(); CaptureLayout(); _point = point; Rebuild(); };
+            _view.OnBeforeGraphChanged += BeforeGraphChange;
+            _view.OnGraphChanged += OnGraphChange;
+            _view.OnPassAdded += pass => { if (!_rebuilding && _draft) { pass.EnsureNodeId(); _draft.Passes.Add(pass); } };
+            _view.OnSelectionChanged += SelectionChanged; _view.CanAddType = CanAdd;
+            _view.ResolveDefinition = id => _draft?.Passes.Find(p => p?.NodeId == id);
+            body.Add(_view);
+            var scroll = new ScrollView(); scroll.style.width = 350; scroll.style.paddingLeft = 10; scroll.style.paddingRight = 10;
+            _inspector = scroll.contentContainer; body.Add(scroll); rootVisualElement.Add(body);
+            if (!_draft && _profile) LoadDraft();
+            else
             {
-                name = "Tsukuyomi Graph"
-            };
-            _graphView.StretchToParentSize();
-            _graphView.OnNodeDoubleClicked += SwitchToDetailView;
-            _graphView.OnSelectionChanged += UpdateSelection;
-            _graphView.OnGraphChanged += MarkGraphDirty;
-            graphPanel.Add(_graphView);
-
-            return graphPanel;
+                // Existing windows may survive an assembly reload.
+                if (_draft)
+                {
+                    bool wasReadOnly = (_draft.hideFlags & HideFlags.NotEditable) != 0;
+                    _draft.hideFlags &= ~HideFlags.NotEditable;
+                    if (wasReadOnly || _observedDraftState == null) _observedDraftState = EditorJsonUtility.ToJson(_draft);
+                    if (!hasUnsavedChanges && (wasReadOnly || _savedDraftState == null)) _savedDraftState = _observedDraftState;
+                }
+                if (_profile && _loadedProfileState == null) _loadedProfileState = EditorJsonUtility.ToJson(_profile);
+                Rebuild();
+            }
         }
-
-        private void BuildStatusBar()
+        private bool CanAdd(Type type)
         {
-            var statusBar = new VisualElement();
-            statusBar.style.height = 20;
-            statusBar.style.flexDirection = FlexDirection.Row;
-            statusBar.style.alignItems = Align.Center;
-            statusBar.style.paddingLeft = 8;
-            statusBar.style.paddingRight = 8;
-            statusBar.style.backgroundColor = new Color(0.16f, 0.16f, 0.16f);
-            statusBar.style.borderTopWidth = 1;
-            statusBar.style.borderTopColor = new Color(0.08f, 0.08f, 0.08f);
-
-            _statusLabel = new Label();
-            _statusLabel.style.unityFontStyleAndWeight = FontStyle.Normal;
-            _statusLabel.style.fontSize = 11;
-            _statusLabel.style.color = new Color(0.72f, 0.72f, 0.72f);
-            statusBar.Add(_statusLabel);
-
-            rootVisualElement.Add(statusBar);
+            var prototype = (RenderPassBase)Activator.CreateInstance(type);
+            return prototype.AllowMultiple || !_draft.Passes.Any(p => p?.GetType() == type);
         }
-
-        private static Label MakeSectionTitle(string text)
+        private void LoadDraft()
         {
-            var label = new Label(text);
-            label.style.marginTop = 8;
-            label.style.marginBottom = 4;
-            label.style.unityFontStyleAndWeight = FontStyle.Bold;
-            label.style.fontSize = 11;
-            label.style.color = new Color(0.82f, 0.82f, 0.82f);
-            return label;
-        }
-
-        private static Label MakeInfoLabel()
-        {
-            var label = new Label();
-            label.style.fontSize = 11;
-            label.style.color = new Color(0.68f, 0.68f, 0.68f);
-            label.style.marginBottom = 4;
-            return label;
-        }
-
-        private void ToggleInspector()
-        {
-            _inspectorVisible = !_inspectorVisible;
-            if (_graphInspectorSplitView != null)
+            ReleaseDraftBinding();
+            _serializedProfile?.Dispose(); _serializedProfile = null;
+            if (_draft) DestroyImmediate(_draft);
+            _draft = null; hasUnsavedChanges = false; _profileChanged = false;
+            _loadedProfileState = _savedDraftState = _observedDraftState = null;
+            if (_profile && PassProfileSchema.IsSupported(_profile))
             {
-                if (_inspectorVisible)
-                    _graphInspectorSplitView.UnCollapse();
+                _draft = Instantiate(_profile);
+                // HideAndDontSave includes NotEditable, which disables bound parameter controls.
+                _draft.hideFlags = HideFlags.HideInHierarchy | HideFlags.DontSave;
+                _serializedDraft = new SerializedObject(_draft); _loadedRevision = _profile.Revision;
+                _loadedProfileState = EditorJsonUtility.ToJson(_profile);
+                _savedDraftState = _observedDraftState = EditorJsonUtility.ToJson(_draft);
+                _serializedProfile = new SerializedObject(_profile);
+            }
+            saveChangesMessage = "The graph has unapplied changes."; Rebuild();
+        }
+        private GraphLayout ReadLayout()
+        {
+            try { return string.IsNullOrEmpty(_draft.GraphLayoutData) ? new GraphLayout() : JsonUtility.FromJson<GraphLayout>(_draft.GraphLayoutData) ?? new GraphLayout(); }
+            catch { return new GraphLayout(); }
+        }
+        private void Rebuild()
+        {
+            if (_view == null) return;
+            _rebuilding = true; _view.SuppressChanges = true;
+            try
+            {
+                _view.ClearGraph(); _inspector.Unbind(); _inspector.Clear(); _view.CurrentDetailPoint = _point;
+                if (!_draft)
+                {
+                    _status.text = _profile ? "Unsupported Profile schema. Restore a migrated Profile before editing." : "Select a Profile.";
+                    return;
+                }
+                if (SerializationUtility.HasManagedReferencesWithMissingTypes(_draft))
+                { _status.text = "Missing pass type. Restore its assembly; saving is disabled."; return; }
+                var layout = ReadLayout();
+                if (_point.HasValue)
+                {
+                    int i = 0;
+                    foreach (var pass in _draft.Passes)
+                    {
+                        if (pass == null || pass.InjectionPoint != _point.Value) continue;
+                        var position = layout.Nodes.FirstOrDefault(n => n.NodeId == pass.NodeId)?.Position ?? new Vector2(20, i * 180);
+                        _view.CreatePassNode(pass.GetType(), position, false, pass); i++;
+                    }
+                }
                 else
-                    _graphInspectorSplitView.CollapseChild(1);
+                {
+                    int i = 0;
+                    foreach (InjectionPoint point in Enum.GetValues(typeof(InjectionPoint)))
+                    {
+                        var position = layout.Stages.FirstOrDefault(n => n.Point == point)?.Position ?? new Vector2(i * 310, 20);
+                        var node = _view.CreateInjectionPointNode(point, position);
+                        node.extensionContainer.Add(new Label($"{_draft.Passes.Count(p => p != null && p.InjectionPoint == point)} effects"));
+                        node.RefreshExpandedState(); i++;
+                    }
+                    _view.ConnectInjectionPoints();
+                }
+                if (_selectedId != null) ShowInspector(_selectedId);
+                UpdateStatus();
             }
-            if (_inspectorButton != null)
-                _inspectorButton.text = _inspectorVisible ? "Hide Inspector" : "Graph Inspector";
+            finally { _rebuilding = false; _view.SuppressChanges = false; }
         }
-
-        private void ShowInspectorMessage(string message)
+        private void BeforeGraphChange()
         {
-            if (_inspectorContent == null)
-                return;
-
-            _selectedPassNode = null;
-            _inspectorContent.Unbind();
-            _inspectorContent.Clear();
-            var label = MakeInfoLabel();
-            label.text = message;
-            label.style.whiteSpace = WhiteSpace.Normal;
-            _inspectorContent.Add(label);
+            if (_rebuilding || !_draft) return;
+            CommitPendingEdits();
+            Undo.RegisterCompleteObjectUndo(_draft, "Edit Tsukuyomi graph");
         }
-
-        private void ShowPassInspector(TsukuyomiPassNode node)
+        private void OnGraphChange()
         {
-            if (_inspectorContent == null || _inspectorHost == null || node?.PassInstance == null)
-                return;
-
-            _selectedPassNode = node;
-            _inspectorContent.Unbind();
-            _inspectorContent.Clear();
-
-            var passName = new Label(node.PassInstance.Name);
-            passName.style.unityFontStyleAndWeight = FontStyle.Bold;
-            passName.style.fontSize = 13;
-            passName.style.marginBottom = 3;
-            _inspectorContent.Add(passName);
-
-            var typeName = MakeInfoLabel();
-            typeName.text = node.PassType.FullName;
-            typeName.style.whiteSpace = WhiteSpace.Normal;
-            _inspectorContent.Add(typeName);
-
-            var injectionPoint = new TextField("Injection Point")
+            if (_rebuilding || !_draft) return;
+            CommitPendingEdits();
+            SynchronizeVisiblePasses();
+            CaptureLayout(); TrackDraftChanges();
+            // Serialized property paths use array indices; rebind the selected stable ID after sorting/deletion.
+            if (_selectedId != null) ShowInspector(_selectedId);
+            UpdateStatus();
+        }
+        private void SynchronizeVisiblePasses()
+        {
+            if (_rebuilding || !_draft || _view == null) return;
+            if (_point.HasValue)
             {
-                value = _currentDetailPoint?.ToString() ?? node.PassInstance.InjectionPoint.ToString(),
-                isReadOnly = true
-            };
-            injectionPoint.SetEnabled(false);
-            injectionPoint.style.marginBottom = 8;
-            _inspectorContent.Add(injectionPoint);
-
-            _inspectorHost.Pass = node.PassInstance;
-            _inspectorObject.Update();
-            SerializedProperty passProperty = _inspectorObject.FindProperty(nameof(PassInspectorHost.Pass));
-            SerializedProperty iterator = passProperty.Copy();
-            SerializedProperty end = iterator.GetEndProperty();
-            bool enterChildren = true;
-
-            while (iterator.NextVisible(enterChildren) && !SerializedProperty.EqualContents(iterator, end))
-            {
-                enterChildren = false;
-                _inspectorContent.Add(new PropertyField(iterator.Copy()));
+                // The draft is authoritative even when Unity replaces a managed reference during serialization.
+                if (_draft.Passes.Where(p => p != null).GroupBy(p => p.NodeId).Any(g => g.Count() > 1)) return;
+                var nodes = _view.nodes.OfType<TsukuyomiPassNode>().OrderBy(n => TsukuyomiGraphView.AuthoredPosition(n).y).ToList();
+                var ids = nodes.Select(n => n.PassInstance.NodeId).ToHashSet();
+                var visible = nodes.Select(n => _draft.Passes.Find(p => p?.NodeId == n.PassInstance.NodeId))
+                    .Where(p => p != null && p.InjectionPoint == _point).ToList();
+                _draft.Passes.RemoveAll(p => p != null && p.InjectionPoint == _point && !ids.Contains(p.NodeId));
+                int index = 0;
+                for (int i = 0; i < _draft.Passes.Count; i++)
+                    if (_draft.Passes[i]?.InjectionPoint == _point) _draft.Passes[i] = visible[index++];
+                foreach (var node in nodes)
+                {
+                    var definition = _draft.Passes.Find(p => p?.NodeId == node.PassInstance.NodeId);
+                    if (definition != null) node.BindDefinition(definition);
+                }
             }
-
-            _inspectorContent.Bind(_inspectorObject);
         }
-
-        private void OnInspectorPropertyChanged(SerializedPropertyChangeEvent evt)
+        private void CaptureLayout()
         {
-            if (_selectedPassNode?.PassInstance == null || _inspectorObject == null)
-                return;
-
-            _inspectorObject.ApplyModifiedProperties();
-            _selectedPassNode.PassInstance.ValidateSettings();
-            _inspectorObject.Update();
-            MarkGraphDirty();
+            if (_rebuilding || !_draft || _view == null) return;
+            var layout = ReadLayout();
+            foreach (var node in _view.nodes.OfType<TsukuyomiPassNode>())
+            {
+                var entry = layout.Nodes.FirstOrDefault(n => n.NodeId == node.PassInstance.NodeId);
+                if (entry == null) { entry = new NodeLayout { NodeId = node.PassInstance.NodeId }; layout.Nodes.Add(entry); }
+                entry.Position = TsukuyomiGraphView.AuthoredPosition(node);
+            }
+            foreach (var node in _view.nodes.OfType<TsukuyomiInjectionPointNode>())
+            {
+                var entry = layout.Stages.FirstOrDefault(n => n.Point == node.Point);
+                if (entry == null) { entry = new StageLayout { Point = node.Point }; layout.Stages.Add(entry); }
+                entry.Position = TsukuyomiGraphView.AuthoredPosition(node);
+            }
+            layout.Nodes.RemoveAll(n => !_draft.Passes.Any(p => p?.NodeId == n.NodeId));
+            _draft.GraphLayoutData = JsonUtility.ToJson(layout);
         }
-
-        private void OnUndoRedo()
+        private void SelectionChanged(IEnumerable<ISelectable> selection)
         {
-            if (_selectedPassNode?.PassInstance == null || _inspectorObject == null)
-                return;
-
-            _inspectorObject.Update();
-            _selectedPassNode.PassInstance.ValidateSettings();
-            MarkGraphDirty();
-            Repaint();
+            if (_rebuilding) return;
+            var node = selection.OfType<TsukuyomiPassNode>().LastOrDefault();
+            if (node != null) { _selectedId = node.PassInstance.NodeId; ShowInspector(_selectedId); }
         }
-
-        private void MarkGraphDirty()
+        private void ShowInspector(string nodeId)
         {
-            if (_suppressGraphChanges || _profile == null)
-                return;
-
-            hasUnsavedChanges = true;
-            UpdateStatusLabel();
+            CommitPendingEdits();
+            _inspector.Unbind(); _inspector.Clear();
+            int index = _draft.Passes.FindIndex(p => p?.NodeId == nodeId);
+            if (index < 0) return;
+            var definition = _draft.Passes[index];
+            _inspector.Add(new Label(definition.Name));
+            _serializedDraft ??= new SerializedObject(_draft); _serializedDraft.Update();
+            var element = _serializedDraft.FindProperty(nameof(TsukuyomiPipelineProfile.Passes)).GetArrayElementAtIndex(index);
+            element.isExpanded = true;
+            var field = new PropertyField(element, "Parameters"); field.Bind(_serializedDraft);
+            field.TrackSerializedObjectValue(_serializedDraft, _ =>
+            {
+                if (_rebuilding) return;
+                // Observe applied object changes, including nested controls. Ignore initial binding notifications.
+                if (EditorJsonUtility.ToJson(_draft) == _observedDraftState) return;
+                _draft.Passes.Find(p => p?.NodeId == nodeId)?.ValidateSettings();
+                TrackDraftChanges(); UpdateStatus();
+            });
+            _inspector.Add(field);
+            var stages = definition.GetType().GetCustomAttributes<InjectionPointAttribute>(true).Select(a => a.Point).Distinct().ToList();
+            if (stages.Count > 1)
+            {
+                var stage = new PopupField<string>("Stage", stages.Select(s => s.ToString()).ToList(), Mathf.Max(0, stages.IndexOf(definition.InjectionPoint)));
+                stage.RegisterValueChangedCallback(e =>
+                {
+                    CommitPendingEdits();
+                    Undo.RegisterCompleteObjectUndo(_draft, "Move effect stage");
+                    _draft.Passes.Find(p => p?.NodeId == nodeId).InjectionPoint = (InjectionPoint)Enum.Parse(typeof(InjectionPoint), e.newValue);
+                    TrackDraftChanges(); Rebuild();
+                });
+                _inspector.Add(stage);
+            }
+            var details = new Foldout { text = "Compiled passes and dependencies", value = false };
+            using (var plan = new PassSession(_draft, initialize: false))
+            {
+                foreach (var error in plan.Errors) details.Add(new HelpBox(error, HelpBoxMessageType.Error));
+                foreach (var pass in plan.Passes)
+                {
+                    if (!pass.ContributesTo(nodeId)) continue;
+                    var label = new Label($"{(int)pass.Event}: {pass.Name}"); label.style.whiteSpace = WhiteSpace.Normal;
+                    details.Add(label);
+                    foreach (var dependency in pass.DependencyDescriptions)
+                        details.Add(new Label("    ← " + dependency));
+                }
+            }
+            _inspector.Add(details);
         }
-
+        public bool TryApply(out string error)
+        {
+            error = null;
+            if (!_profile || !_draft) { error = "Select a migrated Profile."; return false; }
+            CommitPendingEdits();
+            if (ProfileChanged(force: true)) { error = "Profile changed outside this graph. Reload before applying; the asset has not been overwritten."; return false; }
+            if (SerializationUtility.HasManagedReferencesWithMissingTypes(_draft)) { error = "Restore missing pass types before saving."; return false; }
+            SynchronizeVisiblePasses();
+            CaptureLayout();
+            foreach (var pass in _draft.Passes) { pass?.EnsureNodeId(); pass?.ValidateSettings(); }
+            using (var plan = new PassSession(_draft, initialize: false))
+                if (!plan.Valid) { error = string.Join("\n", plan.Errors); return false; }
+            Undo.RegisterCompleteObjectUndo(_profile, "Apply Tsukuyomi graph");
+            string assetName = _profile.name;
+            EditorUtility.CopySerialized(_draft, _profile);
+            _profile.name = assetName;
+            _profile.hideFlags = HideFlags.None; _profile.NotifyChanged();
+            EditorUtility.SetDirty(_profile); AssetDatabase.SaveAssetIfDirty(_profile);
+            _loadedRevision = _profile.Revision; _loadedProfileState = EditorJsonUtility.ToJson(_profile);
+            _savedDraftState = _observedDraftState = EditorJsonUtility.ToJson(_draft);
+            _profileChanged = false; hasUnsavedChanges = false; UpdateStatus(); return true;
+        }
+        private void BakeGraph()
+        {
+            if (!TryApply(out var error)) { if (_status != null) _status.text = error; Debug.LogWarning(error, _profile); }
+        }
         private bool ResolveUnsavedChanges()
         {
-            if (!hasUnsavedChanges)
-                return true;
-
-            int result = EditorUtility.DisplayDialogComplex(
-                "Unsaved Tsukuyomi Graph",
-                saveChangesMessage,
-                "Save & Bake",
-                "Cancel",
-                "Discard");
-
-            if (result == 1)
-                return false;
-            if (result == 0)
-                BakeGraph();
-            else
-                hasUnsavedChanges = false;
-
-            return true;
+            CommitPendingEdits();
+            if (!hasUnsavedChanges) return true;
+            int action = EditorUtility.DisplayDialogComplex("Unapplied graph changes", saveChangesMessage, "Save & Apply", "Cancel", "Discard");
+            if (action == 1) return false;
+            if (action == 0) { BakeGraph(); return !hasUnsavedChanges; }
+            hasUnsavedChanges = false; return true;
         }
-
-        public override void SaveChanges()
+        public override void SaveChanges() { BakeGraph(); if (!hasUnsavedChanges) base.SaveChanges(); }
+        public override void DiscardChanges() { LoadDraft(); base.DiscardChanges(); }
+        private void OnUndoRedo()
         {
-            BakeGraph();
-            base.SaveChanges();
+            if (!_draft) return;
+            // Undo in another Inspector must not make this graph dirty or replace its controls.
+            if (EditorJsonUtility.ToJson(_draft) == _observedDraftState) { UpdateStatus(); return; }
+            ReleaseDraftBinding();
+            _serializedDraft = new SerializedObject(_draft); TrackDraftChanges(); Rebuild();
         }
-
-        public override void DiscardChanges()
+        private void CommitPendingEdits()
         {
-            hasUnsavedChanges = false;
-            LoadGraph();
-            base.DiscardChanges();
+            rootVisualElement.focusController?.focusedElement?.Blur();
+            if (_serializedDraft != null && _serializedDraft.ApplyModifiedProperties()) TrackDraftChanges();
         }
-
+        private void TrackDraftChanges()
+        {
+            if (!_draft) return;
+            _observedDraftState = EditorJsonUtility.ToJson(_draft);
+            hasUnsavedChanges = _observedDraftState != _savedDraftState;
+        }
+        private bool ProfileChanged(bool force = false)
+        {
+            if (!_profile) return false;
+            _serializedProfile ??= new SerializedObject(_profile);
+            // Serialize only on actual source changes (or the final apply check), not every editor tick.
+            if (_serializedProfile.UpdateIfRequiredOrScript() || force)
+                _profileChanged = _profile.Revision != _loadedRevision || EditorJsonUtility.ToJson(_profile) != _loadedProfileState;
+            return _profileChanged;
+        }
+        private void ReleaseDraftBinding()
+        {
+            _inspector?.Unbind();
+            _serializedDraft?.Dispose(); _serializedDraft = null;
+        }
+        private void UpdateStatus()
+        {
+            if (_status == null || !_profile) return;
+            _status.text = ProfileChanged() ? "Profile changed externally — reload before applying."
+                : $"{_profile.name} · {(_point.HasValue ? _point.Value.ToString() : "All Stages")} · {(hasUnsavedChanges ? "Unapplied changes" : "Saved")}";
+        }
+        private void OnInspectorUpdate() => UpdateStatus();
         private void OnDestroy()
         {
             Undo.undoRedoPerformed -= OnUndoRedo;
-            if (_inspectorHost != null)
-                DestroyImmediate(_inspectorHost);
-        }
-
-        private void EnsureGraphData()
-        {
-            if (_profile == null) return;
-
-            _graphData = new GraphData();
-            if (!string.IsNullOrEmpty(_profile.GraphLayoutData))
-            {
-                try
-                {
-                    _graphData = JsonUtility.FromJson<GraphData>(_profile.GraphLayoutData) ?? new GraphData();
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogError($"Failed to load graph layout: {e.Message}");
-                }
-            }
-
-            var points = (InjectionPoint[])System.Enum.GetValues(typeof(InjectionPoint));
-            float currentX = 0;
-            foreach (var point in points)
-            {
-                if (!_graphData.InjectionPoints.Any(p => p.Point == point))
-                {
-                    _graphData.InjectionPoints.Add(new InjectionPointNodeData
-                    {
-                        Point = point,
-                        Position = new Vector2(currentX, 0)
-                    });
-                    currentX += 300;
-                }
-            }
-
-            BindPassInstances();
-        }
-
-        private void BindPassInstances()
-        {
-            var reusablePasses = BuildReusablePassMap(_profile.Passes);
-            var assignedPasses = new HashSet<RenderPassBase>();
-
-            foreach (var pointData in _graphData.InjectionPoints)
-            {
-                foreach (var passData in pointData.ChildPasses)
-                {
-                    Type type = Type.GetType(passData.TypeName);
-                    if (type == null)
-                        continue;
-
-                    RenderPassBase sourcePass = TakeReusablePass(reusablePasses, pointData.Point, type);
-                    passData.PassInstance = sourcePass != null
-                        ? ClonePass(sourcePass)
-                        : (RenderPassBase)Activator.CreateInstance(type);
-                    passData.PassInstance.InjectionPoint = pointData.Point;
-                    if (sourcePass != null)
-                        assignedPasses.Add(sourcePass);
-                }
-            }
-
-            if (_profile.Passes == null)
-                return;
-
-            foreach (var pass in _profile.Passes)
-            {
-                if (pass == null || assignedPasses.Contains(pass))
-                    continue;
-
-                var pointData = _graphData.InjectionPoints.First(p => p.Point == pass.InjectionPoint);
-                pointData.ChildPasses.Add(new PassNodeData
-                {
-                    TypeName = pass.GetType().AssemblyQualifiedName,
-                    Position = new Vector2(0.0f, pointData.ChildPasses.Count * 180.0f),
-                    PassInstance = ClonePass(pass)
-                });
-            }
-        }
-
-        private static RenderPassBase ClonePass(RenderPassBase source)
-        {
-            var clone = (RenderPassBase)Activator.CreateInstance(source.GetType());
-            JsonUtility.FromJsonOverwrite(JsonUtility.ToJson(source), clone);
-            return clone;
-        }
-
-        private void SaveCurrentViewToData()
-        {
-            if (_graphData == null || _graphView == null) return;
-
-            if (_currentDetailPoint.HasValue)
-            {
-                var pointData = _graphData.InjectionPoints.FirstOrDefault(p => p.Point == _currentDetailPoint.Value);
-                if (pointData != null)
-                {
-                    pointData.ChildPasses.Clear();
-                    foreach (var passNode in _graphView.nodes.ToList().OfType<TsukuyomiPassNode>())
-                    {
-                        pointData.ChildPasses.Add(new PassNodeData
-                        {
-                            TypeName = passNode.PassType.AssemblyQualifiedName,
-                            Position = passNode.GetPosition().position,
-                            PassInstance = passNode.PassInstance
-                        });
-                    }
-                }
-            }
-            else
-            {
-                foreach (var ipNode in _graphView.nodes.ToList().OfType<TsukuyomiInjectionPointNode>())
-                {
-                    var pointData = _graphData.InjectionPoints.FirstOrDefault(p => p.Point == ipNode.Point);
-                    if (pointData != null)
-                    {
-                        pointData.Position = ipNode.GetPosition().position;
-                    }
-                }
-            }
-        }
-
-        private void SwitchToMainView()
-        {
-            SaveCurrentViewToData();
-
-            bool previousSuppress = _suppressGraphChanges;
-            _suppressGraphChanges = true;
-            try
-            {
-                _currentDetailPoint = null;
-                _graphView.CurrentDetailPoint = null;
-                _graphView.SetBackgroundStyle(false);
-                _graphView.ClearGraph();
-
-                foreach (var pointData in _graphData.InjectionPoints)
-                    _graphView.CreateInjectionPointNode(pointData.Point, pointData.Position);
-
-                _graphView.ConnectInjectionPoints();
-                _graphView.FrameAllNodes();
-                UpdateChrome();
-            }
-            finally
-            {
-                _suppressGraphChanges = previousSuppress;
-            }
-        }
-
-        private void SwitchToDetailView(InjectionPoint point)
-        {
-            SaveCurrentViewToData();
-
-            bool previousSuppress = _suppressGraphChanges;
-            _suppressGraphChanges = true;
-            try
-            {
-                _currentDetailPoint = point;
-                _graphView.CurrentDetailPoint = point;
-                _graphView.SetBackgroundStyle(true);
-                _graphView.ClearGraph();
-
-                var pointData = _graphData.InjectionPoints.FirstOrDefault(p => p.Point == point);
-                if (pointData != null)
-                {
-                    foreach (var passData in pointData.ChildPasses)
-                    {
-                        var type = Type.GetType(passData.TypeName);
-                        if (type != null)
-                        {
-                            passData.PassInstance ??= (RenderPassBase)Activator.CreateInstance(type);
-                            passData.PassInstance.InjectionPoint = point;
-                            _graphView.CreatePassNode(type, passData.Position, false, passData.PassInstance);
-                        }
-                    }
-                }
-
-                _graphView.FrameAllNodes();
-                UpdateChrome();
-            }
-            finally
-            {
-                _suppressGraphChanges = previousSuppress;
-            }
-        }
-
-        private void LoadGraph()
-        {
-            if (_profile == null || _graphView == null)
-            {
-                UpdateChrome();
-                return;
-            }
-
-            _suppressGraphChanges = true;
-            try
-            {
-                EnsureGraphData();
-                SwitchToMainView();
-                hasUnsavedChanges = false;
-            }
-            finally
-            {
-                _suppressGraphChanges = false;
-            }
-        }
-
-        private void UpdateSelection(IEnumerable<ISelectable> selection)
-        {
-            var selectedItems = selection?.ToList() ?? new List<ISelectable>();
-            var selected = selectedItems.Count == 1 ? selectedItems[0] : null;
-            _selectionLabel.text = selected switch
-            {
-                TsukuyomiInjectionPointNode pointNode => $"Injection Point\n{pointNode.Point}",
-                TsukuyomiPassNode passNode => $"Pass\n{passNode.PassType.Name}",
-                null => "Nothing selected",
-                _ => selected.GetType().Name
-            };
-
-            if (selectedItems.Count > 1)
-                ShowInspectorMessage("Select a single pass node to edit its settings.");
-            else if (selected is TsukuyomiPassNode passNode)
-                ShowPassInspector(passNode);
-            else if (selected is TsukuyomiInjectionPointNode pointNode)
-                ShowInspectorMessage($"Injection Point: {pointNode.Point}\nDouble-click to edit its passes.");
-            else
-                ShowInspectorMessage("Select a pass node to edit its settings.");
-        }
-
-        private void UpdateChrome()
-        {
-            if (_profileField != null)
-                _profileField.SetValueWithoutNotify(_profile);
-
-            bool hasProfile = _profile != null;
-            bool isDetail = _currentDetailPoint.HasValue;
-
-            if (_backButton != null)
-                _backButton.SetEnabled(hasProfile && isDetail);
-            if (_saveButton != null)
-                _saveButton.SetEnabled(hasProfile);
-            if (_inspectorButton != null)
-                _inspectorButton.text = _inspectorVisible ? "Hide Inspector" : "Graph Inspector";
-
-            if (_breadcrumbLabel != null)
-                _breadcrumbLabel.text = isDetail ? $"Pipeline / {_currentDetailPoint.Value}" : "Pipeline / Injection Points";
-
-            if (_selectionLabel != null)
-                _selectionLabel.text = "Nothing selected";
-
-            ShowInspectorMessage("Select a pass node to edit its settings.");
-
-            if (_statsLabel != null)
-            {
-                int pointCount = _graphData?.InjectionPoints?.Count ?? 0;
-                int passCount = _graphData?.InjectionPoints?.Sum(p => p.ChildPasses.Count) ?? 0;
-                _statsLabel.text = hasProfile
-                    ? $"Profile: {_profile.name}\nInjection Points: {pointCount}\nPasses: {passCount}"
-                    : "No profile assigned";
-            }
-
-            UpdateStatusLabel();
-        }
-
-        private void UpdateStatusLabel()
-        {
-            if (_statusLabel == null)
-                return;
-
-            if (_profile == null)
-            {
-                _statusLabel.text = "Assign a Tsukuyomi Pipeline Profile to edit";
-                return;
-            }
-
-            string view = _currentDetailPoint.HasValue
-                ? $"Editing {_currentDetailPoint.Value}"
-                : "Editing injection point overview";
-            _statusLabel.text = hasUnsavedChanges ? $"{view}  •  Unsaved changes" : view;
-        }
-
-        private void BakeGraph()
-        {
-            if (_profile == null)
-            {
-                EditorUtility.DisplayDialog("Error", "Please assign a Pipeline Profile asset first.", "OK");
-                return;
-            }
-
-            SaveCurrentViewToData();
-
-            var bakedPasses = new List<RenderPassBase>();
-            var sortedPoints = _graphData.InjectionPoints.OrderBy(p => (int)p.Point).ToList();
-
-            foreach (var ipData in sortedPoints)
-            {
-                ipData.ChildPasses.Sort((a, b) => a.Position.y.CompareTo(b.Position.y));
-
-                foreach (var passData in ipData.ChildPasses)
-                {
-                    var type = System.Type.GetType(passData.TypeName);
-                    if (type == null)
-                        continue;
-
-                    var passInstance = passData.PassInstance ?? (RenderPassBase)Activator.CreateInstance(type);
-                    passInstance.InjectionPoint = ipData.Point;
-                    passInstance.ValidateSettings();
-                    passData.PassInstance = passInstance;
-                    bakedPasses.Add(passInstance);
-                }
-            }
-
-            Undo.RecordObject(_profile, "Bake Tsukuyomi Graph");
-            _profile.Passes = bakedPasses;
-            _profile.GraphLayoutData = JsonUtility.ToJson(_graphData);
-
-            EditorUtility.SetDirty(_profile);
-            AssetDatabase.SaveAssets();
-            hasUnsavedChanges = false;
-            UpdateChrome();
-
-            Debug.Log($"Baked {bakedPasses.Count} passes to {_profile.name} across {_graphData.InjectionPoints.Count} injection points.");
-        }
-
-        private static Dictionary<string, Queue<RenderPassBase>> BuildReusablePassMap(List<RenderPassBase> passes)
-        {
-            var map = new Dictionary<string, Queue<RenderPassBase>>();
-            if (passes == null)
-                return map;
-
-            foreach (var pass in passes)
-            {
-                if (pass == null)
-                    continue;
-
-                var key = GetReusablePassKey(pass.InjectionPoint, pass.GetType());
-                if (!map.TryGetValue(key, out var queue))
-                {
-                    queue = new Queue<RenderPassBase>();
-                    map.Add(key, queue);
-                }
-
-                queue.Enqueue(pass);
-            }
-
-            return map;
-        }
-
-        private static RenderPassBase TakeReusablePass(
-            Dictionary<string, Queue<RenderPassBase>> reusablePasses,
-            InjectionPoint injectionPoint,
-            System.Type type)
-        {
-            var key = GetReusablePassKey(injectionPoint, type);
-            if (reusablePasses.TryGetValue(key, out var queue) && queue.Count > 0)
-                return queue.Dequeue();
-
-            return null;
-        }
-
-        private static string GetReusablePassKey(InjectionPoint injectionPoint, System.Type type)
-        {
-            return $"{(int)injectionPoint}:{type.AssemblyQualifiedName}";
+            ReleaseDraftBinding();
+            _serializedProfile?.Dispose(); _serializedProfile = null;
+            if (_draft) DestroyImmediate(_draft);
         }
     }
 }

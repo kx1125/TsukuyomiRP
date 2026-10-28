@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -15,12 +16,15 @@ namespace Tsukuyomi.Rendering
         private bool _missingShaderLogged;
         public XrayContributionNode(TsukuyomiXrayRenderPass owner) => _owner = owner;
         public override string Name => "Tsukuyomi Xray Color Contribution";
-        public override int Priority => 250;
         public override bool RequiresIntermediateColorTarget => true;
-        public override bool IsActive(in FrameContext frame) => Enabled && _owner.HasHighlight(frame.CameraData.camera);
+        public override bool IsActive(in FrameContext frame) => Enabled && Prepared && _owner.HasHighlight(frame.CameraData.camera);
         public override void CollectTextureSlots(List<TextureSlot> slots) => slots.Add(_depth);
 
-        internal bool Configure(Camera camera)
+        internal bool Prepared { get; private set; }
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => Prepared = !context.Frame.CameraData.isPreviewCamera && Configure(context.Camera);
+        public override void Deactivate(Camera camera) => Prepared = false;
+        private bool Configure(Camera camera)
         {
             if (!_owner.HasHighlight(camera) || !TsukuyomiRenderPipelineResourcesProvider.TryGet(out var resources)) return false;
             var shader = resources.XrayCompositeShader;
@@ -79,6 +83,6 @@ namespace Tsukuyomi.Rendering
             frame.TargetContribution = contribution; frame.XrayCoverage = p.Coverage;
         }
 
-        public void Dispose() { if (_material) CoreUtils.Destroy(_material); _material = null; _shader = null; }
+        public override void Dispose() { if (_material) CoreUtils.Destroy(_material); _material = null; _shader = null; }
     }
 }

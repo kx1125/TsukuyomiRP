@@ -52,9 +52,9 @@ namespace Tsukuyomi.Rendering
         }
 
         public bool Configure(
-            TsukuyomiPipelineProfile profile,
+            PerObjectShadowPass profile,
             TsukuyomiPerObjectShadowVolume volume,
-            TsukuyomiPcssVolume pcssVolume)
+            in TsukuyomiPcssResolvedSettings pcss)
         {
             _enabled = false;
             _pcssEnabled = false;
@@ -63,8 +63,8 @@ namespace Tsukuyomi.Rendering
                 return false;
 
             _settings = TsukuyomiPerObjectShadowResolvedSettings.From(profile, volume);
-            _pcssSettings = TsukuyomiPcssResolvedSettings.From(profile, pcssVolume);
-            _pcssEnabled = _pcssSettings.Enabled;
+            _pcssSettings = pcss;
+            _pcssEnabled = pcss.Enabled;
 
             return _settings.Enabled;
         }

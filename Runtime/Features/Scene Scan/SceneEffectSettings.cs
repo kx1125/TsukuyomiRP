@@ -19,20 +19,20 @@ namespace Tsukuyomi.Rendering
             p.RingWidth = Value(volume?.ringWidth, p.RingWidth);
             p.NoiseStrength = Value(volume?.noiseStrength, p.NoiseStrength);
         }
-        internal static bool Resolve(TsukuyomiPipelineProfile profile, VolumeStack stack, out VoxelTransitionParameters p)
+        internal static bool Resolve(VoxelTransitionPass profile, VolumeStack stack, out VoxelTransitionParameters p)
         {
-            p = profile ? profile.VoxelTransition : VoxelTransitionParameters.Default;
+            p = profile != null ? profile.VoxelTransition : VoxelTransitionParameters.Default;
             var volume = Active<TsukuyomiVoxelTransitionVolume>(stack);
             Coverage(volume, ref p.Coverage);
             p.CellSize = Value(volume?.cellSize, p.CellSize);
             p.SamplingStrength = Value(volume?.samplingStrength, p.SamplingStrength);
             p.DistortionStrength = Value(volume?.distortionStrength, p.DistortionStrength);
             p.SamplingCompleted = Value(volume?.samplingCompleted, p.SamplingCompleted);
-            return Value(volume?.enable, profile && profile.EnableVoxelTransition);
+            return Value(volume?.enable, profile != null && profile.Enabled);
         }
-        internal static bool Resolve(TsukuyomiPipelineProfile profile, VolumeStack stack, out ScanPostProcessParameters p)
+        internal static bool Resolve(ScanPostProcessPass profile, VolumeStack stack, out ScanPostProcessParameters p)
         {
-            p = profile ? profile.ScanPostProcess : ScanPostProcessParameters.Default;
+            p = profile != null ? profile.ScanPostProcess : ScanPostProcessParameters.Default;
             var volume = Active<TsukuyomiScanPostProcessVolume>(stack);
             Coverage(volume, ref p.Coverage);
             p.CellSize = Value(volume?.cellSize, p.CellSize);
@@ -56,22 +56,22 @@ namespace Tsukuyomi.Rendering
             p.AccentColor = Value(volume?.accentColor, p.AccentColor);
             p.TintColor = Value(volume?.tintColor, p.TintColor);
             p.DebugView = Value(volume?.debugView, p.DebugView);
-            return Value(volume?.enable, profile && profile.EnableScanPostProcess);
+            return Value(volume?.enable, profile != null && profile.Enabled);
         }
-        internal static bool Resolve(TsukuyomiPipelineProfile profile, VolumeStack stack, out XrayRenderParameters p)
+        internal static bool Resolve(XrayRenderPass profile, VolumeStack stack, out XrayRenderParameters p)
         {
-            p = profile ? profile.XrayRender : XrayRenderParameters.Default;
+            p = profile != null ? profile.XrayRender : XrayRenderParameters.Default;
             var volume = Active<TsukuyomiXrayRenderVolume>(stack);
             Coverage(volume, ref p.Coverage);
             p.CellSize = Value(volume?.cellSize, p.CellSize);
             p.Intensity = Value(volume?.intensity, p.Intensity);
             p.PrimaryColor = Value(volume?.primaryColor, p.PrimaryColor);
             p.SecondaryColor = Value(volume?.secondaryColor, p.SecondaryColor);
-            return Value(volume?.enable, profile && profile.EnableXrayRender);
+            return Value(volume?.enable, profile != null && profile.Enabled);
         }
-        internal static bool Resolve(TsukuyomiPipelineProfile profile, VolumeStack stack, out SpatialGridParameters p)
+        internal static bool Resolve(SpatialGridRenderPass profile, VolumeStack stack, out SpatialGridParameters p)
         {
-            p = profile ? profile.SpatialGridRender : SpatialGridParameters.Default;
+            p = profile != null ? profile.SpatialGridRender : SpatialGridParameters.Default;
             var volume = Active<TsukuyomiSpatialGridRenderVolume>(stack);
             p.Coverage = (SpatialGridCoverage)Value(volume?.coverageMode, (ScanCoverageMode)p.Coverage);
             p.OriginWS = Value(volume?.originWS, p.OriginWS);
@@ -89,11 +89,11 @@ namespace Tsukuyomi.Rendering
             p.Intensity = Value(volume?.intensity, p.Intensity);
             p.Color = Value(volume?.color, p.Color);
             p.PulseSpeed = Value(volume?.pulseSpeed, p.PulseSpeed);
-            return Value(volume?.enable, profile && profile.EnableSpatialGridRender);
+            return Value(volume?.enable, profile != null && profile.Enabled);
         }
-        internal static ScanPostEffect Effects(TsukuyomiPipelineProfile profile, VolumeStack stack)
+        internal static ScanPostEffect Effects(ScanPostProcessPass profile, VolumeStack stack)
         {
-            var effects = profile ? profile.ScanPostEffects : ScanPostEffect.All;
+            var effects = profile != null ? profile.ScanPostEffects : ScanPostEffect.All;
             var volume = Active<TsukuyomiScanPostProcessVolume>(stack);
             if (volume?.enableScan.overrideState == true) effects = volume.enableScan.value ? effects | ScanPostEffect.Scan : effects & ~ScanPostEffect.Scan;
             if (volume?.enableVoxelGlitch.overrideState == true) effects = volume.enableVoxelGlitch.value ? effects | ScanPostEffect.VoxelGlitch : effects & ~ScanPostEffect.VoxelGlitch;

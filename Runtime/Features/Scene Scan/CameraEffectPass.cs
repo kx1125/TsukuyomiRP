@@ -25,6 +25,19 @@ namespace Tsukuyomi.Rendering
     internal static class SceneEffectCameras
     {
         private static readonly List<Camera> Dead = new();
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnLoadMethod]
+        private static void RegisterEditorLifecycle()
+        {
+            UnityEditor.EditorApplication.playModeStateChanged -= PlayModeChanged;
+            UnityEditor.EditorApplication.playModeStateChanged += PlayModeChanged;
+        }
+        private static void PlayModeChanged(UnityEditor.PlayModeStateChange state)
+        {
+            // Static camera API controls survive when Domain Reload is disabled.
+            if (state == UnityEditor.PlayModeStateChange.EnteredEditMode) Reset();
+        }
+#endif
         internal static void Prune<T>(Dictionary<Camera, T> cameras)
         {
             Dead.Clear();
@@ -58,7 +71,7 @@ namespace Tsukuyomi.Rendering
         [NonSerialized] private readonly Dictionary<Camera, CameraState> _settings = new();
         [NonSerialized] private readonly Dictionary<Camera, CameraEffectControls<TParameters>.State> _cameras = new();
         protected abstract TParameters DefaultParameters { get; }
-        protected abstract bool ResolveSettings(TsukuyomiPipelineProfile profile, VolumeStack stack, out TParameters parameters);
+        protected abstract bool ResolveSettings(RenderPassBase profile, VolumeStack stack, out TParameters parameters);
         protected abstract void ApplyAnimation(ref TParameters parameters, in ScanAnimationParameters animation);
 
         /// <summary>Override this camera's panel switch. Can be called before a RendererFeature exists.</summary>
@@ -72,7 +85,7 @@ namespace Tsukuyomi.Rendering
         { if (!ReferenceEquals(camera, null)) CameraEffectControls<TParameters>.Cameras.Remove(camera); }
         public static bool HasCameraOverrides(Camera camera) => camera && CameraEffectControls<TParameters>.Cameras.ContainsKey(camera);
 
-        internal void UpdateSettings(Camera camera, TsukuyomiPipelineProfile profile, VolumeStack stack)
+        internal void UpdateSettings(Camera camera, RenderPassBase profile, VolumeStack stack)
         {
             SceneEffectCameras.Prune(_cameras);
             SceneEffectCameras.Prune(_settings);
@@ -100,6 +113,11 @@ namespace Tsukuyomi.Rendering
         { if (!ReferenceEquals(camera, null)) _cameras.Remove(camera); }
         protected internal bool TryGetActiveParameters(Camera camera, out TParameters parameters)
         { Read(camera, out parameters, out var enabled, out _); return Enabled && enabled; }
+        public override void ReleaseCamera(Camera camera)
+        {
+            Clear(camera);
+            if (!ReferenceEquals(camera, null)) _settings.Remove(camera);
+        }
         protected void ClearAllCameras() { _cameras.Clear(); _settings.Clear(); }
 
         private void Read(Camera camera, out TParameters parameters, out bool enabled, out bool exists)

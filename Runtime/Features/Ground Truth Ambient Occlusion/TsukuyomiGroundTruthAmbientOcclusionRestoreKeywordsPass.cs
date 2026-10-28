@@ -22,7 +22,7 @@ namespace Tsukuyomi.Rendering
             if (!activeColorTexture.IsValid())
                 return;
 
-            context.Builder.SetRenderAttachment(activeColorTexture, 0, AccessFlags.Write);
+            context.Builder.SetRenderAttachment(activeColorTexture, 0, AccessFlags.ReadWrite);
             context.Builder.AllowGlobalStateModification(true);
             context.SetRenderFunc(static (data, graphContext) =>
             {

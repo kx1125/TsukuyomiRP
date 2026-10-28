@@ -22,7 +22,13 @@ namespace Tsukuyomi.Rendering
 
         public override string Name => "Tsukuyomi SSGI Debug Output";
 
-        public bool Configure()
+        private readonly System.Func<bool> _requested;
+        internal bool Prepared { get; private set; }
+        public TsukuyomiScreenSpaceGlobalIlluminationDebugPass(System.Func<bool> requested) => _requested = requested;
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => Prepared = _requested() && Configure();
+        public override void Deactivate(Camera camera) => Prepared = false;
+        private bool Configure()
         {
             if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources))
                 return false;
@@ -52,7 +58,7 @@ namespace Tsukuyomi.Rendering
 
         public override bool IsActive(in FrameContext frame)
         {
-            return base.IsActive(frame) && _material != null;
+            return base.IsActive(frame) && Prepared && _material != null;
         }
 
         private sealed class RenderData
@@ -83,7 +89,7 @@ namespace Tsukuyomi.Rendering
             });
         }
 
-        public void Dispose()
+        public override void Dispose()
         {
             ReleaseMaterial();
         }

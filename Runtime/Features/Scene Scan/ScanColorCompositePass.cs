@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -18,15 +19,26 @@ namespace Tsukuyomi.Rendering
         private Shader _shader;
         private bool _requiresNormals, _missingShaderLogged;
 
-        public ScanColorCompositePass(TsukuyomiVoxelTransitionPass opening, TsukuyomiScanPostProcessPass post, TsukuyomiXrayRenderPass xray)
-        { _opening = opening; _post = post; _xray = xray; }
+        public ScanColorCompositePass(TsukuyomiVoxelTransitionPass opening, TsukuyomiScanPostProcessPass post, TsukuyomiXrayRenderPass xray, bool ownsPost = false)
+        { _opening = opening; _post = post; _xray = xray; _ownsPost = ownsPost; }
+        private readonly bool _ownsPost;
+        internal bool Prepared { get; private set; }
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+        {
+            if (_ownsPost) _post?.PrepareRecording(context, ref data);
+            Prepared = !context.Frame.CameraData.isPreviewCamera && Configure(context.Camera);
+        }
+        public override void Deactivate(Camera camera)
+        { Prepared = false; if (_ownsPost) _post?.Deactivate(camera); }
+        public override void ReleaseCamera(Camera camera)
+        { if (_ownsPost) _post?.ReleaseCamera(camera); }
         public override string Name => "Tsukuyomi Scene Effect Color Composite";
 
         internal bool HasScan(Camera camera) => _post != null && _post.TryGetActive(camera, out _)
             && _post.IsEffectEnabled(camera, ScanPostEffect.Scan);
         private bool HasOpening(Camera camera) => _opening != null && _opening.TryGetActiveParameters(camera, out var p) && p.Coverage.Blend > 0f;
         private bool HasXray(Camera camera) => _xray != null && _xray.HasHighlight(camera);
-        public override bool IsActive(in FrameContext frame) => Enabled && (HasScan(frame.CameraData.camera) || HasOpening(frame.CameraData.camera) || HasXray(frame.CameraData.camera));
+        public override bool IsActive(in FrameContext frame) => Enabled && Prepared && (HasScan(frame.CameraData.camera) || HasOpening(frame.CameraData.camera) || HasXray(frame.CameraData.camera));
 
         public override void CollectTextureSlots(List<TextureSlot> slots)
         {
@@ -34,7 +46,7 @@ namespace Tsukuyomi.Rendering
             if (_requiresNormals) slots.Add(_normals);
         }
 
-        internal bool Configure(Camera camera)
+        private bool Configure(Camera camera)
         {
             _requiresNormals = HasScan(camera);
             if (!_requiresNormals && !HasOpening(camera) && !HasXray(camera)) return false;
@@ -121,6 +133,6 @@ namespace Tsukuyomi.Rendering
             graph.SetActiveColor(output);
         }
 
-        public void Dispose() { if (_material) CoreUtils.Destroy(_material); _material = null; _shader = null; }
+        public override void Dispose() { if (_ownsPost) _post?.Dispose(); if (_material) CoreUtils.Destroy(_material); _material = null; _shader = null; }
     }
 }

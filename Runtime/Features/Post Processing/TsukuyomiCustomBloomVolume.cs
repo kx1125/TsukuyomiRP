@@ -56,9 +56,9 @@ namespace Tsukuyomi.Rendering
         public readonly Vector4 BlurCompositeWeight;
         public readonly Color Tint;
 
-        private TsukuyomiCustomBloomResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiCustomBloomVolume volume)
+        private TsukuyomiCustomBloomResolvedSettings(BloomPass profile, TsukuyomiCustomBloomVolume volume)
         {
-            Enabled = profile.EnableCustomBloom && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             Threshold = Resolve(volume?.threshold, profile.CustomBloomThreshold);
             Intensity = Resolve(volume?.intensity, profile.CustomBloomIntensity);
             LumRangeScale = Resolve(volume?.lumRangeScale, profile.CustomBloomLumRangeScale);
@@ -71,7 +71,7 @@ namespace Tsukuyomi.Rendering
 
         public Vector4 Params => new(Threshold, LumRangeScale, PreFilterScale, Intensity);
 
-        public static TsukuyomiCustomBloomResolvedSettings From(TsukuyomiPipelineProfile profile, TsukuyomiCustomBloomVolume volume)
+        public static TsukuyomiCustomBloomResolvedSettings From(BloomPass profile, TsukuyomiCustomBloomVolume volume)
         {
             return new TsukuyomiCustomBloomResolvedSettings(profile, volume);
         }

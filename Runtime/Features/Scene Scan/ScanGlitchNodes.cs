@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -26,7 +27,11 @@ namespace Tsukuyomi.Rendering
                 || ((effects & ScanPostEffect.ChromaticSplit) != 0 && Mathf.Abs(p.ChromaticSplit) > .00001f));
         }
 
-        internal bool Configure(Camera camera)
+        internal bool Prepared { get; private set; }
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => Prepared = !context.Frame.CameraData.isPreviewCamera && Configure(context.Camera);
+        public override void Deactivate(Camera camera) => Prepared = false;
+        private bool Configure(Camera camera)
         {
             if (!HasEffect(camera) || !TsukuyomiRenderPipelineResourcesProvider.TryGet(out var resources)) return false;
             var shader = resources.ScanGlitchShader;
@@ -44,7 +49,7 @@ namespace Tsukuyomi.Rendering
             return _material != null;
         }
 
-        public override bool IsActive(in FrameContext frame) => Enabled && HasEffect(frame.CameraData.camera);
+        public override bool IsActive(in FrameContext frame) => Enabled && Prepared && HasEffect(frame.CameraData.camera);
         public override void CollectTextureSlots(List<TextureSlot> slots) { slots.Add(_source); if (Program == 0) slots.Add(_depth); }
         private sealed class Data
         {
@@ -85,7 +90,7 @@ namespace Tsukuyomi.Rendering
             graph.SetActiveColor(output);
         }
 
-        public void Dispose() { if (_material) CoreUtils.Destroy(_material); _material = null; _shader = null; }
+        public override void Dispose() { if (_material) CoreUtils.Destroy(_material); _material = null; _shader = null; }
     }
 
     internal sealed class ScanVoxelGlitchNode : ScanGlitchNode
@@ -93,7 +98,6 @@ namespace Tsukuyomi.Rendering
         public ScanVoxelGlitchNode(TsukuyomiScanPostProcessPass owner) : base(owner) { }
         protected override int Program => 0;
         public override string Name => "Tsukuyomi Scene Scan Voxel Glitch";
-        public override int Priority => 10;
     }
 
     internal sealed class ScanChannelGlitchNode : ScanGlitchNode

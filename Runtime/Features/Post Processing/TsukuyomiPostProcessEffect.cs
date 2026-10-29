@@ -12,7 +12,7 @@ namespace Tsukuyomi.Rendering
         public abstract string Name { get; }
 
         public abstract bool Configure(
-            TsukuyomiPipelineProfile profile,
+            PostProcessPassDefinition profile,
             VolumeStack volumeStack,
             TsukuyomiRenderPipelineResources resources);
 

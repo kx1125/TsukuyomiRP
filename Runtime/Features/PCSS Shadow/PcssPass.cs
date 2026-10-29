@@ -1,0 +1,533 @@
+using System;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.Universal;
+using UnityEngine.Rendering;
+using UnityEngine;
+
+namespace Tsukuyomi.Rendering
+{
+    [Serializable, InjectionPoint(InjectionPoint.BeforeOpaque)]
+    [UnityEngine.Scripting.APIUpdating.MovedFrom(true, "Tsukuyomi.Rendering", "Tsukuyomi.Rendering", "PcssPlugin")]
+    public sealed class PcssPass : RenderPassBase, IPcssShadowSettingsProvider
+    {
+        public PcssPass() => InjectionPoint = InjectionPoint.BeforeOpaque;
+        public override string Name => "Pcss";
+
+        [Min(1)]
+        public int PcssFindBlockerSampleCount = 16;
+
+        [Min(1)]
+        public int PcssPcfSampleCount = 32;
+
+        [Min(0.001f)]
+        public float PcssAngularDiameter = 0.5357f;
+
+        [Min(0.001f)]
+        public float PcssBlockerSearchAngularDiameter = 0.5357f;
+
+        [Min(0.001f)]
+        public float PcssMinFilterMaxAngularDiameter = 0.5357f;
+
+        [Min(0.0f)]
+        public float PcssMaxPenumbraSize = 0.56f;
+
+        [Min(0.0f)]
+        public float PcssMaxSamplingDistance = 0.1f;
+
+        [Min(0.0f)]
+        public float PcssMinFilterSizeTexels = 1.0f;
+
+        [Range(1, 32)]
+        public int PcssPenumbraMaskScale = 4;
+
+        [field: NonSerialized] public TsukuyomiPcssResolvedSettings ShadowSettings { get; private set; }
+        public override void Build(PassPlanBuilder plan) => ShadowDependencies.RequireComposition(plan);
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => ShadowSettings = TsukuyomiPcssResolvedSettings.From(this, context.Volumes?.GetComponent<TsukuyomiPcssVolume>());
+        public override void Deactivate(Camera camera) => ShadowSettings = default;
+    }
+
+    [System.Serializable]
+    internal sealed class TsukuyomiPcssScreenSpaceShadowPass : UnsafePass, IRenderPassService
+    {
+        internal const string Key = "tsukuyomi.shadow-composition";
+        private readonly MainLightShadowKeywordsRestorePass _restore = new();
+        private bool _active;
+        public override void Build(PassPlanBuilder plan)
+        {
+            var main = plan.Add(this, RenderPassEvent.AfterRenderingPrePasses + 1, () => _active,
+                context => context.Deferred ? RenderPassEvent.BeforeRenderingGbuffer
+                    : context.Find<IContactShadowProvider>()?.Active == true ? RenderPassEvent.AfterRenderingPrePasses + 4 : RenderPassEvent.AfterRenderingPrePasses + 1);
+            plan.Requires(main, ShadowDependencies.Contact, true);
+            plan.Requires(main, ShadowDependencies.ContactDenoised, true);
+            plan.Requires(main, ShadowDependencies.PerObject, true);
+            plan.After(plan.Add(_restore, RenderPassEvent.BeforeRenderingTransparents, () => _active), main);
+        }
+        public override void Initialize()
+        { InitializeKeywords(); MainLightShadowKeywordsRestorePass.InitializeKeywords(); }
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+        {
+            var contact = context.Find<IContactShadowProvider>();
+            var perObject = context.Find<IPerObjectShadowProvider>();
+            var settings = context.Find<IPcssShadowSettingsProvider>()?.ShadowSettings ?? default;
+            _active = !context.Frame.CameraData.isPreviewCamera
+                && Configure(settings, contact?.Active == true, contact?.DenoiseActive == true, perObject?.Active == true);
+            if (!_active)
+            {
+                contact?.Deactivate(context.Camera);
+                perObject?.Deactivate(context.Camera);
+            }
+        }
+        public override void Deactivate(Camera camera)
+        {
+            _active = false; Shader.DisableKeyword("_MAIN_LIGHT_SHADOWS_SCREEN"); Shader.DisableKeyword("_CONTACT_SHADOWS");
+            Shader.SetGlobalTexture("_ScreenSpaceShadowmapTexture", Texture2D.whiteTexture);
+            Shader.SetGlobalTexture("_ContactShadowMap", Texture2D.whiteTexture);
+            Shader.SetGlobalTexture("_TsukuyomiBaseScreenSpaceShadowmapTexture", Texture2D.whiteTexture);
+            Shader.SetGlobalTexture(PenumbraMaskTexId, Texture2D.blackTexture);
+            Shader.SetGlobalVector(PenumbraMaskTexelSizeId, Vector4.zero);
+            Shader.SetGlobalFloat(EnablePcssId, 0f);
+            Shader.SetGlobalFloat(EnableMainLightShadowId, 0f);
+            Shader.SetGlobalFloat("_TsukuyomiEnablePerObjectShadow", 0f);
+        }
+
+        private const int PenumbraMaskPass = 0;
+        private const int BlurHorizontalPass = 1;
+        private const int BlurVerticalPass = 2;
+        private const int ScreenSpaceShadowPass = 3;
+        private const int ContactShadowCompositePass = 4;
+
+        private static readonly int ScreenSpaceShadowmapTextureId = Shader.PropertyToID("_ScreenSpaceShadowmapTexture");
+        private static readonly int ContactShadowMapId = Shader.PropertyToID("_ContactShadowMap");
+        private static readonly int BaseScreenSpaceShadowmapTextureId = Shader.PropertyToID("_TsukuyomiBaseScreenSpaceShadowmapTexture");
+        private static readonly int EnablePcssId = Shader.PropertyToID("_TsukuyomiEnablePCSS");
+        private static readonly int EnableMainLightShadowId = Shader.PropertyToID("_TsukuyomiEnableMainLightShadow");
+        private static readonly int PenumbraMaskTexId = Shader.PropertyToID("_TsukuyomiPenumbraMaskTex");
+        private static readonly int PenumbraMaskTexelSizeId = Shader.PropertyToID("_TsukuyomiPenumbraMaskTex_TexelSize");
+        private static readonly int ColorAttachmentTexelSizeId = Shader.PropertyToID("_TsukuyomiColorAttachmentTexelSize");
+        private static readonly int FindBlockerSampleCountId = Shader.PropertyToID("_TsukuyomiPcssFindBlockerSampleCount");
+        private static readonly int PcfSampleCountId = Shader.PropertyToID("_TsukuyomiPcssPcfSampleCount");
+        private static readonly int AngularDiameterId = Shader.PropertyToID("_TsukuyomiPcssAngularDiameter");
+        private static readonly int BlockerSearchAngularDiameterId = Shader.PropertyToID("_TsukuyomiPcssBlockerSearchAngularDiameter");
+        private static readonly int MinFilterMaxAngularDiameterId = Shader.PropertyToID("_TsukuyomiPcssMinFilterMaxAngularDiameter");
+        private static readonly int MaxPenumbraSizeId = Shader.PropertyToID("_TsukuyomiPcssMaxPenumbraSize");
+        private static readonly int MaxSamplingDistanceId = Shader.PropertyToID("_TsukuyomiPcssMaxSamplingDistance");
+        private static readonly int MinFilterSizeTexelsId = Shader.PropertyToID("_TsukuyomiPcssMinFilterSizeTexels");
+        private static GlobalKeyword MainLightShadowsKeyword;
+        private static GlobalKeyword MainLightShadowCascadesKeyword;
+        private static GlobalKeyword MainLightShadowScreenKeyword;
+        private static GlobalKeyword ContactShadowsKeyword;
+        private static bool s_KeywordsInitialized;
+
+        [Read(BuiltinTexture.CameraDepthTexture)]
+        public TextureSlot depth = TextureSlot.Read("Depth", BuiltinTexture.CameraDepthTexture);
+
+        [Read(BuiltinTexture.MainShadowMap)]
+        public TextureSlot mainShadowMap = TextureSlot.Read("MainShadowMap", BuiltinTexture.MainShadowMap);
+
+        private Material _material;
+        private Material _screenSpaceShadowsMaterial;
+        private bool _ownsMaterial;
+        private bool _ownsScreenSpaceShadowsMaterial;
+        private TsukuyomiPcssResolvedSettings _settings;
+        private bool _contactShadowsEnabled;
+        private bool _contactShadowDenoiseEnabled;
+        private bool _perObjectShadowsEnabled;
+        private static readonly ProfilingSampler _pcssPenumbraSampler = new("PCSS Penumbra");
+        private static readonly ProfilingSampler _screenSpaceShadowSampler = new("Screen Space Shadows");
+
+        public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
+        {
+            slots.Add(depth);
+            slots.Add(mainShadowMap);
+        }
+
+        public override string Name => "Screen Space Shadows";
+
+        internal static void InitializeKeywords()
+        {
+            if (s_KeywordsInitialized)
+                return;
+
+            MainLightShadowsKeyword = GlobalKeyword.Create(ShaderKeywordStrings.MainLightShadows);
+            MainLightShadowCascadesKeyword = GlobalKeyword.Create(ShaderKeywordStrings.MainLightShadowCascades);
+            MainLightShadowScreenKeyword = GlobalKeyword.Create(ShaderKeywordStrings.MainLightShadowScreen);
+            ContactShadowsKeyword = GlobalKeyword.Create("_CONTACT_SHADOWS");
+            s_KeywordsInitialized = true;
+        }
+
+        private bool Configure(
+            in TsukuyomiPcssResolvedSettings settings,
+            bool contactShadowsEnabled = false,
+            bool contactShadowDenoiseEnabled = false,
+            bool perObjectShadowsEnabled = false)
+        {
+            _settings = settings;
+            _contactShadowsEnabled = contactShadowsEnabled;
+            _contactShadowDenoiseEnabled = contactShadowDenoiseEnabled;
+            _perObjectShadowsEnabled = perObjectShadowsEnabled;
+
+            if (!_settings.Enabled && !contactShadowsEnabled && !perObjectShadowsEnabled)
+                return false;
+
+            if (_material != null && (_settings.Enabled || _screenSpaceShadowsMaterial != null))
+                return true;
+
+            if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources))
+                return false;
+
+            if (_material == null && !LoadPcssMaterial(resources))
+                return false;
+
+            if (!_settings.Enabled && (contactShadowsEnabled || perObjectShadowsEnabled) && _screenSpaceShadowsMaterial == null && !LoadScreenSpaceShadowsMaterial(resources))
+                return false;
+
+            return true;
+        }
+
+        private bool LoadPcssMaterial(TsukuyomiRenderPipelineResources resources)
+        {
+            if (resources.ScreenSpacePcssShadowsMaterial != null)
+            {
+                _material = new Material(resources.ScreenSpacePcssShadowsMaterial) { hideFlags = HideFlags.HideAndDontSave };
+                _ownsMaterial = true;
+                return true;
+            }
+
+            Shader shader = resources.ScreenSpacePcssShadowsShader;
+            if (shader == null)
+            {
+                Debug.LogError("Tsukuyomi PCSS requires a Screen Space PCSS Shadows shader in TsukuyomiRenderPipelineResources.");
+                return false;
+            }
+
+            _material = CoreUtils.CreateEngineMaterial(shader);
+            _ownsMaterial = true;
+            return _material != null;
+        }
+
+        private bool LoadScreenSpaceShadowsMaterial(TsukuyomiRenderPipelineResources resources)
+        {
+            if (resources.ScreenSpaceShadowsMaterial != null)
+            {
+                _screenSpaceShadowsMaterial = new Material(resources.ScreenSpaceShadowsMaterial) { hideFlags = HideFlags.HideAndDontSave };
+                _ownsScreenSpaceShadowsMaterial = true;
+                return true;
+            }
+
+            Shader shader = resources.ScreenSpaceShadowsShader;
+            if (shader == null)
+                shader = Shader.Find("Hidden/Universal Render Pipeline/ScreenSpaceShadows");
+
+            if (shader == null)
+            {
+                Debug.LogError("Tsukuyomi Contact Shadow requires Unity's ScreenSpaceShadows shader in TsukuyomiRenderPipelineResources when PCSS is disabled.");
+                return false;
+            }
+
+            _screenSpaceShadowsMaterial = CoreUtils.CreateEngineMaterial(shader);
+            _ownsScreenSpaceShadowsMaterial = true;
+            return _screenSpaceShadowsMaterial != null;
+        }
+
+        public override bool IsActive(in FrameContext frame)
+        {
+            return base.IsActive(frame) && (_settings.Enabled || _contactShadowsEnabled || _perObjectShadowsEnabled) && _material != null;
+        }
+
+        public override void Dispose()
+        {
+            if (_ownsMaterial)
+                CoreUtils.Destroy(_material);
+            if (_ownsScreenSpaceShadowsMaterial)
+                CoreUtils.Destroy(_screenSpaceShadowsMaterial);
+            _material = null;
+            _screenSpaceShadowsMaterial = null;
+            _ownsMaterial = false;
+            _ownsScreenSpaceShadowsMaterial = false;
+        }
+
+        private sealed class RenderData
+        {
+            public bool UseMainLightShadow;
+            public TsukuyomiPcssSettings Settings;
+            public TextureHandle PenumbraMask;
+            public TextureHandle PenumbraBlurTemp;
+            public TextureHandle ScreenShadow;
+            public TextureHandle BaseScreenShadow;
+            public TextureHandle CameraDepthTexture;
+            public TextureHandle ContactShadowMap;
+            public Material Material;
+            public Material ScreenSpaceShadowsMaterial;
+            public UniversalCameraData CameraData;
+            public bool EnablePcss;
+            public bool UseOfficialScreenSpaceShadows;
+            public bool EnableContactShadows;
+            public bool EnablePerObjectShadows;
+        }
+
+        public override void Record(in UnsafePassContext context)
+        {
+            var passData = context.GetOrCreateData<RenderData>();
+            if (!s_KeywordsInitialized || _material == null || (!_settings.Enabled && !_contactShadowsEnabled && !_perObjectShadowsEnabled))
+                return;
+
+            var shadowData = context.FrameData.Get<UniversalShadowData>();
+            var resourceData = context.FrameData.Get<UniversalResourceData>();
+
+            if (context.CameraData.isPreviewCamera || context.LightData.mainLightIndex < 0)
+                return;
+
+            bool useMainLightShadow = shadowData.supportsMainLightShadows && resourceData.mainShadowsTexture.IsValid();
+            if (_settings.Enabled && !useMainLightShadow)
+                return;
+
+            if (!resourceData.cameraDepthTexture.IsValid())
+                return;
+
+            TsukuyomiPcssSettings settings = TsukuyomiPcssSettings.FromResolved(_settings).WithCameraDescriptor(context.CameraData.cameraTargetDescriptor);
+            RenderTextureDescriptor screenDesc = CreateScreenShadowDescriptor(context.CameraData.cameraTargetDescriptor);
+            RenderTextureDescriptor penumbraDesc = CreatePenumbraDescriptor(context.CameraData.cameraTargetDescriptor, settings.PenumbraMaskScale);
+
+            TextureHandle penumbraMask = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, penumbraDesc, "_TsukuyomiPenumbraMaskTex", false, FilterMode.Bilinear);
+            TextureHandle penumbraBlurTemp = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, penumbraDesc, "_TsukuyomiPenumbraMaskBlurTempTex", false, FilterMode.Bilinear);
+            TextureHandle screenShadow = UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, screenDesc, "_ScreenSpaceShadowmapTexture", false);
+            TextureHandle baseScreenShadow = !_settings.Enabled
+                ? UniversalRenderer.CreateRenderGraphTexture(context.RenderGraph, screenDesc, "_TsukuyomiBaseScreenSpaceShadowmapTexture", false)
+                : TextureHandle.nullHandle;
+            TextureHandle cameraDepthTexture = resourceData.cameraDepthTexture;
+            TextureHandle mainShadowsTexture = resourceData.mainShadowsTexture;
+            TextureHandle activeColorTexture = resourceData.activeColorTexture;
+            TextureHandle contactShadowMap = TextureHandle.nullHandle;
+            if (_contactShadowsEnabled)
+            {
+                TextureDesc contactDesc = _contactShadowDenoiseEnabled
+                    ? TsukuyomiContactShadowDenoisePass.CreateDenoiseDesc(context.CameraData.cameraTargetDescriptor)
+                    : TsukuyomiContactShadowPass.CreateContactShadowDesc(context.CameraData.cameraTargetDescriptor);
+                TextureSlot contactSlot = TextureSlot.Read(
+                    _contactShadowDenoiseEnabled ? TsukuyomiContactShadowResources.ContactShadowDenoisedMap : TsukuyomiContactShadowResources.ContactShadowMap,
+                    contactDesc);
+                contactShadowMap = context.GetTexture(contactSlot);
+            }
+            passData.Material = _material;
+            Material screenSpaceShadowsMaterial = _screenSpaceShadowsMaterial;
+            passData.CameraData = context.CameraData;
+            bool enablePcss = _settings.Enabled;
+            passData.UseOfficialScreenSpaceShadows = !enablePcss && useMainLightShadow && screenSpaceShadowsMaterial != null && baseScreenShadow.IsValid();
+            passData.EnableContactShadows = _contactShadowsEnabled && contactShadowMap.IsValid();
+            TextureHandle perObjectShadowMap = context.FrameData.GetOrCreate<TsukuyomiPerObjectShadowResources>().Shadowmap;
+            bool enablePerObjectShadows = _perObjectShadowsEnabled && perObjectShadowMap.IsValid();
+
+            context.Builder.UseTexture(screenShadow, AccessFlags.WriteAll);
+            if (baseScreenShadow.IsValid())
+                context.Builder.UseTexture(baseScreenShadow, AccessFlags.ReadWrite);
+            context.Builder.UseTexture(penumbraMask, AccessFlags.ReadWrite);
+            context.Builder.UseTexture(penumbraBlurTemp, AccessFlags.ReadWrite);
+            context.Builder.UseTexture(cameraDepthTexture, AccessFlags.Read);
+            if (useMainLightShadow)
+                context.Builder.UseTexture(mainShadowsTexture, AccessFlags.Read);
+            context.Builder.UseTexture(activeColorTexture, AccessFlags.Read);
+            if (contactShadowMap.IsValid())
+                context.Builder.UseTexture(contactShadowMap, AccessFlags.Read);
+            if (enablePerObjectShadows)
+                context.Builder.UseTexture(perObjectShadowMap, AccessFlags.Read);
+            context.Builder.AllowGlobalStateModification(true);
+            context.Builder.SetGlobalTextureAfterPass(penumbraMask, PenumbraMaskTexId);
+            context.Builder.SetGlobalTextureAfterPass(screenShadow, ScreenSpaceShadowmapTextureId);
+
+            passData.UseMainLightShadow = useMainLightShadow;
+            passData.Settings = settings;
+            passData.PenumbraMask = penumbraMask;
+            passData.PenumbraBlurTemp = penumbraBlurTemp;
+            passData.ScreenShadow = screenShadow;
+            passData.BaseScreenShadow = baseScreenShadow;
+            passData.CameraDepthTexture = cameraDepthTexture;
+            passData.ContactShadowMap = contactShadowMap;
+            passData.ScreenSpaceShadowsMaterial = screenSpaceShadowsMaterial;
+            passData.EnablePcss = enablePcss;
+            passData.EnablePerObjectShadows = enablePerObjectShadows;
+
+            context.SetRenderFunc(passData, static (state, graphContext) =>
+            {
+                if (state.EnablePcss)
+                {
+                    using (new ProfilingScope(graphContext.cmd, _pcssPenumbraSampler))
+                    {
+                        SetCommonGlobals(graphContext, state.Settings, state.CameraDepthTexture, state.CameraData);
+
+                        graphContext.cmd.SetRenderTarget(state.PenumbraMask, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.PenumbraMaskViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.PenumbraMask, Vector2.one, state.Material, PenumbraMaskPass);
+
+                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, state.PenumbraMask);
+                        graphContext.cmd.SetGlobalVector(PenumbraMaskTexelSizeId, state.Settings.PenumbraMaskTexelSize);
+                        graphContext.cmd.SetRenderTarget(state.PenumbraBlurTemp, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.PenumbraMaskViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.PenumbraMask, Vector2.one, state.Material, BlurHorizontalPass);
+
+                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, state.PenumbraBlurTemp);
+                        graphContext.cmd.SetGlobalVector(PenumbraMaskTexelSizeId, state.Settings.PenumbraMaskTexelSize);
+                        graphContext.cmd.SetRenderTarget(state.PenumbraMask, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.PenumbraMaskViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.PenumbraBlurTemp, Vector2.one, state.Material, BlurVerticalPass);
+
+                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, state.PenumbraMask);
+                    }
+                }
+
+                using (new ProfilingScope(graphContext.cmd, _screenSpaceShadowSampler))
+                {
+                    SetCommonGlobals(graphContext, state.Settings, state.CameraDepthTexture, state.CameraData);
+                    graphContext.cmd.SetKeyword(ContactShadowsKeyword, state.EnableContactShadows);
+                    graphContext.cmd.SetGlobalFloat(EnableMainLightShadowId, state.UseMainLightShadow ? 1.0f : 0.0f);
+                    graphContext.cmd.SetGlobalFloat("_TsukuyomiEnablePerObjectShadow", state.EnablePerObjectShadows ? 1.0f : 0.0f);
+
+                    if (state.EnablePcss)
+                    {
+                        graphContext.cmd.SetGlobalFloat(EnablePcssId, 1.0f);
+                        graphContext.cmd.SetGlobalTexture(PenumbraMaskTexId, state.PenumbraMask);
+                        if (state.EnableContactShadows)
+                            graphContext.cmd.SetGlobalTexture(ContactShadowMapId, state.ContactShadowMap);
+
+                        graphContext.cmd.SetRenderTarget(state.ScreenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.ColorAttachmentViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.ScreenShadow, Vector2.one, state.Material, ScreenSpaceShadowPass);
+                    }
+                    else
+                    {
+                        if (state.UseOfficialScreenSpaceShadows)
+                        {
+                            graphContext.cmd.SetRenderTarget(state.BaseScreenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                            graphContext.cmd.SetViewport(state.Settings.ColorAttachmentViewport);
+                            Blitter.BlitTexture(graphContext.cmd, state.BaseScreenShadow, Vector2.one, state.ScreenSpaceShadowsMaterial, 0);
+                            graphContext.cmd.SetGlobalTexture(BaseScreenSpaceShadowmapTextureId, state.BaseScreenShadow);
+                        }
+
+                        if (state.EnableContactShadows)
+                            graphContext.cmd.SetGlobalTexture(ContactShadowMapId, state.ContactShadowMap);
+
+                        graphContext.cmd.SetRenderTarget(state.ScreenShadow, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                        graphContext.cmd.SetViewport(state.Settings.ColorAttachmentViewport);
+                        Blitter.BlitTexture(graphContext.cmd, state.ScreenShadow, Vector2.one, state.Material, ContactShadowCompositePass);
+                    }
+
+                    graphContext.cmd.SetKeyword(ContactShadowsKeyword, false);
+                    graphContext.cmd.SetKeyword(MainLightShadowsKeyword, false);
+                    graphContext.cmd.SetKeyword(MainLightShadowCascadesKeyword, false);
+                    graphContext.cmd.SetKeyword(MainLightShadowScreenKeyword, true);
+                }
+            });
+        }
+
+        private static RenderTextureDescriptor CreateScreenShadowDescriptor(RenderTextureDescriptor cameraDescriptor)
+        {
+            cameraDescriptor.depthStencilFormat = GraphicsFormat.None;
+            cameraDescriptor.msaaSamples = 1;
+            cameraDescriptor.graphicsFormat = SystemInfo.IsFormatSupported(GraphicsFormat.R8_UNorm, GraphicsFormatUsage.Blend)
+                ? GraphicsFormat.R8_UNorm
+                : GraphicsFormat.B8G8R8A8_UNorm;
+            return cameraDescriptor;
+        }
+
+        private static RenderTextureDescriptor CreatePenumbraDescriptor(RenderTextureDescriptor cameraDescriptor, int maskScale)
+        {
+            cameraDescriptor.width = Mathf.Max(1, cameraDescriptor.width / Mathf.Max(1, maskScale));
+            cameraDescriptor.height = Mathf.Max(1, cameraDescriptor.height / Mathf.Max(1, maskScale));
+            cameraDescriptor.depthStencilFormat = GraphicsFormat.None;
+            cameraDescriptor.msaaSamples = 1;
+            cameraDescriptor.graphicsFormat = GraphicsFormat.R8_UNorm;
+            cameraDescriptor.colorFormat = RenderTextureFormat.R8;
+            cameraDescriptor.autoGenerateMips = false;
+            cameraDescriptor.useMipMap = false;
+            return cameraDescriptor;
+        }
+
+        private static void SetCommonGlobals(
+            UnsafeGraphContext context,
+            TsukuyomiPcssSettings settings,
+            TextureHandle cameraDepthTexture,
+            UniversalCameraData cameraData)
+        {
+            SetPcssSettings(context.cmd, settings);
+            context.cmd.SetGlobalVector(PenumbraMaskTexelSizeId, settings.PenumbraMaskTexelSize);
+            context.cmd.SetGlobalVector(ColorAttachmentTexelSizeId, settings.ColorAttachmentTexelSize);
+        }
+
+        private static void SetPcssSettings(UnsafeCommandBuffer cmd, TsukuyomiPcssSettings settings)
+        {
+            cmd.SetGlobalFloat(FindBlockerSampleCountId, settings.FindBlockerSampleCount);
+            cmd.SetGlobalFloat(PcfSampleCountId, settings.PcfSampleCount);
+            cmd.SetGlobalFloat(AngularDiameterId, settings.AngularDiameter);
+            cmd.SetGlobalFloat(BlockerSearchAngularDiameterId, settings.BlockerSearchAngularDiameter);
+            cmd.SetGlobalFloat(MinFilterMaxAngularDiameterId, settings.MinFilterMaxAngularDiameter);
+            cmd.SetGlobalFloat(MaxPenumbraSizeId, settings.MaxPenumbraSize);
+            cmd.SetGlobalFloat(MaxSamplingDistanceId, settings.MaxSamplingDistance);
+            cmd.SetGlobalFloat(MinFilterSizeTexelsId, settings.MinFilterSizeTexels);
+        }
+
+        private readonly struct TsukuyomiPcssSettings
+        {
+            public readonly float FindBlockerSampleCount;
+            public readonly float PcfSampleCount;
+            public readonly float AngularDiameter;
+            public readonly float BlockerSearchAngularDiameter;
+            public readonly float MinFilterMaxAngularDiameter;
+            public readonly float MaxPenumbraSize;
+            public readonly float MaxSamplingDistance;
+            public readonly float MinFilterSizeTexels;
+            public readonly Vector4 PenumbraMaskTexelSize;
+            public readonly Vector4 ColorAttachmentTexelSize;
+            public readonly Rect PenumbraMaskViewport;
+            public readonly Rect ColorAttachmentViewport;
+            public readonly int PenumbraMaskScale;
+
+            private TsukuyomiPcssSettings(TsukuyomiPcssResolvedSettings settings)
+            {
+                FindBlockerSampleCount = Mathf.Clamp(settings.FindBlockerSampleCount, 1, 64);
+                PcfSampleCount = Mathf.Clamp(settings.PcfSampleCount, 1, 64);
+                AngularDiameter = Mathf.Max(0.001f, settings.AngularDiameter);
+                BlockerSearchAngularDiameter = Mathf.Max(0.001f, settings.BlockerSearchAngularDiameter);
+                MinFilterMaxAngularDiameter = Mathf.Max(0.001f, settings.MinFilterMaxAngularDiameter);
+                MaxPenumbraSize = Mathf.Max(0.0f, settings.MaxPenumbraSize);
+                MaxSamplingDistance = Mathf.Max(0.0f, settings.MaxSamplingDistance);
+                MinFilterSizeTexels = Mathf.Max(0.0f, settings.MinFilterSizeTexels);
+                PenumbraMaskScale = Mathf.Clamp(settings.PenumbraMaskScale, 1, 32);
+                PenumbraMaskTexelSize = Vector4.zero;
+                ColorAttachmentTexelSize = Vector4.zero;
+                PenumbraMaskViewport = Rect.zero;
+                ColorAttachmentViewport = Rect.zero;
+            }
+
+            private TsukuyomiPcssSettings(TsukuyomiPcssSettings settings, RenderTextureDescriptor cameraDescriptor)
+            {
+                FindBlockerSampleCount = settings.FindBlockerSampleCount;
+                PcfSampleCount = settings.PcfSampleCount;
+                AngularDiameter = settings.AngularDiameter;
+                BlockerSearchAngularDiameter = settings.BlockerSearchAngularDiameter;
+                MinFilterMaxAngularDiameter = settings.MinFilterMaxAngularDiameter;
+                MaxPenumbraSize = settings.MaxPenumbraSize;
+                MaxSamplingDistance = settings.MaxSamplingDistance;
+                MinFilterSizeTexels = settings.MinFilterSizeTexels;
+                PenumbraMaskScale = settings.PenumbraMaskScale;
+
+                int penumbraWidth = Mathf.Max(1, cameraDescriptor.width / PenumbraMaskScale);
+                int penumbraHeight = Mathf.Max(1, cameraDescriptor.height / PenumbraMaskScale);
+                PenumbraMaskTexelSize = new Vector4(1.0f / penumbraWidth, 1.0f / penumbraHeight, penumbraWidth, penumbraHeight);
+                ColorAttachmentTexelSize = new Vector4(1.0f / cameraDescriptor.width, 1.0f / cameraDescriptor.height, cameraDescriptor.width, cameraDescriptor.height);
+                PenumbraMaskViewport = new Rect(0.0f, 0.0f, penumbraWidth, penumbraHeight);
+                ColorAttachmentViewport = new Rect(0.0f, 0.0f, cameraDescriptor.width, cameraDescriptor.height);
+            }
+
+            public static TsukuyomiPcssSettings FromResolved(TsukuyomiPcssResolvedSettings settings)
+            {
+                return new TsukuyomiPcssSettings(settings);
+            }
+
+            public TsukuyomiPcssSettings WithCameraDescriptor(RenderTextureDescriptor cameraDescriptor)
+            {
+                return new TsukuyomiPcssSettings(this, cameraDescriptor);
+            }
+        }
+    }
+}

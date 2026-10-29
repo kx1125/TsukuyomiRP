@@ -1,0 +1,6 @@
+{
+    "name": "Tsukuyomi.Rendering.PHCompatibilityTests",
+    "references": ["Tsukuyomi.Rendering", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"],
+    "includePlatforms": ["Editor"],
+    "optionalUnityReferences": ["TestAssemblies"]
+}

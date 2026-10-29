@@ -17,8 +17,24 @@ namespace Tsukuyomi.Rendering
     }
 
     /// <summary>Produces opaque screen-space visibility; does not replace URP's shadow globals.</summary>
-    internal sealed class TsukuyomiRayTracedShadowPass : GraphFeaturePass, IDisposable
+    internal sealed class TsukuyomiRayTracedShadowPass : GraphFeaturePass
     {
+        private readonly RayTracedShadowPass _defaults;
+        public TsukuyomiRayTracedShadowPass(RayTracedShadowPass settings)
+        { _defaults = settings; s_Instances.Add(this); }
+        public override void Build(PassPlanBuilder plan)
+        {
+            plan.PrepareAfter<TsukuyomiRectLightPass>();
+            // Request depth/motion before the GBuffer range, including Forward depth priming.
+            var trace = plan.Add(this, RenderPassEvent.BeforeRenderingGbuffer - 1);
+            plan.Provides(trace, "PH.RayTracedShadows");
+        }
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => Configure(_defaults, context.Deferred, context.Find<TsukuyomiRectLightPass>(), context.Camera);
+        public override void Deactivate(Camera camera) { _ready = false; ClearGlobals(); }
+        public override void ReleaseCamera(Camera camera)
+        { if (!ReferenceEquals(camera, null) && _cameras.Remove(camera, out var state)) state.Dispose(); }
+
         private const string HistoryA = "RT Shadow History A", HistoryB = "RT Shadow History B";
         private const string GeometryA = "RT Shadow Geometry A", GeometryB = "RT Shadow Geometry B";
         private static readonly int CountId = Shader.PropertyToID("_TsukuyomiRTShadowCount");
@@ -50,9 +66,8 @@ namespace Tsukuyomi.Rendering
         internal bool RequiresNormals => _ready;
         public override string Name => "Tsukuyomi Ray Traced Shadows";
 
-        public TsukuyomiRayTracedShadowPass() => s_Instances.Add(this);
 
-        public void Configure(TsukuyomiPipelineProfile profile, bool deferred, TsukuyomiRectLightPass rectLights, Camera camera)
+        public void Configure(RayTracedShadowPass profile, bool deferred, TsukuyomiRectLightPass rectLights, Camera camera)
         {
             _rectLights = rectLights;
             _settings = RayTracedShadowSettings.Resolve(profile);
@@ -63,7 +78,7 @@ namespace Tsukuyomi.Rendering
             var denoise = resources ? resources.RayTracedShadowDenoiser : null;
             if (_trace != trace || _denoise != denoise) ReleaseCameras();
             _trace = trace; _denoise = denoise;
-            bool requested = _settings.Enabled && HasRequestedLights(profile);
+            bool requested = _settings.Enabled && HasRequestedLights();
             _ready = requested && supported && trace && denoise;
             if (requested && !supported && !_warnedUnsupported)
             {
@@ -84,12 +99,10 @@ namespace Tsukuyomi.Rendering
             foreach (var trackedCamera in _retired) { _cameras[trackedCamera].Dispose(); _cameras.Remove(trackedCamera); }
         }
 
-        private static bool HasRequestedLights(TsukuyomiPipelineProfile profile)
+        private bool HasRequestedLights()
         {
             foreach (var light in TsukuyomiRayTracedShadowLight.ActiveLights) if (light && light.IsUsable) return true;
-            var volume = VolumeManager.instance.stack?.GetComponent<TsukuyomiRectLightVolume>();
-            bool rectanglesEnabled = profile && (volume != null && volume.active && volume.enable.overrideState
-                ? volume.enable.value : profile.EnableRectLights);
+            bool rectanglesEnabled = _rectLights != null && _rectLights.Requested;
             if (!rectanglesEnabled) return false;
             foreach (var light in TsukuyomiRectLight.ActiveLights)
                 if (light && light.IsUsable && light.ShadowMode == RayTracedShadowMode.RayTraced && light.ShadowStrength > 0) return true;
@@ -128,7 +141,7 @@ namespace Tsukuyomi.Rendering
         [UnityEditor.InitializeOnLoadMethod]
 #endif
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void Initialize()
+        private static void InitializeFallback()
         {
             ReleaseAll(); s_ShuttingDown = false; ClearGlobals();
             RenderPipelineManager.beginCameraRendering -= ClearCamera;
@@ -170,7 +183,7 @@ namespace Tsukuyomi.Rendering
             s_EmptyMap?.Dispose(); s_EmptyMap = null; CoreUtils.Destroy(s_White); s_White = null;
         }
         private void ReleaseCameras() { foreach (var state in _cameras.Values) state.Dispose(); _cameras.Clear(); }
-        public void Dispose() { ReleaseCameras(); s_Instances.Remove(this); ClearGlobals(); }
+        public override void Dispose() { ReleaseCameras(); s_Instances.Remove(this); ClearGlobals(); }
 
         private sealed class Candidate
         {
@@ -276,7 +289,8 @@ namespace Tsukuyomi.Rendering
             if (!_ready || !camera || (camera.cameraType != CameraType.Game && camera.cameraType != CameraType.SceneView)
                 || context.CameraData.cameraTargetDescriptor.dimension != TextureDimension.Tex2D)
                 return;
-            var rectangles = _rectLights.PrepareFrame(context);
+            var rectangles = _rectLights != null ? _rectLights.PrepareFrame(context)
+                : context.FrameData.GetOrCreate<RectLightFrameData>();
             Gather(context, rectangles, out int additionalCount);
             int count = Mathf.Min(_candidates.Count, _settings.MaxLights);
             if (count == 0)

@@ -1,633 +1,135 @@
-using System;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
 namespace Tsukuyomi.Rendering
 {
-    public class TsukuyomiFeature : ScriptableRendererFeature
+    [DisallowMultipleRendererFeature("Tsukuyomi")]
+    public sealed class TsukuyomiFeature : ScriptableRendererFeature
     {
         public TsukuyomiPipelineProfile Profile;
-
-        private static bool s_WarnedPerObjectShadowRenderingLayersDisabled;
-
-        private Light _perObjectShadowMainLight;
-        private bool _hasMainLightShadowLayerOverride;
-        private bool _originalMainLightCustomShadowLayers;
-        private uint _originalMainLightShadowRenderingLayers;
-
-        private UnityRhi.Dlss.Urp.DlssNrRenderFeature _neuralRendering;
-        private PassRegistry _registry;
-        private PassRegistry _contactShadowRegistry;
-        private PassRegistry _contactShadowDenoiseRegistry;
-        private PassRegistry _depthPyramidRegistry;
-        private PassRegistry _msvoRegistry, _msvoRestoreRegistry;
-        private PassRegistry _gtaoRegistry;
-        private PassRegistry _gtaoRestoreRegistry;
-        private PassRegistry _ssgiRegistry;
-        private PassRegistry _ssgiRestoreRegistry;
-        private PassRegistry _ssgiDebugRegistry;
-        private PassRegistry _pcssRegistry;
-        private PassRegistry _pcssRestoreRegistry;
-        private PassRegistry _planarReflectionRegistry;
-        private PassRegistry _volumeLightRegistry;
-        private PassRegistry _sssSkinRegistry;
-        private PassRegistry _postProcessRegistry;
-        private ResourceHub _resourceHub;
-        private FrameContext _enqueueFrame;
-        private readonly List<TsukuyomiBridgePass> _bridgePasses = new();
-        private TsukuyomiBridgePass _contactShadowBridgePass;
-        private TsukuyomiBridgePass _contactShadowDenoiseBridgePass;
-        private TsukuyomiBridgePass _depthPyramidBridgePass;
-        private TsukuyomiBridgePass _msvoEarlyBridgePass, _msvoLateBridgePass, _msvoRestoreBridgePass;
-        private TsukuyomiBridgePass _gtaoBridgePass;
-        private TsukuyomiBridgePass _gtaoRestoreBridgePass;
-        private TsukuyomiBridgePass _ssgiBridgePass;
-        private TsukuyomiBridgePass _ssgiRestoreBridgePass;
-        private TsukuyomiBridgePass _ssgiDebugBridgePass;
-        private TsukuyomiBridgePass _pcssBridgePass;
-        private TsukuyomiBridgePass _pcssRestoreBridgePass;
-        private TsukuyomiBridgePass _planarReflectionBridgePass;
-        private TsukuyomiBridgePass _volumeLightBridgePass;
-        private TsukuyomiBridgePass _sssSkinBridgePass;
-        private TsukuyomiBridgePass _postProcessBridgePass;
-        private TsukuyomiContactShadowPass _contactShadowPass;
-        private TsukuyomiContactShadowDenoisePass _contactShadowDenoisePass;
-        private TsukuyomiDepthPyramidPass _depthPyramidPass;
-        private TsukuyomiMultiScaleAmbientOcclusionPass _msvoPass;
-        private TsukuyomiMultiScaleAmbientOcclusionCompositePass _msvoCompositePass;
-        private TsukuyomiMultiScaleAmbientOcclusionRestoreKeywordsPass _msvoRestorePass;
-        private TsukuyomiGroundTruthAmbientOcclusionPass _gtaoPass;
-        private TsukuyomiGroundTruthAmbientOcclusionRestoreKeywordsPass _gtaoRestorePass;
-        private TsukuyomiScreenSpaceGlobalIlluminationPass _ssgiPass;
-        private TsukuyomiScreenSpaceGlobalIlluminationRestorePass _ssgiRestorePass;
-        private TsukuyomiScreenSpaceGlobalIlluminationDebugPass _ssgiDebugPass;
-        private TsukuyomiPcssScreenSpaceShadowPass _pcssPass;
-        private TsukuyomiPcssRestoreShadowKeywordsPass _pcssRestorePass;
-        private TsukuyomiPlanarReflectionPass _planarReflectionPass;
-        private TsukuyomiPerObjectShadowCasterPass _perObjectShadowPass;
-        private TsukuyomiVolumetricFogPass _volumeLightPass;
-        private TsukuyomiSssSkinPass _sssSkinPass;
-        private TsukuyomiPostProcessPass _postProcessPass;
-        private TsukuyomiRectLightPass _rectLightPass;
-        private TsukuyomiBridgePass _rectLightBridgePass;
-        private TsukuyomiRayTracedShadowPass _rayTracedShadowPass;
-        private TsukuyomiBridgePass _rayTracedShadowBridgePass;
-#if ENABLE_UPSCALER_FRAMEWORK
-        private TsukuyomiFsr3OpaqueOnlyCapturePass _fsr3OpaqueOnlyCapturePass;
-        private TsukuyomiFsr3ManualMaskPass _fsr3ManualMaskPass;
-#endif
-
-        private void OnEnable()
-        {
-            TsukuyomiPcssScreenSpaceShadowPass.InitializeKeywords();
-            TsukuyomiPcssRestoreShadowKeywordsPass.InitializeKeywords();
-            TsukuyomiGroundTruthAmbientOcclusionPass.InitializeKeywords();
-            TsukuyomiMultiScaleAmbientOcclusionPass.InitializeKeywords();
-            TsukuyomiScreenSpaceGlobalIlluminationPass.InitializeKeyword();
-            TsukuyomiVolumetricFogPass.InitializeKeywords();
-        }
+        [System.NonSerialized] private TsukuyomiPipelineProfile _source;
+        [System.NonSerialized] private PassSession _session;
+        [System.NonSerialized] private int _revision = -1;
+        [System.NonSerialized] private int _switches;
+        [System.NonSerialized] private bool _callbacksRegistered, _renderingContext, _suspended;
+        private readonly List<PassSession> _retired = new();
 
         public override void Create()
         {
-            ReleaseNeuralRendering();
-            _neuralRendering = CreateInstance<UnityRhi.Dlss.Urp.DlssNrRenderFeature>();
-            _neuralRendering.hideFlags = HideFlags.HideAndDontSave;
-            _neuralRendering.ManagedByTsukuyomi = true;
-            _neuralRendering.Create();
-            _registry = new PassRegistry();
-            _contactShadowRegistry = new PassRegistry();
-            _contactShadowDenoiseRegistry = new PassRegistry();
-            _depthPyramidRegistry = new PassRegistry();
-            _msvoRegistry = new PassRegistry();
-            _msvoRestoreRegistry = new PassRegistry();
-            _gtaoRegistry = new PassRegistry();
-            _gtaoRestoreRegistry = new PassRegistry();
-            _ssgiRegistry = new PassRegistry();
-            _ssgiRestoreRegistry = new PassRegistry();
-            _ssgiDebugRegistry = new PassRegistry();
-            _pcssRegistry = new PassRegistry();
-            _pcssRestoreRegistry = new PassRegistry();
-            _planarReflectionRegistry = new PassRegistry();
-            _volumeLightRegistry = new PassRegistry();
-            _sssSkinRegistry = new PassRegistry();
-            _postProcessRegistry = new PassRegistry();
-            _resourceHub?.Dispose();
-            _resourceHub = new ResourceHub();
-            _bridgePasses.Clear();
-
-            _contactShadowPass ??= new TsukuyomiContactShadowPass();
-            _contactShadowDenoisePass ??= new TsukuyomiContactShadowDenoisePass();
-            _depthPyramidPass ??= new TsukuyomiDepthPyramidPass();
-            _msvoPass ??= new TsukuyomiMultiScaleAmbientOcclusionPass();
-            _msvoRestorePass ??= new TsukuyomiMultiScaleAmbientOcclusionRestoreKeywordsPass();
-            _msvoCompositePass ??= new TsukuyomiMultiScaleAmbientOcclusionCompositePass(_msvoPass);
-            _gtaoPass ??= new TsukuyomiGroundTruthAmbientOcclusionPass();
-            _gtaoRestorePass ??= new TsukuyomiGroundTruthAmbientOcclusionRestoreKeywordsPass();
-            _ssgiPass ??= new TsukuyomiScreenSpaceGlobalIlluminationPass();
-            _ssgiRestorePass ??= new TsukuyomiScreenSpaceGlobalIlluminationRestorePass();
-            _ssgiDebugPass ??= new TsukuyomiScreenSpaceGlobalIlluminationDebugPass();
-            _pcssPass ??= new TsukuyomiPcssScreenSpaceShadowPass();
-            _pcssRestorePass ??= new TsukuyomiPcssRestoreShadowKeywordsPass();
-            _planarReflectionPass ??= new TsukuyomiPlanarReflectionPass();
-            _perObjectShadowPass ??= new TsukuyomiPerObjectShadowCasterPass();
-            _volumeLightPass ??= new TsukuyomiVolumetricFogPass();
-            _sssSkinPass ??= new TsukuyomiSssSkinPass();
-            _postProcessPass ??= new TsukuyomiPostProcessPass();
-            _rectLightPass ??= new TsukuyomiRectLightPass();
-            _rayTracedShadowPass?.Dispose();
-            _rayTracedShadowPass = new TsukuyomiRayTracedShadowPass { InjectionPoint = InjectionPoint.BeforeOpaque };
-            var rtShadowRegistry = new PassRegistry();
-            rtShadowRegistry.AddPass(_rayTracedShadowPass);
-            _rayTracedShadowBridgePass = new TsukuyomiBridgePass(rtShadowRegistry, InjectionPoint.BeforeOpaque, _resourceHub)
-            {
-                // URP schedules a depth read in the GBuffer event range after GBuffer,
-                // even in Forward, where that copy does not run. Request it before
-                // GBuffer so depth priming is copied (and motion rendered) after prepass.
-                renderPassEvent = RenderPassEvent.BeforeRenderingGbuffer - 1
-            };
-            _rectLightPass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            var rectLightRegistry = new PassRegistry();
-            rectLightRegistry.AddPass(_rectLightPass);
-            _rectLightBridgePass = new TsukuyomiBridgePass(rectLightRegistry, InjectionPoint.BeforeOpaque, _resourceHub)
-            { renderPassEvent = RenderPassEvent.BeforeRenderingOpaques };
-#if ENABLE_UPSCALER_FRAMEWORK
-            _fsr3OpaqueOnlyCapturePass ??= new TsukuyomiFsr3OpaqueOnlyCapturePass();
-            _fsr3ManualMaskPass ??= new TsukuyomiFsr3ManualMaskPass();
-#endif
-
-            _contactShadowPass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            _contactShadowDenoisePass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            _depthPyramidPass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            _msvoPass.InjectionPoint = InjectionPoint.AfterOpaque;
-            _msvoCompositePass.InjectionPoint = InjectionPoint.AfterOpaque;
-            _msvoRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
-            _gtaoPass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            _gtaoRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
-            _ssgiPass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            _ssgiRestorePass.InjectionPoint = InjectionPoint.AfterOpaque;
-            _ssgiDebugPass.InjectionPoint = InjectionPoint.BeforePostProcess;
-            _pcssPass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            _pcssRestorePass.InjectionPoint = InjectionPoint.BeforePostProcess;
-            _planarReflectionPass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            _volumeLightPass.InjectionPoint = InjectionPoint.BeforePostProcess;
-            _sssSkinPass.InjectionPoint = InjectionPoint.BeforeOpaque;
-            _postProcessPass.InjectionPoint = InjectionPoint.BeforePostProcess;
-
-            _contactShadowRegistry.AddPass(_contactShadowPass);
-            _contactShadowDenoiseRegistry.AddPass(_contactShadowDenoisePass);
-            _depthPyramidRegistry.AddPass(_depthPyramidPass);
-            _msvoRegistry.AddPass(_msvoPass);
-            _msvoRegistry.AddPass(_msvoCompositePass);
-            _msvoRestoreRegistry.AddPass(_msvoRestorePass);
-            _gtaoRegistry.AddPass(_gtaoPass);
-            _gtaoRestoreRegistry.AddPass(_gtaoRestorePass);
-            _ssgiRegistry.AddPass(_ssgiPass);
-            _ssgiRestoreRegistry.AddPass(_ssgiRestorePass);
-            _ssgiDebugRegistry.AddPass(_ssgiDebugPass);
-            _pcssRegistry.AddPass(_pcssPass);
-            _pcssRestoreRegistry.AddPass(_pcssRestorePass);
-            _planarReflectionRegistry.AddPass(_planarReflectionPass);
-            _volumeLightRegistry.AddPass(_volumeLightPass);
-            _sssSkinRegistry.AddPass(_sssSkinPass);
-            _postProcessRegistry.AddPass(_postProcessPass);
-
-            _contactShadowBridgePass = new TsukuyomiBridgePass(_contactShadowRegistry, _contactShadowPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 1
-            };
-            _contactShadowDenoiseBridgePass = new TsukuyomiBridgePass(_contactShadowDenoiseRegistry, _contactShadowDenoisePass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 3
-            };
-            _depthPyramidBridgePass = new TsukuyomiBridgePass(_depthPyramidRegistry, _depthPyramidPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses
-            };
-            _msvoEarlyBridgePass = new TsukuyomiBridgePass(_msvoRegistry, InjectionPoint.BeforeOpaque, _resourceHub)
-            { renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 2 };
-            _msvoLateBridgePass = new TsukuyomiBridgePass(_msvoRegistry, InjectionPoint.AfterOpaque, _resourceHub)
-            { renderPassEvent = RenderPassEvent.BeforeRenderingTransparents - 1 };
-            _msvoRestoreBridgePass = new TsukuyomiBridgePass(_msvoRestoreRegistry, _msvoRestorePass.InjectionPoint, _resourceHub)
-            { renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1 };
-            _gtaoBridgePass = new TsukuyomiBridgePass(_gtaoRegistry, _gtaoPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 2
-            };
-            _gtaoRestoreBridgePass = new TsukuyomiBridgePass(_gtaoRestoreRegistry, _gtaoRestorePass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1
-            };
-            _ssgiBridgePass = new TsukuyomiBridgePass(_ssgiRegistry, _ssgiPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 4
-            };
-            _ssgiRestoreBridgePass = new TsukuyomiBridgePass(_ssgiRestoreRegistry, _ssgiRestorePass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.BeforeRenderingTransparents
-            };
-            _ssgiDebugBridgePass = new TsukuyomiBridgePass(_ssgiDebugRegistry, _ssgiDebugPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing
-            };
-            _pcssBridgePass = new TsukuyomiBridgePass(_pcssRegistry, _pcssPass.InjectionPoint, _resourceHub);
-            _pcssRestoreBridgePass = new TsukuyomiBridgePass(_pcssRestoreRegistry, _pcssRestorePass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.BeforeRenderingTransparents
-            };
-            _planarReflectionBridgePass = new TsukuyomiBridgePass(_planarReflectionRegistry, _planarReflectionPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.BeforeRenderingOpaques - 1
-            };
-            _volumeLightBridgePass = new TsukuyomiBridgePass(_volumeLightRegistry, _volumeLightPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 3
-            };
-            _sssSkinBridgePass = new TsukuyomiBridgePass(_sssSkinRegistry, _sssSkinPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 5
-            };
-            _postProcessBridgePass = new TsukuyomiBridgePass(_postProcessRegistry, _postProcessPass.InjectionPoint, _resourceHub)
-            {
-                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1
-            };
-
-            if (Profile != null && Profile.Passes != null)
-            {
-                foreach (RenderPassBase pass in Profile.Passes)
-                    _registry.AddPass(pass);
-            }
-
-            foreach (InjectionPoint point in Enum.GetValues(typeof(InjectionPoint)))
-            {
-                var bridge = new TsukuyomiBridgePass(_registry, point, _resourceHub)
-                {
-                    renderPassEvent = MapInjectionPointToEvent(point)
-                };
-                _bridgePasses.Add(bridge);
-            }
+            RegisterCallbacks();
+            Retire(); ResetConfiguration();
+            if (!_renderingContext) DisposeRetired();
         }
-
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            _neuralRendering?.AddRenderPasses(renderer, ref renderingData);
-            _registry.Synchronize(Profile != null ? Profile.Passes : null);
-            _resourceHub.ReleaseDestroyedCameras();
-            Camera camera = renderingData.cameraData.camera;
-            _enqueueFrame = new FrameContext(renderingData.frameData,
-                camera ? _resourceHub.ForCamera(camera) : _resourceHub);
-            var requirements = renderingData.frameData.GetOrCreate<ResourceRequirements>();
-            requirements.Begin(camera);
-            _rectLightPass.Configure(Profile, UsesDeferredLighting(renderer));
-            _rayTracedShadowPass.Configure(Profile, UsesDeferredLighting(renderer), _rectLightPass, camera);
-            EnqueueBridge(renderer, _rayTracedShadowBridgePass);
-            EnqueueBridge(renderer, _rectLightBridgePass);
-#if ENABLE_UPSCALER_FRAMEWORK
-            _fsr3ManualMaskPass.Configure(Profile);
-            renderer.EnqueuePass(_fsr3OpaqueOnlyCapturePass);
-            renderer.EnqueuePass(_fsr3ManualMaskPass);
+            if (!isActive || _suspended)
+            {
+                Retire(); ResetConfiguration();
+                if (!_renderingContext) DisposeRetired();
+                return;
+            }
+            // A retained renderer can resume without Create after a lifecycle transition.
+            RegisterCallbacks();
+            _renderingContext = true;
+            int switches = Profile ? Profile.SwitchSignature() : 0;
+            if (ConfigurationChanged(switches))
+            {
+                Retire(); _source = Profile; _revision = Profile ? Profile.Revision : -1; _switches = switches;
+                if (Profile)
+                {
+                    _session = new PassSession(Profile);
+                    foreach (var error in _session.Errors) Debug.LogError("Tsukuyomi Profile: " + error, Profile);
+                }
+            }
+            _session?.Enqueue(renderer, ref renderingData);
+        }
+        private bool ConfigurationChanged(int switches)
+            => !ReferenceEquals(_source, Profile) || (Profile && _session == null) || (!Profile && _session != null)
+                || (Profile && (_revision != Profile.Revision || switches != _switches));
+        private void ResetConfiguration() { _source = null; _revision = -1; _switches = 0; }
+        private void Retire() { if (_session != null) { _retired.Add(_session); _session = null; } }
+        private void BeginContext(ScriptableRenderContext context, List<Camera> cameras) => _renderingContext = true;
+        private void EndCamera(ScriptableRenderContext context, Camera camera)
+        {
+            _session?.EndCamera(camera);
+            foreach (var session in _retired) session.EndCamera(camera);
+        }
+        private void EndContext(ScriptableRenderContext context, List<Camera> cameras)
+        {
+            _renderingContext = false;
+            // A removed camera need not render again to release its resources. Likewise, a Profile
+            // edit/switch must retire the old snapshot even when no camera enqueues this feature.
+            if (!isActive || _suspended || ConfigurationChanged(Profile ? Profile.SwitchSignature() : 0))
+            { Retire(); ResetConfiguration(); }
+            _session?.EndContext();
+            DisposeRetired();
+        }
+        private void DisposeRetired()
+        {
+            foreach (var session in _retired) session.Dispose();
+            _retired.Clear();
+        }
+        private void ReleaseRuntime()
+        {
+            _renderingContext = false;
+            Retire(); ResetConfiguration(); DisposeRetired();
+        }
+        private void SuspendRuntime() { _suspended = true; ReleaseRuntime(); }
+        private void OnDisable() => Dispose();
+        private void OnDestroy() => Dispose();
+
+        private void RegisterCallbacks()
+        {
+            if (_callbacksRegistered) return;
+            _callbacksRegistered = true;
+            RenderPipelineManager.beginContextRendering += BeginContext;
+            RenderPipelineManager.endContextRendering += EndContext;
+            RenderPipelineManager.endCameraRendering += EndCamera;
+            Application.quitting += SuspendRuntime;
+#if UNITY_EDITOR
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += Dispose;
+            UnityEditor.EditorApplication.playModeStateChanged += PlayModeChanged;
+            UnityEditor.EditorApplication.quitting += SuspendRuntime;
+            UnityEditor.EditorApplication.update += UpdateEditorLifecycle;
 #endif
-            if (Profile == null)
-            {
-                RestoreMainLightShadowLayerOverride();
-                TsukuyomiPerObjectShadowRenderer.RestoreRenderingLayersForAll();
-                TsukuyomiPlanarReflectionPass.ClearGlobals();
-                TsukuyomiScreenSpaceGlobalIlluminationPass.ClearGlobals();
-                return;
-            }
-
-            VolumeStack volumeStack = VolumeManager.instance.stack;
-            TsukuyomiPcssVolume pcssVolume = volumeStack?.GetComponent<TsukuyomiPcssVolume>();
-            TsukuyomiPerObjectShadowVolume perObjectShadowVolume = volumeStack?.GetComponent<TsukuyomiPerObjectShadowVolume>();
-            TsukuyomiContactShadowVolume contactShadowVolume = volumeStack?.GetComponent<TsukuyomiContactShadowVolume>();
-            var msvoVolume = volumeStack?.GetComponent<TsukuyomiMultiScaleAmbientOcclusionVolume>();
-            TsukuyomiGroundTruthAmbientOcclusionVolume gtaoVolume = volumeStack?.GetComponent<TsukuyomiGroundTruthAmbientOcclusionVolume>();
-            TsukuyomiScreenSpaceGlobalIlluminationVolume ssgiVolume = volumeStack?.GetComponent<TsukuyomiScreenSpaceGlobalIlluminationVolume>();
-            TsukuyomiVolumeLightVolume volumeLightVolume = volumeStack?.GetComponent<TsukuyomiVolumeLightVolume>();
-            TsukuyomiSssSkinVolume sssSkinVolume = volumeStack?.GetComponent<TsukuyomiSssSkinVolume>();
-
-            bool contactShadowsEnabled = _contactShadowPass != null && _contactShadowPass.Configure(Profile, contactShadowVolume);
-            bool contactShadowDenoiseEnabled = _contactShadowDenoisePass != null && _contactShadowDenoisePass.Configure(Profile, contactShadowVolume);
-
-            if (_planarReflectionPass != null && _planarReflectionPass.Configure(Profile))
-            {
-                EnqueueBridge(renderer, _planarReflectionBridgePass);
-            }
-            else
-            {
-                TsukuyomiPlanarReflectionPass.ClearGlobals();
-            }
-
-            if (contactShadowsEnabled)
-            {
-                EnqueueBridge(renderer, _contactShadowBridgePass);
-
-                if (contactShadowDenoiseEnabled)
-                {
-                    EnqueueBridge(renderer, _contactShadowDenoiseBridgePass);
-                }
-            }
-
-            bool usesDeferredLighting = UsesDeferredLighting(renderer);
-            bool msvoEnabled = _msvoPass.Configure(Profile, msvoVolume) && _msvoPass.IsActive(_enqueueFrame)
-                && _msvoCompositePass.Configure();
-            _msvoPass.InjectionPoint = _msvoPass.Settings.IsLighting ? InjectionPoint.BeforeOpaque : InjectionPoint.AfterOpaque;
-            bool gtaoEnabled = !msvoEnabled && _gtaoPass != null && _gtaoPass.Configure(Profile, gtaoVolume);
-            bool ssgiEnabled = !usesDeferredLighting
-                && _ssgiPass != null
-                && _ssgiPass.Configure(Profile, ssgiVolume, ref renderingData);
-            if (gtaoEnabled) _gtaoBridgePass.CollectResourceRequirements(requirements, _enqueueFrame);
-            if (ssgiEnabled) _ssgiBridgePass.CollectResourceRequirements(requirements, _enqueueFrame);
-            foreach (var bridge in _bridgePasses)
-                bridge.CollectResourceRequirements(requirements, _enqueueFrame);
-
-            bool supportsPyramid = !renderingData.cameraData.isPreviewCamera && SystemInfo.supportsComputeShaders
-                && renderingData.cameraData.cameraTargetDescriptor.dimension == UnityEngine.Rendering.TextureDimension.Tex2D;
-            bool hasProducer = _depthPyramidPass != null && _depthPyramidPass.Enabled;
-            bool depthPyramidEnabled = requirements.ResolveDepthPyramid(
-                _depthPyramidBridgePass.renderPassEvent, hasProducer, supportsPyramid);
-            if (depthPyramidEnabled && !_depthPyramidPass.Configure())
-                depthPyramidEnabled = requirements.ResolveDepthPyramid(_depthPyramidBridgePass.renderPassEvent, false, supportsPyramid);
-            requirements.ReportFailures();
-            gtaoEnabled &= requirements.CanRecord(_gtaoPass);
-            ssgiEnabled &= requirements.CanRecord(_ssgiPass);
-            if (depthPyramidEnabled)
-            {
-                EnqueueBridge(renderer, _depthPyramidBridgePass);
-            }
-
-            if (msvoEnabled)
-            {
-                EnqueueBridge(renderer, _msvoPass.Settings.IsLighting ? _msvoEarlyBridgePass : _msvoLateBridgePass);
-                if (_msvoPass.Settings.IsLighting)
-                {
-                    if (_msvoCompositePass.IsActive(_enqueueFrame)) EnqueueBridge(renderer, _msvoLateBridgePass);
-                    EnqueueBridge(renderer, _msvoRestoreBridgePass);
-                }
-            }
-
-            if (gtaoEnabled && depthPyramidEnabled)
-            {
-                EnqueueBridge(renderer, _gtaoBridgePass);
-                EnqueueBridge(renderer, _gtaoRestoreBridgePass);
-            }
-
-            if (ssgiEnabled && depthPyramidEnabled)
-            {
-                EnqueueBridge(renderer, _ssgiBridgePass);
-                EnqueueBridge(renderer, _ssgiRestoreBridgePass);
-                if (_ssgiPass.DebugOutput && _ssgiDebugPass != null && _ssgiDebugPass.Configure())
-                    EnqueueBridge(renderer, _ssgiDebugBridgePass);
-            }
-            else
-            {
-                TsukuyomiScreenSpaceGlobalIlluminationPass.ClearGlobals();
-            }
-
-            bool perObjectShadowsEnabled = _perObjectShadowPass != null && _perObjectShadowPass.Configure(Profile, perObjectShadowVolume, pcssVolume);
-            if (perObjectShadowsEnabled)
-            {
-                TsukuyomiPerObjectShadowRenderer.ApplyRenderingLayerMaskToAll(Profile.PerObjectShadowRenderingLayer);
-                ExcludePerObjectShadowLayerFromMainLight(ref renderingData, Profile.PerObjectShadowRenderingLayer);
-                _perObjectShadowPass.renderPassEvent = usesDeferredLighting
-                    ? RenderPassEvent.BeforeRenderingGbuffer - 1
-                    : contactShadowsEnabled
-                        ? RenderPassEvent.AfterRenderingPrePasses + 2
-                        : RenderPassEvent.AfterRenderingPrePasses;
-                renderer.EnqueuePass(_perObjectShadowPass);
-            }
-            else
-            {
-                RestoreMainLightShadowLayerOverride();
-                TsukuyomiPerObjectShadowRenderer.RestoreRenderingLayersForAll();
-            }
-
-            if (_pcssPass != null && _pcssPass.Configure(Profile, pcssVolume, contactShadowsEnabled, contactShadowDenoiseEnabled, perObjectShadowsEnabled))
-            {
-                _pcssBridgePass.renderPassEvent = usesDeferredLighting
-                    ? RenderPassEvent.BeforeRenderingGbuffer
-                    : contactShadowsEnabled
-                        ? RenderPassEvent.AfterRenderingPrePasses + 4
-                        : RenderPassEvent.AfterRenderingPrePasses + 1;
-                EnqueueBridge(renderer, _pcssBridgePass);
-                EnqueueBridge(renderer, _pcssRestoreBridgePass);
-            }
-
-            if (_volumeLightPass != null && _volumeLightPass.Configure(Profile, volumeLightVolume))
-            {
-                EnqueueBridge(renderer, _volumeLightBridgePass);
-            }
-
-            if (_postProcessPass != null && _postProcessPass.Configure(Profile, volumeStack))
-            {
-                EnqueueBridge(renderer, _postProcessBridgePass);
-            }
-
-            // SSS declares scene depth/normals itself; it no longer depends on AO being enabled.
-            bool useSharedDepthNormals = true;
-            if (_sssSkinPass != null && _sssSkinPass.Configure(Profile, sssSkinVolume, useSharedDepthNormals))
-            {
-                EnqueueBridge(renderer, _sssSkinBridgePass);
-            }
-
-            foreach (TsukuyomiBridgePass bridge in _bridgePasses)
-            {
-                EnqueueBridge(renderer, bridge);
-            }
         }
-
-        private void EnqueueBridge(ScriptableRenderer renderer, TsukuyomiBridgePass bridge)
+        private void UnregisterCallbacks()
         {
-            if (renderer == null || bridge == null)
-                return;
-
-            if (bridge.ConfigureInputFromTextureSlots(_enqueueFrame))
-                renderer.EnqueuePass(bridge);
+            if (!_callbacksRegistered) return;
+            _callbacksRegistered = false;
+            RenderPipelineManager.beginContextRendering -= BeginContext;
+            RenderPipelineManager.endContextRendering -= EndContext;
+            RenderPipelineManager.endCameraRendering -= EndCamera;
+            Application.quitting -= SuspendRuntime;
+#if UNITY_EDITOR
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= Dispose;
+            UnityEditor.EditorApplication.playModeStateChanged -= PlayModeChanged;
+            UnityEditor.EditorApplication.quitting -= SuspendRuntime;
+            UnityEditor.EditorApplication.update -= UpdateEditorLifecycle;
+#endif
         }
-
-        private bool RequiresCameraNormals(bool contactShadowDenoiseEnabled, bool gtaoEnabled, bool ssgiEnabled)
+#if UNITY_EDITOR
+        private void PlayModeChanged(UnityEditor.PlayModeStateChange state)
         {
-            return (contactShadowDenoiseEnabled && PassRegistry.PassRequiresBuiltinTexture(_contactShadowDenoisePass, BuiltinTexture.CameraNormals))
-                || (_rayTracedShadowPass != null && _rayTracedShadowPass.RequiresNormals)
-                || (gtaoEnabled && PassRegistry.PassRequiresBuiltinTexture(_gtaoPass, BuiltinTexture.CameraNormals))
-                || (ssgiEnabled && PassRegistry.PassRequiresBuiltinTexture(_ssgiPass, BuiltinTexture.CameraNormals))
-                || (_registry != null && _registry.RequiresBuiltinTexture(BuiltinTexture.CameraNormals));
+            // Covers disabled Domain Reload as well as the normal domain/scene reload path.
+            if (state == UnityEditor.PlayModeStateChange.ExitingEditMode || state == UnityEditor.PlayModeStateChange.ExitingPlayMode)
+                SuspendRuntime();
+            else if (state == UnityEditor.PlayModeStateChange.EnteredEditMode || state == UnityEditor.PlayModeStateChange.EnteredPlayMode)
+                _suspended = false;
         }
-        private RenderPassEvent MapInjectionPointToEvent(InjectionPoint point)
+        private void UpdateEditorLifecycle()
         {
-            return point switch
-            {
-                InjectionPoint.BeforeRendering => RenderPassEvent.BeforeRendering,
-                InjectionPoint.BeforeOpaque => RenderPassEvent.BeforeRenderingOpaques,
-                InjectionPoint.AfterOpaque => RenderPassEvent.AfterRenderingOpaques,
-                InjectionPoint.BeforeSkybox => RenderPassEvent.BeforeRenderingSkybox,
-                InjectionPoint.BeforePostProcess => RenderPassEvent.BeforeRenderingPostProcessing,
-                InjectionPoint.AfterPostProcess => RenderPassEvent.AfterRenderingPostProcessing,
-                InjectionPoint.AfterRendering => RenderPassEvent.AfterRendering,
-                _ => RenderPassEvent.AfterRendering
-            };
+            // SetActive only changes a flag. An idle/paused Editor may not render another context.
+            if (!_renderingContext && !isActive && (_session != null || _retired.Count != 0)) ReleaseRuntime();
         }
-
-        private ScriptableRenderer _deferredRenderer;
-        private Func<bool> _usesDeferredLighting;
-
-        private bool UsesDeferredLighting(ScriptableRenderer renderer)
-        {
-            if (renderer == null)
-                return false;
-
-            if (!ReferenceEquals(renderer, _deferredRenderer))
-            {
-                _deferredRenderer = renderer;
-                const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                PropertyInfo property = renderer.GetType().GetProperty("usesDeferredLighting", flags);
-                _usesDeferredLighting = property?.PropertyType == typeof(bool)
-                    ? (Func<bool>)Delegate.CreateDelegate(typeof(Func<bool>), renderer, property.GetGetMethod(true))
-                    : null;
-            }
-            return _usesDeferredLighting?.Invoke() ?? false;
-        }
-        private void ExcludePerObjectShadowLayerFromMainLight(ref RenderingData renderingData, RenderingLayerMask perObjectShadowRenderingLayer)
-        {
-            uint perObjectShadowLayerMask = perObjectShadowRenderingLayer;
-            if (perObjectShadowLayerMask == 0)
-            {
-                RestoreMainLightShadowLayerOverride();
-                return;
-            }
-
-            UniversalRenderPipelineAsset urpAsset = UniversalRenderPipeline.asset;
-            if (urpAsset != null && !urpAsset.useRenderingLayers && !s_WarnedPerObjectShadowRenderingLayersDisabled)
-            {
-                Debug.LogWarning("Tsukuyomi Per Object Shadows require the URP Asset \"Use Rendering Layers\" option to exclude their casters from the main light shadow map.");
-                s_WarnedPerObjectShadowRenderingLayersDisabled = true;
-            }
-
-            int mainLightIndex = renderingData.lightData.mainLightIndex;
-            if (mainLightIndex < 0 || mainLightIndex >= renderingData.lightData.visibleLights.Length)
-            {
-                RestoreMainLightShadowLayerOverride();
-                return;
-            }
-
-            VisibleLight mainLight = renderingData.lightData.visibleLights[mainLightIndex];
-            if (!mainLight.light || mainLight.lightType != LightType.Directional)
-            {
-                RestoreMainLightShadowLayerOverride();
-                return;
-            }
-
-            UniversalAdditionalLightData mainLightData = mainLight.light.GetUniversalAdditionalLightData();
-            if (_hasMainLightShadowLayerOverride && _perObjectShadowMainLight != mainLight.light)
-                RestoreMainLightShadowLayerOverride();
-
-            if (!_hasMainLightShadowLayerOverride)
-            {
-                _perObjectShadowMainLight = mainLight.light;
-                _originalMainLightCustomShadowLayers = mainLightData.customShadowLayers;
-                _originalMainLightShadowRenderingLayers = (uint)mainLightData.shadowRenderingLayers;
-                _hasMainLightShadowLayerOverride = true;
-            }
-
-            uint baseShadowLayers = _originalMainLightCustomShadowLayers
-                ? _originalMainLightShadowRenderingLayers
-                : uint.MaxValue;
-            mainLightData.customShadowLayers = true;
-            mainLightData.shadowRenderingLayers = baseShadowLayers & ~perObjectShadowLayerMask;
-        }
-
-        private void RestoreMainLightShadowLayerOverride()
-        {
-            if (!_hasMainLightShadowLayerOverride)
-                return;
-
-            if (_perObjectShadowMainLight)
-            {
-                UniversalAdditionalLightData mainLightData = _perObjectShadowMainLight.GetUniversalAdditionalLightData();
-                mainLightData.customShadowLayers = _originalMainLightCustomShadowLayers;
-                mainLightData.shadowRenderingLayers = _originalMainLightShadowRenderingLayers;
-            }
-
-            _perObjectShadowMainLight = null;
-            _hasMainLightShadowLayerOverride = false;
-        }
-
-        private void ReleaseNeuralRendering()
-        {
-            if (!_neuralRendering) return;
-            var old = _neuralRendering;
-            _neuralRendering = null;
-            TsukuyomiUpscaling.RetireResources(() => { old.Dispose(); CoreUtils.Destroy(old); });
-        }
-
+#endif
         protected override void Dispose(bool disposing)
         {
-            ReleaseNeuralRendering();
-            RestoreMainLightShadowLayerOverride();
-            TsukuyomiPerObjectShadowRenderer.RestoreRenderingLayersForAll();
-            _resourceHub?.Dispose();
-            _resourceHub = null;
-            _contactShadowPass = null;
-            _contactShadowDenoisePass = null;
-            _contactShadowBridgePass = null;
-            _contactShadowDenoiseBridgePass = null;
-            _depthPyramidPass = null;
-            _depthPyramidBridgePass = null;
-            _msvoCompositePass?.Dispose();
-            _msvoCompositePass = null; _msvoPass = null;
-            _msvoEarlyBridgePass = null; _msvoLateBridgePass = null; _msvoRegistry = null;
-            _msvoRestorePass = null; _msvoRestoreBridgePass = null; _msvoRestoreRegistry = null;
-            _gtaoPass = null;
-            _gtaoBridgePass = null;
-            _gtaoRestorePass = null;
-            _gtaoRestoreBridgePass = null;
-            _ssgiPass = null;
-            _ssgiBridgePass = null;
-            _ssgiRestorePass = null;
-            _ssgiRestoreBridgePass = null;
-            _ssgiDebugPass?.Dispose();
-            _ssgiDebugPass = null;
-            _ssgiDebugBridgePass = null;
-            _pcssPass?.Dispose();
-            _pcssPass = null;
-            _pcssRestorePass = null;
-            _pcssBridgePass = null;
-            _pcssRestoreBridgePass = null;
-            _planarReflectionPass = null;
-            _planarReflectionBridgePass = null;
-            _perObjectShadowPass?.Dispose();
-            _perObjectShadowPass = null;
-            _volumeLightPass?.Dispose();
-            _volumeLightPass = null;
-            _volumeLightBridgePass = null;
-            _postProcessPass?.Dispose();
-            _postProcessPass = null;
-            _postProcessBridgePass = null;
-            _rectLightPass?.Dispose();
-            _rayTracedShadowPass?.Dispose();
-            _rayTracedShadowPass = null;
-            _rayTracedShadowBridgePass = null;
-            _rectLightPass = null;
-            _rectLightBridgePass = null;
-            _sssSkinPass?.Dispose();
-            _sssSkinPass = null;
-            _sssSkinBridgePass = null;
-#if ENABLE_UPSCALER_FRAMEWORK
-            _fsr3OpaqueOnlyCapturePass = null;
-            _fsr3ManualMaskPass = null;
-#endif
+            UnregisterCallbacks();
+            ReleaseRuntime(); _suspended = false;
             base.Dispose(disposing);
         }
     }
 }
-
-
-
-
-
-
-
-
-

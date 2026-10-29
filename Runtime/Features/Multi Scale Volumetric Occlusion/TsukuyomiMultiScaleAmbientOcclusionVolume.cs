@@ -99,9 +99,10 @@ namespace Tsukuyomi.Rendering
         }
 
         public static TsukuyomiMultiScaleAmbientOcclusionResolvedSettings From(
-            TsukuyomiPipelineProfile settings, TsukuyomiMultiScaleAmbientOcclusionVolume volume)
+            MsvoPass settings, TsukuyomiMultiScaleAmbientOcclusionVolume volume)
         {
-            return new(settings.EnableMSVO && Resolve(volume?.enable, true),
+            if (volume != null && !volume.active) volume = null;
+            return new(settings.Enabled && Resolve(volume?.enable, true),
                 Resolve(volume?.compositionMode, settings.MsvoCompositionMode),
                 Resolve(volume?.debugOcclusion, settings.MsvoDebugOcclusion),
                 Resolve(volume?.intensity, settings.MsvoIntensity),

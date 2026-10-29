@@ -93,23 +93,7 @@ void TemporalAccumulation(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    // float3 neighborhoodMin = current.rgb;
-    // float3 neighborhoodMax = current.rgb;
-    // int2 signalLimit = (int2)_SignalResolution.xy - 1;
-    // [unroll]
-    // for (int y = -1; y <= 1; y++)
-    // {
-    //     [unroll]
-    //     for (int x = -1; x <= 1; x++)
-    //     {
-    //         float3 sampleColor = _InputIndirectDiffuseTexture.Load(int3(clamp((int2)coord + int2(x, y), 0, signalLimit), 0)).rgb;
-    //         neighborhoodMin = min(neighborhoodMin, sampleColor);
-    //         neighborhoodMax = max(neighborhoodMax, sampleColor);
-    //     }
-    // }
-
     float4 history = _HistoryIndirectDiffuseTexture.SampleLevel(sampler_LinearClamp, previousUv, 0);
-    //history.rgb = clamp(history.rgb, neighborhoodMin, neighborhoodMax);
     float sampleCount;
     float historyWeight = DenoiseTemporalHistoryWeight(history.a, 32.0, 0.95, sampleCount);
     _OutputIndirectDiffuseHistoryRW[coord] = float4(lerp(current.rgb, history.rgb, historyWeight), sampleCount);

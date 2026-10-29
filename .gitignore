@@ -48,13 +48,15 @@ playground.xcworkspace
 /Tests/
 /Tests.meta
 
-# Local documentation; publish only the feature guide and its images
+# Local documentation; publish the feature/API guides and images
 /Documentation~/*
 !/Documentation~/Images/
 !/Documentation~/Images/**
 !/Documentation~/FeatureDevelopmentGuide.md
 !/Documentation~/RectLight.md
 !/Documentation~/RayTracedShadows.md
+!/Documentation~/SceneEffects.md
+!/Documentation~/PHCompatibility.md
 
 # Unity generated directories
 /[Ll]ibrary/

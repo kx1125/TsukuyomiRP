@@ -9,6 +9,36 @@ namespace Tsukuyomi.Rendering
 {
     internal sealed class TsukuyomiMultiScaleAmbientOcclusionPass : UnsafePass
     {
+        private readonly MsvoPass _defaults;
+        private readonly TsukuyomiMultiScaleAmbientOcclusionCompositePass _composite;
+        private readonly TsukuyomiMultiScaleAmbientOcclusionRestoreKeywordsPass _restore = new();
+        internal bool Prepared { get; private set; }
+        private bool _compositeReady;
+        public TsukuyomiMultiScaleAmbientOcclusionPass(MsvoPass settings)
+        { _defaults = settings; _composite = new(this); }
+        public override void Build(PassPlanBuilder plan)
+        {
+            var main = plan.Add(this, RenderPassEvent.BeforeRenderingTransparents - 1, () => Prepared,
+                _ => Settings.IsLighting ? RenderPassEvent.AfterRenderingPrePasses + 2 : RenderPassEvent.BeforeRenderingTransparents - 1);
+            plan.After(plan.Add(_composite, RenderPassEvent.BeforeRenderingTransparents - 1,
+                () => Prepared && _compositeReady && (!Settings.IsLighting || Settings.DebugOcclusion)), main);
+            plan.After(plan.Add(_restore, RenderPassEvent.BeforeRenderingPostProcessing - 1,
+                () => Prepared && Settings.IsLighting), main);
+        }
+        public override void Initialize() => InitializeKeywords();
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+        {
+            Prepared = Configure(_defaults, context.Volumes?.GetComponent<TsukuyomiMultiScaleAmbientOcclusionVolume>())
+                && IsActive(context.Frame);
+            _compositeReady = Prepared && _composite.Configure();
+        }
+        public override void Deactivate(Camera camera)
+        {
+            Prepared = false;
+            Shader.DisableKeyword("_SCREEN_SPACE_OCCLUSION");
+            Shader.SetGlobalTexture("_ScreenSpaceOcclusionTexture", Texture2D.whiteTexture);
+        }
+
         internal const string OutputName = "Tsukuyomi MSVO Result";
         internal TsukuyomiMultiScaleAmbientOcclusionResolvedSettings Settings { get; private set; }
         private ComputeShader _downsample1, _downsample2, _render, _upsample;
@@ -28,7 +58,7 @@ namespace Tsukuyomi.Rendering
             s_KeywordsInitialized = true;
         }
 
-        public bool Configure(TsukuyomiPipelineProfile profile, TsukuyomiMultiScaleAmbientOcclusionVolume volume)
+        public bool Configure(MsvoPass profile, TsukuyomiMultiScaleAmbientOcclusionVolume volume)
         {
             if (profile == null) return false;
             Settings = TsukuyomiMultiScaleAmbientOcclusionResolvedSettings.From(profile, volume);

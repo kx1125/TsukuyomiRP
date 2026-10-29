@@ -20,7 +20,7 @@ namespace Tsukuyomi.Rendering
         public NoInterpClampedIntParameter penumbraMaskScale = new(4, 1, 32);
     }
 
-    internal readonly struct TsukuyomiPcssResolvedSettings
+    public readonly struct TsukuyomiPcssResolvedSettings
     {
         public readonly bool Enabled;
         public readonly int FindBlockerSampleCount;
@@ -33,9 +33,9 @@ namespace Tsukuyomi.Rendering
         public readonly float MinFilterSizeTexels;
         public readonly int PenumbraMaskScale;
 
-        private TsukuyomiPcssResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiPcssVolume volume)
+        private TsukuyomiPcssResolvedSettings(PcssPass profile, TsukuyomiPcssVolume volume)
         {
-            Enabled = profile.EnablePCSS && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             FindBlockerSampleCount = Resolve(volume?.findBlockerSampleCount, profile.PcssFindBlockerSampleCount);
             PcfSampleCount = Resolve(volume?.pcfSampleCount, profile.PcssPcfSampleCount);
             AngularDiameter = Resolve(volume?.angularDiameter, profile.PcssAngularDiameter);
@@ -47,7 +47,7 @@ namespace Tsukuyomi.Rendering
             PenumbraMaskScale = Resolve(volume?.penumbraMaskScale, profile.PcssPenumbraMaskScale);
         }
 
-        public static TsukuyomiPcssResolvedSettings From(TsukuyomiPipelineProfile profile, TsukuyomiPcssVolume volume)
+        public static TsukuyomiPcssResolvedSettings From(PcssPass profile, TsukuyomiPcssVolume volume)
         {
             return new TsukuyomiPcssResolvedSettings(profile, volume);
         }

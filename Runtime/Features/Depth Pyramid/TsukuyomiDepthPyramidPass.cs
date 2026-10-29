@@ -1,12 +1,52 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace Tsukuyomi.Rendering
 {
     [System.Serializable]
-    internal sealed class TsukuyomiDepthPyramidPass : ComputePass
+    internal sealed class TsukuyomiDepthPyramidPass : ComputePass, IRenderPassService
     {
+        internal const string Key = "tsukuyomi.depth-pyramid/camera/prepasses/r32/min";
+        private bool _active, _prepared;
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+        {
+            _active = false;
+            _prepared = !context.Frame.CameraData.isPreviewCamera && Configure();
+        }
+        public override void Build(PassPlanBuilder plan)
+            => plan.Provides(plan.Add(this, RenderPassEvent.AfterRenderingPrePasses, () => _active), Key);
+        public override void ResolveResources(in PassCameraContext context, ref RenderingData data)
+        {
+            bool supported = !data.cameraData.isPreviewCamera && SystemInfo.supportsComputeShaders
+                && data.cameraData.cameraTargetDescriptor.dimension == UnityEngine.Rendering.TextureDimension.Tex2D;
+            var requests = context.Requirements.GetRequests<DepthPyramidRequest>();
+            _active = Resolve(requests, _prepared, supported);
+        }
+        private static bool Resolve(ResourceRequestSet<DepthPyramidRequest> requests, bool available, bool supported)
+        {
+            bool needed = false;
+            for (int i = 0; i < requests.Count; i++)
+            {
+                var entry = requests[i];
+                var status = !supported || !entry.Request.Supported ? ResourceRequirementStatus.Unsupported
+                    : !available ? ResourceRequirementStatus.MissingProducer
+                    : entry.Request.GenerationEvent >= entry.ConsumerEvent ? ResourceRequirementStatus.OrderConflict
+                    : ResourceRequirementStatus.Ready;
+                requests.SetStatus(i, status);
+                needed |= status == ResourceRequirementStatus.Ready;
+            }
+            return needed;
+        }
+        public override void Deactivate(Camera camera)
+        {
+            _active = _prepared = false;
+            // These bindings reference transient graph resources, not persistent camera history.
+            Shader.SetGlobalTexture(DepthPyramidGlobalId, Texture2D.blackTexture);
+            Shader.SetGlobalBuffer(DepthPyramidMipLevelOffsetsId, (GraphicsBuffer)null);
+        }
+
         private const int TileSize = 8;
         private const string CopyKernelName = "CopyDepth";
         private const string DownsampleKernelName = "KDepthDownsample8DualUav";
@@ -47,18 +87,16 @@ namespace Tsukuyomi.Rendering
 
         public override string Name => "Tsukuyomi Depth Pyramid";
 
-        public bool Configure()
+        private bool Configure()
         {
             if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out TsukuyomiRenderPipelineResources resources))
                 return false;
 
-            _computeShader = resources.DepthPyramidComputeShader;
-            if (_computeShader == null)
-            {
-                Debug.LogError("Tsukuyomi Depth Pyramid requires a DepthPyramid compute shader in TsukuyomiRenderPipelineResources.");
-                return false;
-            }
+            var shader = resources.DepthPyramidComputeShader;
+            if (shader == null) return false;
+            if (_computeShader == shader && _copyKernel >= 0 && _downsampleKernel >= 0) return true;
 
+            _computeShader = shader;
             _copyKernel = _computeShader.FindKernel(CopyKernelName);
             _downsampleKernel = _computeShader.FindKernel(DownsampleKernelName);
             return _copyKernel >= 0 && _downsampleKernel >= 0;
@@ -196,6 +234,16 @@ namespace Tsukuyomi.Rendering
         private static int DivRoundUp(int value, int divisor)
         {
             return (value + divisor - 1) / divisor;
+        }
+    }
+
+    /// <summary>Public effect-module entry point for the shared camera depth pyramid.</summary>
+    public static class DepthPyramidDependency
+    {
+        public static void Require(PassPlanBuilder plan, PassPlanNode consumer)
+        {
+            plan.Service(TsukuyomiDepthPyramidPass.Key, () => new TsukuyomiDepthPyramidPass());
+            plan.Requires(consumer, TsukuyomiDepthPyramidPass.Key);
         }
     }
 }

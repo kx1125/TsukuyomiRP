@@ -69,7 +69,6 @@ namespace Tsukuyomi.Rendering
 
         public bool isCastingShadow = true;
         public ShadowCasterClusterData[] clusterData;
-        public RenderingLayerMask renderingLayerMask = TsukuyomiPerObjectShadowDefaults.RenderingLayerMask;
 
         private static readonly HashSet<TsukuyomiPerObjectShadowRenderer> s_ActiveRenderers = new();
 
@@ -80,13 +79,11 @@ namespace Tsukuyomi.Rendering
         {
             UnregisterClusters();
             AllocateClusters();
-            SetupRenderingLayers(renderingLayerMask);
         }
 
         private void OnEnable()
         {
             SafeCheckEditor();
-            SetupRenderingLayers(renderingLayerMask);
             s_ActiveRenderers.Add(this);
             RegisterClusters();
         }
@@ -104,7 +101,6 @@ namespace Tsukuyomi.Rendering
             UnregisterClusters();
             RestoreRenderingLayers();
             AllocateClusters();
-            SetupRenderingLayers(renderingLayerMask);
             if (enabled)
                 RegisterClusters();
         }

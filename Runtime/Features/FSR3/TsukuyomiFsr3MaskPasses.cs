@@ -74,39 +74,19 @@ namespace Tsukuyomi.Rendering
     internal sealed class TsukuyomiFsr3ManualMaskPass : ScriptableRenderPass
     {
         private static readonly List<ShaderTagId> ShaderTags = new() { new ShaderTagId("TsukuyomiFsr3Mask") };
-        private FirstPersonViewPass _firstPersonPass;
+        private IReadOnlyList<IRenderMaskViewProvider> _providers;
+        private readonly List<RenderMaskView> _views = new();
+        private readonly List<RendererListHandle> _lists = new();
 
         private sealed class PassData
         {
             public RendererListHandle RendererList;
-            public RendererListHandle FirstPersonRendererList;
-            public bool HasFirstPersonRendererList;
-            public Matrix4x4 FirstPersonView;
-            public Matrix4x4 FirstPersonProjection;
-            public Matrix4x4 CameraView;
-            public Matrix4x4 CameraProjection;
+            public readonly List<RendererListHandle> ViewLists = new();
+            public readonly List<RenderMaskView> Views = new();
+            public Matrix4x4 CameraView, CameraProjection;
         }
-
-        public TsukuyomiFsr3ManualMaskPass()
-        {
-            renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1;
-        }
-
-        public void Configure(TsukuyomiPipelineProfile profile)
-        {
-            _firstPersonPass = null;
-            if (profile?.Passes == null)
-                return;
-
-            for (int i = 0; i < profile.Passes.Count; i++)
-            {
-                if (profile.Passes[i] is FirstPersonViewPass firstPersonPass && firstPersonPass.Enabled)
-                {
-                    _firstPersonPass = firstPersonPass;
-                    break;
-                }
-            }
-        }
+        public TsukuyomiFsr3ManualMaskPass() => renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing - 1;
+        public void Configure(IReadOnlyList<IRenderMaskViewProvider> providers) => _providers = providers;
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
@@ -133,29 +113,22 @@ namespace Tsukuyomi.Rendering
             maskDesc.name = "_TsukuyomiFsr3TransparencyAndCompositionMask";
             TextureHandle composition = renderGraph.CreateTexture(maskDesc);
 
-            int firstPersonMask = _firstPersonPass?.CullingMask.value ?? 0;
+            _views.Clear(); _lists.Clear();
+            int customMask = 0;
+            if (_providers != null)
+                foreach (var provider in _providers)
+                    if (provider.TryGetMaskView(cameraData, out var view)
+                        && TryCreateViewRendererList(renderGraph, frameData, renderingData, cameraData, lightData, view, out var list))
+                    { _views.Add(view); _lists.Add(list); customMask |= view.LayerMask; }
             DrawingSettings drawingSettings = CreateDrawingSettings(renderingData, cameraData, lightData, cameraData.GetViewMatrix());
-            FilteringSettings filteringSettings = new(RenderQueueRange.transparent, ~firstPersonMask);
-            RendererListHandle rendererList = renderGraph.CreateRendererList(
-                new RendererListParams(renderingData.cullResults, drawingSettings, filteringSettings));
-
-            bool hasFirstPersonRendererList = TryCreateFirstPersonRendererList(
-                renderGraph,
-                frameData,
-                renderingData,
-                cameraData,
-                lightData,
-                out RendererListHandle firstPersonRendererList,
-                out Matrix4x4 firstPersonView,
-                out Matrix4x4 firstPersonProjection);
+            FilteringSettings filteringSettings = new(RenderQueueRange.transparent, ~customMask);
+            RendererListHandle rendererList = renderGraph.CreateRendererList(new RendererListParams(renderingData.cullResults, drawingSettings, filteringSettings));
 
             using (IRasterRenderGraphBuilder builder = renderGraph.AddRasterRenderPass<PassData>("Tsukuyomi FSR3 Manual Masks", out PassData passData))
             {
                 passData.RendererList = rendererList;
-                passData.FirstPersonRendererList = firstPersonRendererList;
-                passData.HasFirstPersonRendererList = hasFirstPersonRendererList;
-                passData.FirstPersonView = firstPersonView;
-                passData.FirstPersonProjection = firstPersonProjection;
+                passData.ViewLists.Clear(); passData.Views.Clear();
+                passData.ViewLists.AddRange(_lists); passData.Views.AddRange(_views);
                 passData.CameraView = cameraData.GetViewMatrix();
                 passData.CameraProjection = cameraData.GetProjectionMatrix();
                 builder.SetRenderAttachment(reactive, 0, AccessFlags.Write);
@@ -163,17 +136,16 @@ namespace Tsukuyomi.Rendering
                 if (resources.activeDepthTexture.IsValid())
                     builder.SetRenderAttachmentDepth(resources.activeDepthTexture, AccessFlags.Read);
                 builder.UseRendererList(rendererList);
-                if (hasFirstPersonRendererList)
-                    builder.UseRendererList(firstPersonRendererList);
+                foreach (var list in _lists) builder.UseRendererList(list);
                 builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
                 {
                     context.cmd.DrawRendererList(data.RendererList);
-                    if (data.HasFirstPersonRendererList)
+                    for (int i = 0; i < data.ViewLists.Count; i++)
                     {
-                        context.cmd.SetViewProjectionMatrices(data.FirstPersonView, data.FirstPersonProjection);
-                        context.cmd.DrawRendererList(data.FirstPersonRendererList);
-                        context.cmd.SetViewProjectionMatrices(data.CameraView, data.CameraProjection);
+                        context.cmd.SetViewProjectionMatrices(data.Views[i].View, data.Views[i].Projection);
+                        context.cmd.DrawRendererList(data.ViewLists[i]);
                     }
+                    context.cmd.SetViewProjectionMatrices(data.CameraView, data.CameraProjection);
                 });
             }
 
@@ -202,49 +174,19 @@ namespace Tsukuyomi.Rendering
             return settings;
         }
 
-        private bool TryCreateFirstPersonRendererList(
-            RenderGraph renderGraph,
-            ContextContainer frameData,
-            UniversalRenderingData renderingData,
-            UniversalCameraData cameraData,
-            UniversalLightData lightData,
-            out RendererListHandle rendererList,
-            out Matrix4x4 viewMatrix,
-            out Matrix4x4 projectionMatrix)
+        private static bool TryCreateViewRendererList(RenderGraph graph, ContextContainer frame,
+            UniversalRenderingData renderingData, UniversalCameraData cameraData, UniversalLightData lightData,
+            RenderMaskView view, out RendererListHandle rendererList)
         {
             rendererList = default;
-            viewMatrix = default;
-            projectionMatrix = default;
-            Camera camera = cameraData.camera;
-            if (_firstPersonPass == null || _firstPersonPass.CullingMask.value == 0 || camera == null ||
-                camera.cameraType != CameraType.Game || cameraData.renderType != CameraRenderType.Base || camera.stereoEnabled ||
-                (!string.IsNullOrEmpty(_firstPersonPass.CameraTag) && !camera.CompareTag(_firstPersonPass.CameraTag)) ||
-                !camera.TryGetCullingParameters(out ScriptableCullingParameters cullingParameters))
-            {
-                return false;
-            }
-
-            int width = Mathf.Max(1, cameraData.cameraTargetDescriptor.width);
-            int height = Mathf.Max(1, cameraData.cameraTargetDescriptor.height);
-            viewMatrix = camera.worldToCameraMatrix;
-            projectionMatrix = Matrix4x4.Perspective(
-                Mathf.Clamp(_firstPersonPass.FieldOfView, 1.0f, 179.0f),
-                (float)width / height,
-                Mathf.Max(0.001f, _firstPersonPass.NearClipPlane),
-                Mathf.Max(_firstPersonPass.NearClipPlane + 0.001f, _firstPersonPass.FarClipPlane));
-            projectionMatrix.m02 += camera.projectionMatrix.m02 - camera.nonJitteredProjectionMatrix.m02;
-            projectionMatrix.m12 += camera.projectionMatrix.m12 - camera.nonJitteredProjectionMatrix.m12;
-
-            cullingParameters.cullingMatrix = projectionMatrix * viewMatrix;
-            cullingParameters.origin = camera.transform.position;
-            cullingParameters.cullingMask = unchecked((uint)_firstPersonPass.CullingMask.value);
-            if (!_firstPersonPass.UseOcclusionCulling)
-                cullingParameters.cullingOptions &= ~CullingOptions.OcclusionCull;
-
-            CullingResults cullingResults = frameData.Get<CullContextData>().Cull(ref cullingParameters);
-            DrawingSettings drawingSettings = CreateDrawingSettings(renderingData, cameraData, lightData, viewMatrix);
-            FilteringSettings filteringSettings = new(RenderQueueRange.transparent, _firstPersonPass.CullingMask.value);
-            rendererList = renderGraph.CreateRendererList(new RendererListParams(cullingResults, drawingSettings, filteringSettings));
+            if (!cameraData.camera.TryGetCullingParameters(out ScriptableCullingParameters culling)) return false;
+            culling.cullingMatrix = view.Projection * view.View;
+            culling.origin = cameraData.camera.transform.position;
+            culling.cullingMask = unchecked((uint)view.LayerMask);
+            if (!view.UseOcclusionCulling) culling.cullingOptions &= ~CullingOptions.OcclusionCull;
+            var results = frame.Get<CullContextData>().Cull(ref culling);
+            var drawing = CreateDrawingSettings(renderingData, cameraData, lightData, view.View);
+            rendererList = graph.CreateRendererList(new RendererListParams(results, drawing, new FilteringSettings(RenderQueueRange.transparent, view.LayerMask)));
             return true;
         }
     }

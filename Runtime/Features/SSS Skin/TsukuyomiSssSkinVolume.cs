@@ -18,6 +18,12 @@ namespace Tsukuyomi.Rendering
     [DisplayInfo(name = "Sss Skin Volume")]
     public sealed class TsukuyomiSssSkinVolume : VolumeComponent
     {
+        [HideInInspector] // Retained only for serialized asset migration.
+        public BoolParameter studioCompatibility = new(false);
+        [HideInInspector] // Retained only for serialized asset migration.
+        public ClampedFloatParameter studioWorldScale = new(.1f,.0001f,10f);
+        [HideInInspector] // Retained only for serialized asset migration.
+        public ClampedFloatParameter studioReferenceFieldOfView = new(60f,1f,179f);
         public BoolParameter enable = new(false, BoolParameter.DisplayType.EnumPopup);
         public TsukuyomiSssSkinQualityParameter quality = new(TsukuyomiSssSkinQuality.High);
         public ClampedFloatParameter scatteringRadius = new(1.0f, 0.0f, 10.0f);
@@ -53,10 +59,10 @@ namespace Tsukuyomi.Rendering
         public readonly float DitherIntensity;
         public readonly Texture NoiseTexture;
 
-        private TsukuyomiSssSkinResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiSssSkinVolume volume)
+        private TsukuyomiSssSkinResolvedSettings(SssSkinPass profile, TsukuyomiSssSkinVolume volume)
         {
             HighPrecision = Resolve(volume?.highPrecision, profile.SssSkinHighPrecision);
-            Enabled = profile.EnableSssSkin && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             SkinLayerMask = profile.SssSkinLayerMask;
             Quality = Resolve(volume?.quality, profile.SssSkinQuality);
             ScatteringRadius = Resolve(volume?.scatteringRadius, profile.SssSkinScatteringRadius);
@@ -74,7 +80,7 @@ namespace Tsukuyomi.Rendering
 
         public bool IsActive => Enabled && SkinLayerMask.value != 0;
 
-        public static TsukuyomiSssSkinResolvedSettings From(TsukuyomiPipelineProfile profile, TsukuyomiSssSkinVolume volume)
+        public static TsukuyomiSssSkinResolvedSettings From(SssSkinPass profile, TsukuyomiSssSkinVolume volume)
         {
             return new TsukuyomiSssSkinResolvedSettings(profile, volume);
         }

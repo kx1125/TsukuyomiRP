@@ -49,9 +49,9 @@ namespace Tsukuyomi.Rendering
         public readonly int BlurIterations;
         public readonly float TransmittanceThreshold;
 
-        private TsukuyomiVolumeLightResolvedSettings(TsukuyomiPipelineProfile profile, TsukuyomiVolumeLightVolume volume)
+        private TsukuyomiVolumeLightResolvedSettings(VolumeLightPass profile, TsukuyomiVolumeLightVolume volume)
         {
-            Enabled = profile.EnableVolumeLight && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             Distance = Resolve(volume?.distance, profile.VolumeLightDistance);
             BaseHeight = Resolve(volume?.baseHeight, profile.VolumeLightBaseHeight);
             MaximumHeight = Mathf.Max(BaseHeight, Resolve(volume?.maximumHeight, profile.VolumeLightMaximumHeight));
@@ -73,7 +73,7 @@ namespace Tsukuyomi.Rendering
 
         public bool IsActive => Enabled && Distance > 0.0f && GroundHeight < MaximumHeight && Density > 0.0f;
 
-        public static TsukuyomiVolumeLightResolvedSettings From(TsukuyomiPipelineProfile profile, TsukuyomiVolumeLightVolume volume)
+        public static TsukuyomiVolumeLightResolvedSettings From(VolumeLightPass profile, TsukuyomiVolumeLightVolume volume)
         {
             return new TsukuyomiVolumeLightResolvedSettings(profile, volume);
         }

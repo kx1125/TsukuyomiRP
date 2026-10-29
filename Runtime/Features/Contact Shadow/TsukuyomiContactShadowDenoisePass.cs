@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -26,7 +27,7 @@ namespace Tsukuyomi.Rendering
         [Read(BuiltinTexture.CameraNormals)]
         public TextureSlot normals = TextureSlot.Read("Normals", BuiltinTexture.CameraNormals);
 
-        private TsukuyomiPipelineProfile _profile;
+        private ContactShadowPass _profile;
         private TsukuyomiContactShadowResolvedSettings _settings;
         private ComputeShader _computeShader;
         private int _horizontalKernel = -1;
@@ -41,7 +42,15 @@ namespace Tsukuyomi.Rendering
 
         public override string Name => "Diffuse Shadow Denoise";
 
-        public bool Configure(TsukuyomiPipelineProfile profile, TsukuyomiContactShadowVolume volume)
+        private readonly ContactShadowPass _defaults;
+        private readonly IContactShadowProvider _owner;
+        internal bool Prepared { get; private set; }
+        public TsukuyomiContactShadowDenoisePass(ContactShadowPass settings, IContactShadowProvider owner)
+        { _defaults = settings; _owner = owner; }
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => Prepared = _owner.Active && Configure(_defaults, context.Volumes?.GetComponent<TsukuyomiContactShadowVolume>());
+        public override void Deactivate(Camera camera) => Prepared = false;
+        private bool Configure(ContactShadowPass profile, TsukuyomiContactShadowVolume volume)
         {
             _profile = profile;
 
@@ -70,7 +79,7 @@ namespace Tsukuyomi.Rendering
 
         public override bool IsActive(in FrameContext frame)
         {
-            return base.IsActive(frame)
+            return base.IsActive(frame) && Prepared
                 && _profile != null
                 && _settings.Enabled
                 && _settings.Denoiser == TsukuyomiShadowDenoiser.Spatial

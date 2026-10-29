@@ -12,6 +12,7 @@ namespace Tsukuyomi.Rendering
         private Material _ownedMaterial, _material;
         private static readonly int Occlusion = Shader.PropertyToID("_MsvoOcclusionTexture");
         private static readonly int OcclusionColor = Shader.PropertyToID("_MsvoOcclusionColor");
+        public override bool RequiresIntermediateColorTarget => true;
         public override string Name => "MSVO Color Composite / Debug";
         public TsukuyomiMultiScaleAmbientOcclusionCompositePass(TsukuyomiMultiScaleAmbientOcclusionPass source) => _source = source;
         public override void CollectTextureSlots(List<TextureSlot> slots) => slots.Add(_color);
@@ -70,6 +71,6 @@ namespace Tsukuyomi.Rendering
             });
         }
 
-        public void Dispose() { CoreUtils.Destroy(_ownedMaterial); _ownedMaterial = null; _material = null; }
+        public override void Dispose() { CoreUtils.Destroy(_ownedMaterial); _ownedMaterial = null; _material = null; }
     }
 }

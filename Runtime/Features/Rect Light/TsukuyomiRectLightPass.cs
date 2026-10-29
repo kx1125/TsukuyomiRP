@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace Tsukuyomi.Rendering
@@ -17,6 +18,26 @@ namespace Tsukuyomi.Rendering
     [System.Serializable]
     internal sealed class TsukuyomiRectLightPass : GraphFeaturePass
     {
+        private readonly RectLightPass _defaults;
+        public TsukuyomiRectLightPass(RectLightPass settings) => _defaults = settings;
+        public override void Build(PassPlanBuilder plan)
+        {
+            var upload = plan.Add(this, RenderPassEvent.BeforeRenderingOpaques);
+            plan.Requires(upload, "PH.RayTracedShadows", optional: true);
+        }
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+            => Configure(_defaults, context.Deferred);
+        public override void Deactivate(Camera camera) => ClearGlobals();
+        internal bool Requested
+        {
+            get
+            {
+                var volume = VolumeManager.instance.stack?.GetComponent<TsukuyomiRectLightVolume>();
+                return _profile != null && _profile.Enabled && !_unsupported
+                    && (volume == null || !volume.active || !volume.enable.overrideState || volume.enable.value);
+            }
+        }
+
         internal const string BufferKey = "Tsukuyomi Rect Lights";
         internal static readonly int CountId = Shader.PropertyToID("_TsukuyomiRectLightCount");
         internal static readonly int HighId = Shader.PropertyToID("_TsukuyomiRectLightHasHigh");
@@ -29,13 +50,13 @@ namespace Tsukuyomi.Rendering
         private static bool s_ShuttingDown;
         private readonly List<TsukuyomiRectLight> _visible = new();
         private readonly Plane[] _planes = new Plane[6];
-        private TsukuyomiPipelineProfile _profile;
+        private RectLightPass _profile;
         private TsukuyomiRectLightResources _resources;
         private bool _unsupported, _warnedMissing, _warnedOverflow;
         public override string Name => "Tsukuyomi Rect Lights";
         public override void CollectTextureSlots(List<TextureSlot> slots) { }
 
-        public void Configure(TsukuyomiPipelineProfile profile, bool unsupported)
+        public void Configure(RectLightPass profile, bool unsupported)
         { _profile = profile; _unsupported = unsupported; }
 
         public static void ClearGlobals()
@@ -56,7 +77,7 @@ namespace Tsukuyomi.Rendering
         [UnityEditor.InitializeOnLoadMethod]
 #endif
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void Initialize()
+        private static void InitializeFallback()
         {
             ReleaseFallback();
             s_ShuttingDown = false;
@@ -114,10 +135,9 @@ namespace Tsukuyomi.Rendering
             frame.Prepared = true;
             var camera = context.CameraData.camera;
             var volume = VolumeManager.instance.stack?.GetComponent<TsukuyomiRectLightVolume>();
-            bool enabled = _profile && (volume != null && volume.active && volume.enable.overrideState
-                ? volume.enable.value : _profile.EnableRectLights);
+            bool enabled = Requested;
             int budget = Mathf.Clamp(volume != null && volume.active && volume.maxLights.overrideState
-                ? volume.maxLights.value : _profile ? _profile.MaxRectLights : 16, 1, 64);
+                ? volume.maxLights.value : _profile != null ? _profile.MaxRectLights : 16, 1, 64);
             enabled &= !_unsupported && camera && (camera.cameraType == CameraType.Game || camera.cameraType == CameraType.SceneView)
                 && context.CameraData.cameraTargetDescriptor.dimension == TextureDimension.Tex2D
                 && SystemInfo.graphicsShaderLevel >= 45;
@@ -212,7 +232,7 @@ namespace Tsukuyomi.Rendering
             });
         }
 
-        public void Dispose()
+        public override void Dispose()
         {
             ClearGlobals();
             if (_resources) _resources.Release();

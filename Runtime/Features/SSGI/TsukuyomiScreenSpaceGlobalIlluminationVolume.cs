@@ -79,10 +79,10 @@ namespace Tsukuyomi.Rendering
         }
 
         private TsukuyomiScreenSpaceGlobalIlluminationResolvedSettings(
-            TsukuyomiPipelineProfile profile,
+            SsgiPass profile,
             TsukuyomiScreenSpaceGlobalIlluminationVolume volume)
         {
-            Enabled = profile.EnableScreenSpaceGlobalIllumination && Resolve(volume?.enable, true);
+            Enabled = profile.Enabled && Resolve(volume?.enable, true);
             DebugOutput = Resolve(volume?.debugOutput, false);
             HalfResolution = Resolve(volume?.halfResolution, profile.SsgiHalfResolution);
             DepthBufferThickness = Resolve(volume?.depthBufferThickness, profile.SsgiDepthBufferThickness);
@@ -96,7 +96,7 @@ namespace Tsukuyomi.Rendering
         }
 
         public static TsukuyomiScreenSpaceGlobalIlluminationResolvedSettings From(
-            TsukuyomiPipelineProfile profile,
+            SsgiPass profile,
             TsukuyomiScreenSpaceGlobalIlluminationVolume volume)
         {
             return new TsukuyomiScreenSpaceGlobalIlluminationResolvedSettings(profile, volume);

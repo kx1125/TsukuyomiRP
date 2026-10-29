@@ -29,13 +29,13 @@ namespace Tsukuyomi.Rendering
             DirectionalDistance = float.IsFinite(directionalDistance) ? Mathf.Max(0.01f, directionalDistance) : 100;
         }
 
-        public static RayTracedShadowSettings Resolve(TsukuyomiPipelineProfile profile)
+        public static RayTracedShadowSettings Resolve(RayTracedShadowPass profile)
         {
-            if (!profile) return new RayTracedShadowSettings(false, 8, 4, -1, 100);
+            if (profile == null) return new RayTracedShadowSettings(false, 8, 4, -1, 100);
             var volume = VolumeManager.instance.stack?.GetComponent<TsukuyomiRayTracedShadowVolume>();
             bool active = volume != null && volume.active;
             return new RayTracedShadowSettings(
-                active && volume.enable.overrideState ? volume.enable.value : profile.EnableRayTracedShadows,
+                profile.Enabled && (!active || !volume.enable.overrideState || volume.enable.value),
                 active && volume.samples.overrideState ? volume.samples.value : profile.RayTracedShadowSamples,
                 active && volume.maxLights.overrideState ? volume.maxLights.value : profile.MaxRayTracedShadowLights,
                 active && volume.casterMask.overrideState ? volume.casterMask.value : profile.RayTracedShadowCasterMask,

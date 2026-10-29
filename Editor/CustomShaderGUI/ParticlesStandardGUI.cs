@@ -17,9 +17,6 @@ public class ParticlesStandardGUI : ShaderProperty
     private static bool _DissolveTex_Foldout = true;
     private static bool _Fresnel_Foldout = true;
 
-    private static Gradient gradient = new Gradient();
-    private static bool RampEditor;
-    
     private void UpdateProperties(MaterialProperty[] properties)
     {
         //TEXTURES
@@ -41,7 +38,6 @@ public class ParticlesStandardGUI : ShaderProperty
         _props.DstBlend = FindProperty("_DstBlend", properties);
 
         //TEXTURE OPTIONS
-        //if (_props.MainTex.textureValue != null)
         {
             _props.MainTexMoveCenter = FindProperty("_MainTex_MoveCenter", properties);
             _props.MainTexRotator = FindProperty("_MainTex_Rotator", properties);
@@ -49,7 +45,6 @@ public class ParticlesStandardGUI : ShaderProperty
             _props.ClampMainUV = FindProperty("_ClampMainUV", properties);
         }
         
-        //if (_props.NoiseTex.textureValue != null)
         {
             _props.NoiseTexMoveCenter = FindProperty("_NoiseTex_MoveCenter", properties);
             _props.NoiseTexRotator = FindProperty("_NoiseTex_Rotator", properties);
@@ -57,7 +52,6 @@ public class ParticlesStandardGUI : ShaderProperty
             _props.NoiseTexChannel = FindProperty("_NoiseTex_Channel", properties);
         }
         
-        //if (_props.MaskTex.textureValue != null)
         {
             _props.MaskTexMoveCenter = FindProperty("_MaskTex_MoveCenter", properties);
             _props.MaskTexRotator = FindProperty("_MaskTex_Rotator", properties);
@@ -66,7 +60,6 @@ public class ParticlesStandardGUI : ShaderProperty
             _props.MaskPower = FindProperty("_MaskPower", properties);
         }
         
-        //if (_props.DistortionTex.textureValue != null)
         {
             _props.Distortion = FindProperty("_Distortion", properties);
             _props.DistortionTexMoveCenter = FindProperty("_DistortionTex_MoveCenter", properties);
@@ -75,7 +68,6 @@ public class ParticlesStandardGUI : ShaderProperty
             _props.DistortionTexChannel = FindProperty("_DistortionTex_Channel", properties);
         }
         
-        //if (_props.DissolveTex.textureValue != null)
         {
             _props.DissolveTexMoveCenter = FindProperty("_DissolveTex_MoveCenter", properties);
             _props.DissolveTexRotator = FindProperty("_DissolveTex_Rotator", properties);
@@ -253,25 +245,6 @@ public class ParticlesStandardGUI : ShaderProperty
 
                 EditorGUI.indentLevel--;
             }
-            
-            // _features.ForceField = material.IsKeywordEnabled("_FORCEFIELD_ON");
-            // _features.Ripple = material.IsKeywordEnabled("_RIPPLE_ON");
-            // _features.ArrowLine = material.IsKeywordEnabled("_ARROWLINE_ON");
-            // EditorGUI.BeginChangeCheck();
-            // {
-            //     materialEditor.ShaderProperty(_props.CullMode, new GUIContent("CullMode", "裁剪模式"));
-            //     _features.ForceField = EditorGUILayout.Toggle(new GUIContent("ForceField", "开启力场效果"), _features.ForceField);
-            //     _features.ArrowLine = EditorGUILayout.Toggle(new GUIContent("ArrowLine", "开启连线"), _features.ArrowLine);
-            //     _features.Ripple = EditorGUILayout.Toggle(new GUIContent("Ripple", "开启涟漪效果"), _features.Ripple);
-            // }
-            // if(EditorGUI.EndChangeCheck())
-            // {
-            //     ApplyKeyworld(material, "_FORCEFIELD_ON", _features.ForceField);
-            //     ApplyKeyworld(material, "_RIPPLE_ON", _features.Ripple);
-            //     ApplyKeyworld(material, "_ARROWLINE_ON", _features.ArrowLine);
-            // }
-
-            //EditorGUI.indentLevel--;
         }
         
         _Base_Foldout = ShaderGUIHelper.GetFoldOut(_Base_Foldout, "Main Settings", "主要属性");

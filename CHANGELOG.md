@@ -2,6 +2,12 @@
 
 All notable changes to this package are documented in this file.
 
+## [0.3.1] - 2026-11-04
+
+### Fixed
+
+- Enabled SceneScan Profile nodes now stay idle until a camera or Volume requests playback. Clearing camera overrides returns each module to its Volume setting, which defaults to off.
+
 ## [0.3.0] - 2026-10-28
 
 ### Added

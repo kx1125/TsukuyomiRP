@@ -18,7 +18,7 @@ TsukuyomiRP is an experimental collection of custom rendering features for Unity
 In Unity, open **Window > Package Management > Package Manager**, select **Install package from git URL**, and enter:
 
 ```text
-https://github.com/kx1125/TsukuyomiRP.git#v0.3.0
+https://github.com/kx1125/TsukuyomiRP.git#v0.3.1
 ```
 
 You can also add the package directly to your project's `Packages/manifest.json`:
@@ -26,7 +26,7 @@ You can also add the package directly to your project's `Packages/manifest.json`
 ```json
 {
   "dependencies": {
-    "tsukuyomi.render-pipelines.universal": "https://github.com/kx1125/TsukuyomiRP.git#v0.3.0"
+    "tsukuyomi.render-pipelines.universal": "https://github.com/kx1125/TsukuyomiRP.git#v0.3.1"
   }
 }
 ```
@@ -50,13 +50,13 @@ SceneScan rendering is split into four independent effects. Add the correspondin
 | XrayRender | `TsukuyomiXrayRenderPass` | Registered renderer masks, private target depth and highlights behind walls |
 | SpatialGridRender | `TsukuyomiSpatialGridRenderPass` | World-space lattice points and connecting lines |
 
-Scan, voxel glitch, horizontal glitch and chromatic split have separate switches. Project code owns timing, curves, presets and gameplay target categories, and calls the static Pass APIs for enabled nodes directly without looking up `RendererFeature`:
+Enabling a SceneScan node in the Profile leaves it on standby. Start playback for a camera with `SetCameraEnabled(camera, true)` or turn on the corresponding Volume's `enable` override. Project code owns timing, curves and presets. Scan, voxel glitch, horizontal glitch and chromatic split have separate switches.
 
 ```csharp
-TsukuyomiSpatialGridRenderPass.SetCameraEnabled(camera, true);
+TsukuyomiScanPostProcessPass.SetCameraEnabled(camera, true);
 TsukuyomiScanPostProcessPass.SetCameraEffectEnabled(camera, ScanPostEffect.ChromaticSplit, false);
-// Return control to Profile/Volume when this camera override is no longer needed.
-TsukuyomiSpatialGridRenderPass.ClearCamera(camera);
+// At the end of playback, return to the Volume setting (off by default).
+TsukuyomiScanPostProcessPass.ClearCamera(camera);
 ```
 
 SpatialGridRender can run independently with full coverage; its current Mesh backend remains private so future particle or Compute Shader implementations can retain the public parameter API.

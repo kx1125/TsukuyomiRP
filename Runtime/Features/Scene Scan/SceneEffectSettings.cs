@@ -7,6 +7,10 @@ namespace Tsukuyomi.Rendering
         private static T Value<T>(VolumeParameter<T> value, T fallback) => value != null && value.overrideState ? value.value : fallback;
         private static T Active<T>(VolumeStack stack) where T : VolumeComponent
         { var volume = stack?.GetComponent<T>(); return volume != null && volume.active ? volume : null; }
+
+        // PassSession gates the module on Profile.Enabled. Playback starts idle until a Volume or camera enables it.
+        private static bool VolumeEnablesPlayback(TsukuyomiSceneEffectVolume volume) => Value(volume?.enable, false);
+
         private static void Coverage(TsukuyomiSceneEffectVolume volume, ref ScanCoverageParameters p)
         {
             p.Mode = Value(volume?.coverageMode, p.Mode);
@@ -28,7 +32,7 @@ namespace Tsukuyomi.Rendering
             p.SamplingStrength = Value(volume?.samplingStrength, p.SamplingStrength);
             p.DistortionStrength = Value(volume?.distortionStrength, p.DistortionStrength);
             p.SamplingCompleted = Value(volume?.samplingCompleted, p.SamplingCompleted);
-            return Value(volume?.enable, profile != null && profile.Enabled);
+            return VolumeEnablesPlayback(volume);
         }
         internal static bool Resolve(ScanPostProcessPass profile, VolumeStack stack, out ScanPostProcessParameters p)
         {
@@ -56,7 +60,7 @@ namespace Tsukuyomi.Rendering
             p.AccentColor = Value(volume?.accentColor, p.AccentColor);
             p.TintColor = Value(volume?.tintColor, p.TintColor);
             p.DebugView = Value(volume?.debugView, p.DebugView);
-            return Value(volume?.enable, profile != null && profile.Enabled);
+            return VolumeEnablesPlayback(volume);
         }
         internal static bool Resolve(XrayRenderPass profile, VolumeStack stack, out XrayRenderParameters p)
         {
@@ -67,7 +71,7 @@ namespace Tsukuyomi.Rendering
             p.Intensity = Value(volume?.intensity, p.Intensity);
             p.PrimaryColor = Value(volume?.primaryColor, p.PrimaryColor);
             p.SecondaryColor = Value(volume?.secondaryColor, p.SecondaryColor);
-            return Value(volume?.enable, profile != null && profile.Enabled);
+            return VolumeEnablesPlayback(volume);
         }
         internal static bool Resolve(SpatialGridRenderPass profile, VolumeStack stack, out SpatialGridParameters p)
         {
@@ -89,7 +93,7 @@ namespace Tsukuyomi.Rendering
             p.Intensity = Value(volume?.intensity, p.Intensity);
             p.Color = Value(volume?.color, p.Color);
             p.PulseSpeed = Value(volume?.pulseSpeed, p.PulseSpeed);
-            return Value(volume?.enable, profile != null && profile.Enabled);
+            return VolumeEnablesPlayback(volume);
         }
         internal static ScanPostEffect Effects(ScanPostProcessPass profile, VolumeStack stack)
         {

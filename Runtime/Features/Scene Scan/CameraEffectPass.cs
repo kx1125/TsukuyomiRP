@@ -74,13 +74,13 @@ namespace Tsukuyomi.Rendering
         protected abstract bool ResolveSettings(RenderPassBase profile, VolumeStack stack, out TParameters parameters);
         protected abstract void ApplyAnimation(ref TParameters parameters, in ScanAnimationParameters animation);
 
-        /// <summary>Override this camera's panel switch. Can be called before a RendererFeature exists.</summary>
+        /// <summary>Request or suppress playback for this camera. The Profile node must be enabled to render.</summary>
         public static void SetCameraEnabled(Camera camera, bool enabled) => CameraEffectControls<TParameters>.Get(camera).Enabled = enabled;
         /// <summary>Override all rendering parameters for this camera, without enabling the effect.</summary>
         public static void SetCameraParameters(Camera camera, in TParameters parameters) => CameraEffectControls<TParameters>.Get(camera).Parameters = parameters;
         /// <summary>Drive animated inputs while retaining panel-authored appearance and coverage mode.</summary>
         public static void SetCameraAnimation(Camera camera, in ScanAnimationParameters animation) => CameraEffectControls<TParameters>.Get(camera).Animation = animation;
-        /// <summary>Return control to Profile/Volume. Backend resources have a separate release API.</summary>
+        /// <summary>Clear static overrides for this camera. Backend resources have a separate release API.</summary>
         public static void ClearCamera(Camera camera)
         { if (!ReferenceEquals(camera, null)) CameraEffectControls<TParameters>.Cameras.Remove(camera); }
         public static bool HasCameraOverrides(Camera camera) => camera && CameraEffectControls<TParameters>.Cameras.ContainsKey(camera);

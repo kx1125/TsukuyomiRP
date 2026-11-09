@@ -12,11 +12,48 @@ Shader "Hidden/Tsukuyomi RP/Scene Scan/Main"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+            #pragma multi_compile_local_fragment _ _SCENE_OUTLINE _SCENE_OUTLINE_MASKED _SCENE_OUTLINE_TEMPORAL
             #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/SceneScanCommon.hlsl"
+            #include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/SceneOutlineResponse.hlsl"
             TEXTURE2D_X(_TransitionSampled);
             TEXTURE2D_X(_TransitionDistorted);
             TEXTURE2D_X(_TransitionScreenMask);
             TEXTURE2D_X(_XrayContribution);
+            #if defined(_SCENE_OUTLINE) || defined(_SCENE_OUTLINE_MASKED) || defined(_SCENE_OUTLINE_TEMPORAL)
+                #define HAS_SCENE_OUTLINE 1
+                float4 _SceneOutlineColor;
+                float4 _SceneOutlineParams; // UV step, relative depth threshold, normal threshold (-1 disables).
+            #endif
+            #if defined(_SCENE_OUTLINE_MASKED)
+                TEXTURE2D_X(_SceneOutlineExcludedMask);
+            #endif
+            #if defined(_SCENE_OUTLINE_TEMPORAL)
+                TEXTURE2D_X(_SceneOutlineCoverage);
+                float2 _SceneOutlineJitter;
+            #endif
+
+            float2 CompareEdge(float2 uv, float eyeDepth, float3 normalWS, bool useNormals)
+            {
+                #if defined(_SCENE_OUTLINE_MASKED)
+                    if (SAMPLE_TEXTURE2D_X(_SceneOutlineExcludedMask, sampler_PointClamp, uv).r > 0.5) return 0.0;
+                #endif
+                float depthDelta = abs(LinearEyeDepthConsiderProjection(SampleSceneDepth(uv)) - eyeDepth);
+                float normalDelta = useNormals ? length(normalWS - SafeNormal(SampleSceneNormals(uv))) : 0.0;
+                return float2(depthDelta, normalDelta);
+            }
+
+            float2 SceneEdgeDifferences(float2 uv, float2 offset, float eyeDepth, float3 normalWS, bool useNormals)
+            {
+                #if defined(_SCENE_OUTLINE_MASKED)
+                    if (SAMPLE_TEXTURE2D_X(_SceneOutlineExcludedMask, sampler_PointClamp, uv).r > 0.5) return 0.0;
+                #endif
+                float2 horizontal = max(CompareEdge(saturate(uv + float2(offset.x, 0)), eyeDepth, normalWS, useNormals),
+                                        CompareEdge(saturate(uv - float2(offset.x, 0)), eyeDepth, normalWS, useNormals));
+                float2 vertical = max(CompareEdge(saturate(uv + float2(0, offset.y)), eyeDepth, normalWS, useNormals),
+                                      CompareEdge(saturate(uv - float2(0, offset.y)), eyeDepth, normalWS, useNormals));
+                return max(horizontal, vertical);
+            }
+
             half4 Frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
@@ -24,6 +61,7 @@ Shader "Hidden/Tsukuyomi RP/Scene Scan/Main"
                 half4 original = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv);
                 float rawDepth = SampleSceneDepth(uv);
                 bool hasSurface = !IsSky(rawDepth);
+                bool scan = _ScanModuleFlags.x > 0.5;
                 bool opening = _ScanModuleFlags.y > 0.5;
                 half4 source = opening ? SAMPLE_TEXTURE2D_X(_TransitionSampled, sampler_PointClamp, uv) : original;
                 half3 outsideScan = opening ? SAMPLE_TEXTURE2D_X(_TransitionDistorted, sampler_PointClamp, uv).rgb : original.rgb;
@@ -38,26 +76,54 @@ Shader "Hidden/Tsukuyomi RP/Scene Scan/Main"
                 float3 result = source.rgb;
                 float2 masks = 0.0;
                 float3 normalWS = float3(0.0, 1.0, 0.0);
-
-                if (hasSurface && _ScanModuleFlags.x > 0.5)
+                float3 positionWS = 0.0;
+                if (hasSurface && scan)
                 {
-                    float3 positionWS = ComputeWorldSpacePosition(uv, DeviceDepth(rawDepth), UNITY_MATRIX_I_VP);
+                    positionWS = ComputeWorldSpacePosition(uv, DeviceDepth(rawDepth), UNITY_MATRIX_I_VP);
                     masks = ScanMasks(positionWS);
-                    normalWS = SafeNormal(SampleSceneNormals(uv));
-                    float2 rightUV = saturate(uv + float2(outlineStep.x, 0.0));
-                    float2 leftUV = saturate(uv - float2(outlineStep.x, 0.0));
-                    float2 upUV = saturate(uv + float2(0.0, outlineStep.y));
-                    float2 downUV = saturate(uv - float2(0.0, outlineStep.y));
+                }
+                bool needEdges = scan;
+                bool useNormals = scan;
+                #if defined(HAS_SCENE_OUTLINE)
+                    needEdges = true;
+                    useNormals = scan || _SceneOutlineParams.w >= 0.0;
+                    float takeover = saturate(_ScanCurveParams.x * masks.x * screenMask * (1.0 - excluded));
+                    outlineStep = lerp(max(_CameraDepthTexture_TexelSize.xy, _SceneOutlineParams.xy), outlineStep, takeover);
+                    float baseAlpha = 0.0;
+                #endif
+                float outline = 0.0;
+                #if defined(_SCENE_OUTLINE_TEMPORAL)
+                float3 stable = SAMPLE_TEXTURE2D_X(_SceneOutlineCoverage, sampler_PointClamp, uv).rgb;
+                // Present converged pixel coverage in the jitter phase expected by the upscaler.
+                float2 stableEdges = stable.xy;
+                if (any(_SceneOutlineJitter))
+                {
+                    float2 phased = SAMPLE_TEXTURE2D_X(_SceneOutlineCoverage, sampler_LinearClamp, uv - _SceneOutlineJitter).rg;
+                    stableEdges = lerp(stable.xy, phased, saturate((stable.z - 2.0) * .25));
+                }
+                baseAlpha = stableEdges.x * _SceneOutlineColor.a;
+                outline = stableEdges.y;
+                if (hasSurface && scan) normalWS = SafeNormal(SampleSceneNormals(uv));
+                #else
+                if (hasSurface && needEdges)
+                {
+                    if (useNormals) normalWS = SafeNormal(SampleSceneNormals(uv));
                     float depth = LinearEyeDepthConsiderProjection(rawDepth);
-                    float depthDiff = max(max(abs(LinearEyeDepthConsiderProjection(SampleSceneDepth(rightUV)) - depth),
-                        abs(LinearEyeDepthConsiderProjection(SampleSceneDepth(leftUV)) - depth)),
-                        max(abs(LinearEyeDepthConsiderProjection(SampleSceneDepth(upUV)) - depth),
-                        abs(LinearEyeDepthConsiderProjection(SampleSceneDepth(downUV)) - depth)));
-                    float normalDiff = max(max(length(normalWS - SafeNormal(SampleSceneNormals(rightUV))),
-                        length(normalWS - SafeNormal(SampleSceneNormals(leftUV)))),
-                        max(length(normalWS - SafeNormal(SampleSceneNormals(upUV))),
-                        length(normalWS - SafeNormal(SampleSceneNormals(downUV)))));
-                    float outline = saturate(max(normalDiff * 1.5, depthDiff / max(0.05, depth * 0.03)));
+                    float2 delta = SceneEdgeDifferences(uv, outlineStep, depth, normalWS, useNormals);
+                    outline = SceneOutlineScanStrength(delta, depth);
+                    #if defined(HAS_SCENE_OUTLINE)
+                        baseAlpha = SceneOutlineBaseCoverage(delta, depth, _SceneOutlineParams.zw) * _SceneOutlineColor.a;
+                    #endif
+                }
+                #endif
+                #if defined(HAS_SCENE_OUTLINE)
+                    float3 baseColor = lerp(original.rgb, _SceneOutlineColor.rgb, baseAlpha);
+                    if (!scan && !opening && _ScanModuleFlags.z < 0.5) return half4(baseColor, original.a);
+                #else
+                    float3 baseColor = original.rgb;
+                #endif
+                if (hasSurface && scan)
+                {
                     float fresnel = pow(1.0 - saturate(dot(normalWS, SafeNormal(GetWorldSpaceViewDir(positionWS)))), 3.0);
 
                     float2 gridUV = GridUV(positionWS, normalWS);
@@ -113,6 +179,12 @@ Shader "Hidden/Tsukuyomi RP/Scene Scan/Main"
                 float3 revealColor = _ScanDebugColor.rgb * lerp(0.03, 1.0, saturate(_ScanGridSettings.z));
                 result += (revealColor - source.rgb) * (1.0 - masks.x) * (hasSurface && _ScanModuleFlags.x > 0.5 ? 1.0 : 0.0);
 
+                #if defined(HAS_SCENE_OUTLINE)
+                    // Replace the base line only where the scan has arrived. Screen opening
+                    // and overall playback fade are applied below, once, to both styles.
+                    result = lerp(result, _SceneOutlineColor.rgb, baseAlpha * (1.0 - masks.x));
+                    outsideScan = lerp(outsideScan, _SceneOutlineColor.rgb, baseAlpha);
+                #endif
                 result += SAMPLE_TEXTURE2D_X(_XrayContribution, sampler_PointClamp, uv).rgb;
 
                 // UE blends the distorted original scene into the voxel-sampled world scan.
@@ -120,7 +192,7 @@ Shader "Hidden/Tsukuyomi RP/Scene Scan/Main"
                 result = lerp(outsideScan, result, screenMask);
                 // Flash is added after the screen blend; the UE material reads its RGB and ignores its alpha.
                 result += _ScanDebugColor.rgb * _ScanCurveParams.w * _ScanGridFlash.y;
-                result = lerp(original.rgb, result, saturate(_ScanCurveParams.x) * (1.0 - saturate(excluded)));
+                result = lerp(baseColor, result, saturate(_ScanCurveParams.x) * (1.0 - saturate(excluded)));
                 return half4(result, original.a);
             }
 

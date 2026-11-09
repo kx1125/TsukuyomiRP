@@ -21,6 +21,8 @@ namespace Tsukuyomi.Rendering
             _capture = new TsukuyomiFsr3OpaqueOnlyCapturePass();
             _masks = new TsukuyomiFsr3ManualMaskPass();
             var capture = plan.AddNative(_capture, RenderPassEvent.BeforeRenderingTransparents, () => _active);
+            // The reactive mask compares against the fully composited opaque scene, including its outlines.
+            plan.Requires(capture, SceneEffectPass.ColorBeforeTransparents, optional: true);
             plan.After(plan.AddNative(_masks, RenderPassEvent.BeforeRenderingPostProcessing - 1, () => _manual), capture);
         }
         public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)

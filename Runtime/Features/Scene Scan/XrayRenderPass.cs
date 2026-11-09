@@ -30,21 +30,24 @@ namespace Tsukuyomi.Rendering
     public sealed class TsukuyomiXrayRenderPass : CameraEffectPass<XrayRenderParameters>
     {
         private readonly XrayRenderPass _defaults;
-        private readonly System.Func<bool> _excludedRequired;
+        private readonly Func<Camera, bool> _excludedRequired;
+        private readonly bool _hasOutline;
+        private bool NeedsOutlineMask(ContextContainer frameData) => _hasOutline && SceneOutlineExclude.ActiveRoots.Count > 0
+            && frameData.Get<ScanEffectFrameResources>().Outline.Visible;
         public TsukuyomiXrayRenderPass() { }
-        internal TsukuyomiXrayRenderPass(XrayRenderPass settings, System.Func<bool> excludedRequired)
-        { _defaults = settings; _excludedRequired = excludedRequired; }
+        internal TsukuyomiXrayRenderPass(XrayRenderPass settings, Func<Camera, bool> excludedRequired, bool hasOutline)
+        { _defaults = settings; _excludedRequired = excludedRequired; _hasOutline = hasOutline; }
         internal bool Prepared { get; private set; }
         public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
         {
             Prepared = false;
             if (_defaults != null || _excludedRequired != null) UpdateSettings(context.Camera, _defaults, context.Volumes);
             // Exclusion consumers finish preparing before resource resolution.
-            if (_excludedRequired == null) Prepared = !context.Frame.CameraData.isPreviewCamera && Configure(context.Camera, false);
+            if (_excludedRequired == null) Prepared = !context.Frame.CameraData.isPreviewCamera && Configure(context.Frame, false);
         }
         public override void ResolveResources(in PassCameraContext context, ref RenderingData data)
         {
-            if (_excludedRequired != null) Prepared = !context.Frame.CameraData.isPreviewCamera && Configure(context.Camera, _excludedRequired());
+            if (_excludedRequired != null) Prepared = !context.Frame.CameraData.isPreviewCamera && Configure(context.Frame, _excludedRequired(context.Camera));
         }
         public override void Deactivate(Camera camera)
         {
@@ -54,6 +57,8 @@ namespace Tsukuyomi.Rendering
 
         public const string TargetMaskName = "SceneScanTargetMask";
         public const string ExcludedMaskName = "SceneScanExcludedMask";
+        // The visible-mask shader uses a negative tag to require a match with camera depth.
+        private const int OutlineExclusionTag = -1;
 
         [Read(BuiltinTexture.CameraDepthTexture)]
         public TextureSlot sceneDepth = TextureSlot.Read("Scene Depth", BuiltinTexture.CameraDepthTexture);
@@ -68,6 +73,8 @@ namespace Tsukuyomi.Rendering
         private readonly Dictionary<MaterialKey, Material> _materials = new();
         private readonly List<MaterialKey> _deadMaterials = new();
         private readonly List<Material> _sourceMaterials = new();
+        private readonly List<Renderer> _outlineRenderers = new();
+        private readonly List<DrawCall> _outlineDraws = new();
         private readonly HashSet<Renderer> _recordedRenderers = new();
         private readonly Plane[] _frustum = new Plane[6];
         private Shader _shader;
@@ -134,11 +141,12 @@ namespace Tsukuyomi.Rendering
 
         internal bool HighlightAllowed { get; set; } = true;
 
-        private bool Configure(Camera camera, bool excludedRequired)
+        private bool Configure(in FrameContext frame, bool excludedRequired)
         {
+            var camera = frame.CameraData.camera;
             if (excludedRequired && TryGetRenderers(camera, out _)) _excludedRequests.Add(camera);
             else _excludedRequests.Remove(camera);
-            if (!HasHighlight(camera) && !_excludedRequests.Contains(camera)) return false;
+            if (!HasHighlight(camera) && !_excludedRequests.Contains(camera) && !NeedsOutlineMask(frame.URPFrameData)) return false;
             if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out var resources)) return false;
             Shader shader = resources.ScanTargetMaskShader;
             if (!shader)
@@ -153,7 +161,7 @@ namespace Tsukuyomi.Rendering
         }
 
         public override bool IsActive(in FrameContext frame) => Prepared && _shader != null
-            && (HasHighlight(frame.CameraData.camera) || _excludedRequests.Contains(frame.CameraData.camera));
+            && (HasHighlight(frame.CameraData.camera) || _excludedRequests.Contains(frame.CameraData.camera) || NeedsOutlineMask(frame.URPFrameData));
 
         public override void Clear(Camera camera)
         {
@@ -212,12 +220,22 @@ namespace Tsukuyomi.Rendering
             descriptor.msaaSamples = 1;
             descriptor.bindMS = false;
             descriptor.depthStencilFormat = GraphicsFormat.None;
-            descriptor.graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat;
             descriptor.useMipMap = false;
             descriptor.autoGenerateMips = false;
             descriptor.enableRandomWrite = false;
             descriptor.memoryless = RenderTextureMemoryless.None;
 
+            GeometryUtility.CalculateFrustumPlanes(camera.cullingMatrix, _frustum);
+            if (HasHighlight(camera) || _excludedRequests.Contains(camera))
+                RecordScanMasks(graph, camera, cameraDepth, descriptor);
+            if (NeedsOutlineMask(graph.FrameData))
+                RecordOutlineMask(graph, camera, cameraDepth, descriptor);
+        }
+
+        private void RecordScanMasks(in FeatureGraphContext graph, Camera camera, TextureHandle cameraDepth,
+            RenderTextureDescriptor descriptor)
+        {
+            descriptor.graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat;
             TextureDesc targetDesc = new(descriptor)
             {
                 name = TargetMaskName,
@@ -237,7 +255,6 @@ namespace Tsukuyomi.Rendering
             };
             TextureHandle targetDepth = graph.CreateTexture(depthDesc);
 
-            GeometryUtility.CalculateFrustumPlanes(camera.cullingMatrix, _frustum);
             using (var node = graph.AddRaster<MaskData>("Tsukuyomi Scene Scan Target Mask"))
             {
                 // Mesh draws only cover part of the target. WriteAll/Discard would let
@@ -270,6 +287,40 @@ namespace Tsukuyomi.Rendering
             }
         }
 
+        private void RecordOutlineMask(in FeatureGraphContext graph, Camera camera, TextureHandle cameraDepth,
+            RenderTextureDescriptor descriptor)
+        {
+            _outlineDraws.Clear();
+            _recordedRenderers.Clear();
+            var roots = SceneOutlineExclude.ActiveRoots;
+            for (int i = 0; i < roots.Count; i++)
+            {
+                var root = roots[i];
+                if (!root) continue;
+                root.GetComponentsInChildren(false, _outlineRenderers);
+                foreach (var renderer in _outlineRenderers)
+                    AddRendererDraws(_outlineDraws, camera, renderer, OutlineExclusionTag);
+            }
+            _outlineRenderers.Clear();
+            if (_outlineDraws.Count == 0) return;
+
+            descriptor.graphicsFormat = GraphicsFormat.R8_UNorm;
+            var desc = new TextureDesc(descriptor)
+            {
+                name = "SceneOutlineExclusion", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp,
+                clearBuffer = true, clearColor = Color.clear
+            };
+            using var node = graph.AddRaster<MaskData>("Tsukuyomi Scene Outline Visible Exclusion");
+            node.ReadTexture(cameraDepth);
+            graph.FrameData.GetOrCreate<ScanEffectFrameResources>().OutlineExclusion =
+                node.ColorAttachment(desc, access: AccessFlags.Write);
+            node.Data.ShaderPass = 1;
+            node.Data.Draws.Clear();
+            node.Data.Draws.AddRange(_outlineDraws);
+            node.SetRenderFunc(static (data, context) => Draw(data, context));
+            _outlineDraws.Clear();
+        }
+
         private void PopulateDraws(List<DrawCall> draws, Camera camera, bool excluded)
         {
             draws.Clear(); _recordedRenderers.Clear();
@@ -280,29 +331,30 @@ namespace Tsukuyomi.Rendering
             {
                 var entry = entries[i];
                 if ((entry.Role == RendererMaskRole.Excluded) != excluded || (!excluded && entry.Tag <= 0)) continue;
-                Renderer renderer = entry.Renderer;
-                if (!renderer || !renderer.enabled || renderer.forceRenderingOff || !renderer.gameObject.activeInHierarchy
-                    || (camera.cullingMask & (1 << renderer.gameObject.layer)) == 0
-                    || !GeometryUtility.TestPlanesAABB(_frustum, renderer.bounds) || !_recordedRenderers.Add(renderer)) continue;
-                Mesh mesh = null;
-                if (renderer is SkinnedMeshRenderer skinned)
-                    mesh = skinned.sharedMesh;
-                else if (renderer.TryGetComponent(out MeshFilter filter))
-                    mesh = filter.sharedMesh;
-                if (!mesh || mesh.subMeshCount == 0)
-                    continue;
+                AddRendererDraws(draws, camera, entry.Renderer, excluded ? 0 : entry.Tag);
+            }
+        }
 
-                renderer.GetSharedMaterials(_sourceMaterials);
-                int count = Mathf.Min(mesh.subMeshCount, _sourceMaterials.Count);
-                for (int submesh = 0; submesh < count; submesh++)
-                {
-                    Material source = _sourceMaterials[submesh];
-                    if (source == null)
-                        continue;
-                    Material material = GetMaskMaterial(source, excluded ? 0 : entry.Tag);
-                    if (material != null)
-                        draws.Add(new DrawCall(renderer, material, submesh));
-                }
+        private void AddRendererDraws(List<DrawCall> draws, Camera camera, Renderer renderer, int tag)
+        {
+            if (!renderer || !renderer.enabled || renderer.forceRenderingOff || !renderer.gameObject.activeInHierarchy
+                || (camera.cullingMask & (1 << renderer.gameObject.layer)) == 0
+                || !GeometryUtility.TestPlanesAABB(_frustum, renderer.bounds) || !_recordedRenderers.Add(renderer)) return;
+            Mesh mesh = null;
+            if (renderer is SkinnedMeshRenderer skinned)
+                mesh = skinned.sharedMesh;
+            else if (renderer.TryGetComponent(out MeshFilter filter))
+                mesh = filter.sharedMesh;
+            if (!mesh || mesh.subMeshCount == 0) return;
+
+            renderer.GetSharedMaterials(_sourceMaterials);
+            int count = Mathf.Min(mesh.subMeshCount, _sourceMaterials.Count);
+            for (int submesh = 0; submesh < count; submesh++)
+            {
+                var source = _sourceMaterials[submesh];
+                if (!source) continue;
+                var material = GetMaskMaterial(source, tag);
+                if (material) draws.Add(new DrawCall(renderer, material, submesh));
             }
         }
 

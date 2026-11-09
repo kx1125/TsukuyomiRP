@@ -31,36 +31,53 @@ namespace Tsukuyomi.Rendering
         }
     }
 
-    // Owned by one pooled plan. Effects provide operations; the plan handles their lifetime
-    // and invocation without requiring each effect to cache instance delegates.
+    // Values are shared with the Uber shader.
+    internal enum PostBlendKind
+    {
+        Bloom = 1,
+        Diffusion = 2,
+        Tonemapping = 3
+    }
+
     internal abstract class TsukuyomiPostProcessData
     {
-        public virtual void SetupUber(UnsafeGraphContext context, Material material) { }
+        public abstract PostBlendKind Kind { get; }
+        public abstract void SetupUber(UnsafeGraphContext context, Material material);
     }
 
     internal sealed class TsukuyomiPostProcessPlan
     {
-        private readonly TsukuyomiPassData _effectData = new();
+        internal static readonly int OrderId = Shader.PropertyToID("_TsukuyomiPostOrder");
 
-        public T GetOrCreateData<T>() where T : class, new() => _effectData.GetOrCreateData<T>();
+        private readonly TsukuyomiPassData _effectData = new();
+        private readonly List<TsukuyomiPostProcessData> _steps = new();
+        private Vector4 _order;
+
+        public bool UsesLegacyOrder => (_order.y == 0 || _order.x < _order.y)
+            && (_order.z == 0 || _order.y < _order.z);
+
+        public T GetOrCreateData<T>() where T : class, new()
+        {
+            return _effectData.GetOrCreateData<T>();
+        }
 
         public void Clear()
         {
-            _uberSetups.Clear();
+            _steps.Clear();
+            _order = Vector4.zero;
         }
-
-        private readonly List<TsukuyomiPostProcessData> _uberSetups = new();
 
         public void AddUberSetup(TsukuyomiPostProcessData data)
         {
-            if (data != null)
-                _uberSetups.Add(data);
+            _order[_steps.Count] = (int)data.Kind;
+            _steps.Add(data);
         }
 
         public void SetupUberMaterial(UnsafeGraphContext context, Material material)
         {
-            for (int i = 0; i < _uberSetups.Count; i++)
-                _uberSetups[i].SetupUber(context, material);
+            material.SetVector(OrderId, _order);
+            for (int i = 0; i < _steps.Count; i++)
+                _steps[i].SetupUber(context, material);
         }
     }
 

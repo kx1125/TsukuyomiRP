@@ -11,6 +11,8 @@ namespace Tsukuyomi.Rendering.Editor
     {
         public Type PassType { get; private set; }
         public RenderPassBase PassInstance { get; private set; }
+        internal Port OrderInput { get; }
+        internal Port OrderOutput { get; }
         internal void BindDefinition(RenderPassBase definition)
         { PassInstance = definition; PassType = definition.GetType(); title = definition.Name; }
 
@@ -30,7 +32,22 @@ namespace Tsukuyomi.Rendering.Editor
             style.borderLeftColor = new Color(0.22f, 0.22f, 0.22f);
             style.borderRightColor = new Color(0.22f, 0.22f, 0.22f);
             
+            OrderInput = CreateOrderPort(Direction.Input, "Previous pass in this stage");
+            OrderOutput = CreateOrderPort(Direction.Output, "Next pass in this stage");
+            mainContainer.Insert(0, OrderInput);
+            mainContainer.Add(OrderOutput);
             GenerateResourcePorts();
+        }
+
+        private static Port CreateOrderPort(Direction direction, string tooltip)
+        {
+            var port = Port.Create<Edge>(Orientation.Vertical, direction, Port.Capacity.Single, typeof(bool));
+            port.RemoveManipulator(port.edgeConnector);
+            port.portName = string.Empty;
+            port.tooltip = tooltip;
+            port.portColor = new Color(0.45f, 0.73f, 0.93f);
+            port.style.alignSelf = Align.Center;
+            return port;
         }
 
         private void GenerateResourcePorts()

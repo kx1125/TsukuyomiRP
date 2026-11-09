@@ -90,6 +90,8 @@ namespace Tsukuyomi.Rendering.Editor
         }
         private bool CanAdd(Type type)
         {
+            if (!_draft)
+                return false;
             var prototype = (RenderPassBase)Activator.CreateInstance(type);
             return prototype.AllowMultiple || !_draft.Passes.Any(p => p?.GetType() == type);
         }
@@ -134,13 +136,19 @@ namespace Tsukuyomi.Rendering.Editor
                 var layout = ReadLayout();
                 if (_point.HasValue)
                 {
-                    int i = 0;
-                    foreach (var pass in _draft.Passes)
+                    var passes = _draft.Passes.Where(p => p != null && p.InjectionPoint == _point).ToList();
+                    var positions = passes.Select((pass, i) => layout.Nodes.FirstOrDefault(n => n.NodeId == pass.NodeId)?.Position
+                        ?? new Vector2(20, i * 180)).ToArray();
+                    // The Inspector can reorder a stage without editing its saved layout. Keep the
+                    // authored horizontal positions and spacing, but assign the Y slots in Profile order.
+                    var heights = positions.Select(p => p.y).OrderBy(y => y).ToArray();
+                    var nodes = new List<TsukuyomiPassNode>(passes.Count);
+                    for (int i = 0; i < passes.Count; i++)
                     {
-                        if (pass == null || pass.InjectionPoint != _point.Value) continue;
-                        var position = layout.Nodes.FirstOrDefault(n => n.NodeId == pass.NodeId)?.Position ?? new Vector2(20, i * 180);
-                        _view.CreatePassNode(pass.GetType(), position, false, pass); i++;
+                        var pass = passes[i];
+                        nodes.Add(_view.CreatePassNode(pass.GetType(), new Vector2(positions[i].x, heights[i]), false, pass));
                     }
+                    _view.ConnectPassesInOrder(nodes);
                 }
                 else
                 {
@@ -182,7 +190,8 @@ namespace Tsukuyomi.Rendering.Editor
             {
                 // The draft is authoritative even when Unity replaces a managed reference during serialization.
                 if (_draft.Passes.Where(p => p != null).GroupBy(p => p.NodeId).Any(g => g.Count() > 1)) return;
-                var nodes = _view.nodes.OfType<TsukuyomiPassNode>().OrderBy(n => TsukuyomiGraphView.AuthoredPosition(n).y).ToList();
+                var nodes = _view.nodes.OfType<TsukuyomiPassNode>().OrderBy(n => TsukuyomiGraphView.AuthoredPosition(n).y)
+                    .ThenBy(n => _draft.Passes.FindIndex(p => p?.NodeId == n.PassInstance.NodeId)).ToList();
                 var ids = nodes.Select(n => n.PassInstance.NodeId).ToHashSet();
                 var visible = nodes.Select(n => _draft.Passes.Find(p => p?.NodeId == n.PassInstance.NodeId))
                     .Where(p => p != null && p.InjectionPoint == _point).ToList();
@@ -195,6 +204,7 @@ namespace Tsukuyomi.Rendering.Editor
                     var definition = _draft.Passes.Find(p => p?.NodeId == node.PassInstance.NodeId);
                     if (definition != null) node.BindDefinition(definition);
                 }
+                _view.ConnectPassesInOrder(nodes);
             }
         }
         private void CaptureLayout()
@@ -347,7 +357,17 @@ namespace Tsukuyomi.Rendering.Editor
             _status.text = ProfileChanged() ? "Profile changed externally — reload before applying."
                 : $"{_profile.name} · {(_point.HasValue ? _point.Value.ToString() : "All Stages")} · {(hasUnsavedChanges ? "Unapplied changes" : "Saved")}";
         }
-        private void OnInspectorUpdate() => UpdateStatus();
+        private void OnInspectorUpdate()
+        {
+            if (_draft && !hasUnsavedChanges && ProfileChanged())
+            {
+                // A focused field can have an uncommitted edit when another Inspector changes the Profile.
+                CommitPendingEdits();
+                TrackDraftChanges();
+                if (!hasUnsavedChanges) { LoadDraft(); return; }
+            }
+            UpdateStatus();
+        }
         private void OnDestroy()
         {
             Undo.undoRedoPerformed -= OnUndoRedo;

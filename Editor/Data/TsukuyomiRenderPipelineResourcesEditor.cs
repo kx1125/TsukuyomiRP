@@ -62,7 +62,7 @@ namespace Tsukuyomi.Rendering.Editor
                 "postProcessUberMaterial");
 
             DrawFoldout(ref s_ShowSceneEffects, "Scene Effects", "voxelTransitionShader", "scanMainShader",
-                "scanGlitchShader", "scanTargetMaskShader", "xrayCompositeShader", "scanGridShader");
+                "sceneOutlineTemporalShader", "scanGlitchShader", "scanTargetMaskShader", "xrayCompositeShader", "scanGridShader");
 
             DrawChildFoldout(ref s_ShowFsr3Resources, "FSR3 Resources", "fsr3Shaders");
 

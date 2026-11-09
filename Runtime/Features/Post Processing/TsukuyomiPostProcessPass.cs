@@ -11,31 +11,30 @@ namespace Tsukuyomi.Rendering
     [UnityEngine.Scripting.APIUpdating.MovedFrom(true, "Tsukuyomi.Rendering", "Tsukuyomi.Rendering", "PostProcessPlugin")]
     public abstract class PostProcessPassDefinition : RenderPassBase
     {
-        public override bool AllowMultiple => true;
+        public sealed override bool AllowMultiple => false;
         [NonSerialized] private TsukuyomiPostProcessEffect _effect;
         internal TsukuyomiPostProcessEffect Effect => _effect;
         [field: NonSerialized] internal bool Prepared { get; private set; }
         internal abstract TsukuyomiPostProcessEffect CreateEffect();
+
         public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
-            => Prepared = !context.Frame.CameraData.isPreviewCamera && TsukuyomiRenderPipelineResourcesProvider.TryGet(out var resources)
+        {
+            Prepared = context.AllowsPostProcessing
+                && TsukuyomiRenderPipelineResourcesProvider.TryGet(out var resources)
                 && _effect.Configure(this, context.Volumes, resources);
+        }
+
         public override void Deactivate(Camera camera) => Prepared = false;
         public override void Dispose() { _effect?.Dispose(); _effect = null; }
         public override void Build(PassPlanBuilder plan)
         {
             _effect = CreateEffect();
-            string group = NodeId;
-            // This shader implements precisely Bloom -> Tonemapping. Never commute user effects.
-            if (this is TonemappingPass && plan.PreviousDefinition is BloomPass bloom
-                && bloom.InjectionPoint == InjectionPoint) group = bloom.NodeId;
-            plan.Service("post/" + group, () => new TsukuyomiPostProcessPass()).Add(this);
+            plan.Service("post/" + InjectionPoint, () => new TsukuyomiPostProcessPass()).Add(this);
         }
     }
 
     internal sealed class TsukuyomiPostProcessPass : GraphFeaturePass, IRenderPassService
     {
-        private const int UberCompositePass = 0;
-
         [Read(BuiltinTexture.ActiveColor)]
         public TextureSlot color = TextureSlot.Read("Color", BuiltinTexture.ActiveColor);
 
@@ -52,10 +51,13 @@ namespace Tsukuyomi.Rendering
             _effects = new TsukuyomiPostProcessEffect[_definitions.Count];
             for (int i = 0; i < _effects.Length; i++) _effects[i] = _definitions[i].Effect;
             _effectOutputs = new TextureHandle[_effects.Length];
-            plan.Add(this, PassPlanBuilder.EventFor(_definitions[0].InjectionPoint), () => Prepared);
+            // Resolve the final scene color after other Tsukuyomi passes at this injection point.
+            var composite = plan.Add(this, PassPlanBuilder.EventFor(_definitions[0].InjectionPoint), () => Prepared);
+            composite.Order = int.MaxValue;
         }
         private Material _uberMaterial;
-        private bool _ownsUberMaterial;
+        private Material _packageFallback;
+        private bool _supportsOrderedComposite;
 
         public override void CollectTextureSlots(System.Collections.Generic.List<TextureSlot> slots)
         {
@@ -77,14 +79,23 @@ namespace Tsukuyomi.Rendering
 
             for (int i = 0; i < _effects.Length; i++)
             {
-                if (_definitions[i].Prepared)
-                    _activeEffects.Add(_effects[i]);
+                if (!_definitions[i].Prepared)
+                    continue;
+                if (!ResolveUberMaterial(resources))
+                    return false;
+                if (_effects[i] is TsukuyomiDiffusionEffect diffusion)
+                {
+                    if (!diffusion.ResolvePasses(_uberMaterial))
+                        continue;
+                    // Existing custom Uber shaders can use the package prefilter with their own blur kernels.
+                    if (!diffusion.ResolvePrefilter(_uberMaterial) && !diffusion.ResolvePrefilter(GetPackageUberMaterial()))
+                        continue;
+                }
+
+                _activeEffects.Add(_effects[i]);
             }
 
-            if (_activeEffects.Count == 0)
-                return false;
-
-            return ResolveUberMaterial(resources);
+            return _activeEffects.Count > 0;
         }
 
         public override bool IsActive(in FrameContext frame)
@@ -96,11 +107,10 @@ namespace Tsukuyomi.Rendering
 
         public override void Dispose()
         {
-            if (_ownsUberMaterial)
-                CoreUtils.Destroy(_uberMaterial);
-
+            CoreUtils.Destroy(_uberMaterial);
+            CoreUtils.Destroy(_packageFallback);
             _uberMaterial = null;
-            _ownsUberMaterial = false;
+            _packageFallback = null;
         }
 
         private sealed class RenderData
@@ -114,17 +124,14 @@ namespace Tsukuyomi.Rendering
 
         public override void RecordGraph(in FeatureGraphContext context)
         {
-            if (_uberMaterial == null || _activeEffects.Count == 0 || context.CameraData.isPreviewCamera)
+            if (_uberMaterial == null || context.CameraData.isPreviewCamera || _activeEffects.Count == 0)
                 return;
 
             TextureHandle source = context.GetTexture(color);
             if (!source.IsValid())
                 return;
 
-            TextureHandle destination = PassRecorder.CreateTextureLike(
-                context.RenderGraph,
-                source,
-                "_TsukuyomiPostProcessColor");
+            TextureHandle destination = PassRecorder.CreateTextureLike(context.RenderGraph, source, "_TsukuyomiPostProcessColor");
             if (!destination.IsValid())
                 return;
 
@@ -149,7 +156,7 @@ namespace Tsukuyomi.Rendering
                     _effectOutputs[i] = TextureHandle.nullHandle;
                 }
 
-                passData.UberMaterial = _uberMaterial;
+                passData.UberMaterial = ResolveCompositeMaterial(plan);
                 passData.Effects = _effects;
 
                 passData.Source = source;
@@ -163,7 +170,7 @@ namespace Tsukuyomi.Rendering
                     state.Plan.SetupUberMaterial(graphContext, state.UberMaterial);
 
                     graphContext.cmd.SetRenderTarget(state.Destination, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                    Blitter.BlitTexture(graphContext.cmd, state.Source, new Vector4(1.0f, 1.0f, 0.0f, 0.0f), state.UberMaterial, UberCompositePass);
+                    Blitter.BlitTexture(graphContext.cmd, state.Source, new Vector4(1.0f, 1.0f, 0.0f, 0.0f), state.UberMaterial, 0);
                 });
             }
 
@@ -175,23 +182,42 @@ namespace Tsukuyomi.Rendering
             if (_uberMaterial != null)
                 return true;
 
-            _ownsUberMaterial = false;
             if (resources.PostProcessUberMaterial != null)
             {
                 _uberMaterial = new Material(resources.PostProcessUberMaterial) { hideFlags = HideFlags.HideAndDontSave };
-                _ownsUberMaterial = true;
-                return true;
             }
-
-            if (resources.PostProcessUberShader == null)
+            else if (resources.PostProcessUberShader != null)
+            {
+                _uberMaterial = CoreUtils.CreateEngineMaterial(resources.PostProcessUberShader);
+            }
+            else
             {
                 Debug.LogError("Tsukuyomi Post Processing requires an Uber shader or material in TsukuyomiRenderPipelineResources.");
                 return false;
             }
 
-            _uberMaterial = CoreUtils.CreateEngineMaterial(resources.PostProcessUberShader);
-            _ownsUberMaterial = true;
+            _supportsOrderedComposite = _uberMaterial != null && _uberMaterial.HasProperty(TsukuyomiPostProcessPlan.OrderId);
             return _uberMaterial != null;
+        }
+
+        private Material ResolveCompositeMaterial(TsukuyomiPostProcessPlan plan)
+        {
+            if (_supportsOrderedComposite || plan.UsesLegacyOrder)
+                return _uberMaterial;
+
+            return GetPackageUberMaterial();
+        }
+
+        private Material GetPackageUberMaterial()
+        {
+            if (_packageFallback == null)
+            {
+                var shader = Shader.Find("Hidden/Tsukuyomi/Post Processing/UberPost");
+                if (shader == null)
+                    throw new InvalidOperationException("The Tsukuyomi UberPost shader is required for this Profile.");
+                _packageFallback = CoreUtils.CreateEngineMaterial(shader);
+            }
+            return _packageFallback;
         }
     }
 }

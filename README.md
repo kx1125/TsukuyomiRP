@@ -33,15 +33,29 @@ You can also add the package directly to your project's `Packages/manifest.json`
 
 ## Profile and Graph Editor
 
-New `TsukuyomiPipelineProfile` assets contain no effects. Open **Graph Editor** from the Profile Inspector, double-click the desired rendering stage to add a Pass, and click **Save & Apply**. The Profile Inspector then displays only the added nodes, with their Enabled switches and parameters. Graph Editor edits remain a draft until applied; reload a draft after external Profile changes to avoid overwriting them.
+New `TsukuyomiPipelineProfile` assets start empty. Open **Graph Editor** from the Profile Inspector, double-click a rendering stage to add a Pass, and click **Save & Apply**. Expand a stage in the Inspector to edit parameters, toggle Passes or drag them into order. The Graph Editor shows that order with numbered nodes and links.
+
+The Graph Editor refreshes a clean draft when the Profile changes externally. If the draft also has edits, the window keeps them and prompts you to reload before applying.
 
 Each RendererFeature owns its Pass runtime instances and camera resources. Passes prepare their settings in `PrepareRecording` and declare their dependencies and restoration steps; the Feature handles generic scheduling and lifecycle management. New Passes provide their own code and resources and are discovered automatically, without adding effect-specific fields or branches to the framework.
 
 Settings resolve from node defaults, then checked Volume fields, then explicit camera overrides. **Enabled is the master switch:** an absent or disabled node cannot be activated by Volume or camera API overrides.
 
+## Post-processing
+
+Enable **Post Processing** on the camera and add **Bloom**, **Diffusion** or **Tonemapping** to the **BeforePostProcess** stage. The final Uber draw blends the active effects in Profile order. To tune Diffusion, set **Intensity**, **Radius** and **Highlight Limit** on the node or in the **TsukuyomiRP/Postprocessing/Diffusion** Volume override.
+
+## Toon environment materials and object outlines
+
+Assign **TsukuyomiRP/Toon/EnvironmentCommon** to an environment material. The shader exposes toon shadow bands, specular and rim lighting. Its RMOE texture packs roughness, metallic, occlusion and emission mask into the R, G, B and A channels.
+
+For mesh outlines, add **ObjectOutlinePass** to **AfterOpaque** in the Profile Graph Editor and click **Save & Apply**. By default it draws opaque renderers on the selected layers whose material has an `ObjectOutline` LightMode pass. Set **Outline Color** and **Outline Width** on the material. Width is measured in pixels at 1080p. **Mesh Normal** uses the mesh normals. Choose **Vertex Color** for meshes with smooth tangent-space normals encoded in vertex RGB.
+
+Add **TsukuyomiRP/Object Outline** to a Volume to toggle the outline or set **Distance Fade Start** and **Distance Fade End** in world units. With no fade override, the material width applies at every distance.
+
 ## SceneScan rendering features
 
-SceneScan rendering is split into four independent effects. Add the corresponding Pass nodes in Graph Editor, then edit their parameters in the Profile Inspector or through the corresponding `TsukuyomiRP` Volume overrides.
+SceneScan provides four independent playback modules and an optional persistent outline. Add their nodes in Graph Editor and edit the settings in the Profile Inspector. All five nodes accept `TsukuyomiRP` Volume overrides.
 
 | Feature | Public Pass | Responsibility |
 | --- | --- | --- |
@@ -49,8 +63,9 @@ SceneScan rendering is split into four independent effects. Add the correspondin
 | ScanPostProcess | `TsukuyomiScanPostProcessPass` | Surface scan/grid, reveal, flash, voxel glitch, horizontal glitch and chromatic split |
 | XrayRender | `TsukuyomiXrayRenderPass` | Registered renderer masks, private target depth and highlights behind walls |
 | SpatialGridRender | `TsukuyomiSpatialGridRenderPass` | World-space lattice points and connecting lines |
+| Scene Outline | `SceneOutlinePass` | Persistent scene silhouettes and surface creases, with optional character exclusion |
 
-Enabling a SceneScan node in the Profile leaves it on standby. Start playback for a camera with `SetCameraEnabled(camera, true)` or turn on the corresponding Volume's `enable` override. Project code owns timing, curves and presets. Scan, voxel glitch, horizontal glitch and chromatic split have separate switches.
+**Scene Outline** draws when both its Profile node and the camera's **Post Processing** switch are enabled. Attach **Scene Outline Exclude** to a character root to exclude its visible renderers. The other four nodes start on standby. Start playback for a camera with `SetCameraEnabled(camera, true)` or turn on the corresponding Volume's `enable` override. Project code owns timing, curves and presets. Scan, voxel glitch, horizontal glitch and chromatic split have separate switches.
 
 ```csharp
 TsukuyomiScanPostProcessPass.SetCameraEnabled(camera, true);

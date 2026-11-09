@@ -1,5 +1,11 @@
 Shader "Hidden/Tsukuyomi/Post Processing/UberPost"
 {
+    Properties
+    {
+        [HideInInspector] _TsukuyomiPostOrder("Post-processing order", Vector) = (1, 2, 3, 0)
+        [HideInInspector] _TsukuyomiDiffusionHighlightLimit("Diffusion highlight limit", Float) = 1
+    }
+
     HLSLINCLUDE
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
@@ -11,7 +17,12 @@ Shader "Hidden/Tsukuyomi/Post Processing/UberPost"
         TEXTURE2D_X(_TsukuyomiBloomMipDown0);
         TEXTURE2D_X(_TsukuyomiBloomMipDown1);
         TEXTURE2D_X(_TsukuyomiBloomMipDown2);
+        TEXTURE2D_X(_TsukuyomiDiffusionTexture);
 
+        float _TsukuyomiDiffusionRadius;
+        float _TsukuyomiDiffusionHighlightLimit;
+        half _TsukuyomiDiffusionIntensity;
+        float4 _TsukuyomiPostOrder;
         float4 _TsukuyomiBloomParams; // x: threshold, y: lum range scale, z: prefilter scale, w: intensity
         float4 _TsukuyomiBloomColorTint;
         float2 _TsukuyomiBloomBlurScaler;
@@ -52,15 +63,15 @@ Shader "Hidden/Tsukuyomi/Post Processing/UberPost"
             return saturate(numerator / denominator);
         }
 
-        half3 TsukuyomiGranTurismoTonemap(half3 color)
+        half3 TsukuyomiGranTurismoTonemap(half3 color, float4 params0, float4 params1)
         {
             float3 x = max((float3)color, 0.0);
-            float P = max(_TsukuyomiToneMapParams0.x, 0.0001);
-            float a = max(_TsukuyomiToneMapParams0.y, 0.0001);
-            float m = max(_TsukuyomiToneMapParams0.z, 0.0001);
-            float l = _TsukuyomiToneMapParams0.w;
-            float c = max(_TsukuyomiToneMapParams1.x, 0.0001);
-            float b = _TsukuyomiToneMapParams1.y;
+            float P = max(params0.x, 0.0001);
+            float a = max(params0.y, 0.0001);
+            float m = max(params0.z, 0.0001);
+            float l = params0.w;
+            float c = max(params1.x, 0.0001);
+            float b = params1.y;
 
             float l0 = ((P - m) * l) / a;
             float L0 = m - m / a;
@@ -82,12 +93,11 @@ Shader "Hidden/Tsukuyomi/Post Processing/UberPost"
         half3 ApplyTsukuyomiTonemap(half3 color)
         {
         #if defined(_TSUKUYOMI_TONEMAP_GT)
-            return TsukuyomiGranTurismoTonemap(color);
+            return TsukuyomiGranTurismoTonemap(color, _TsukuyomiToneMapParams0, _TsukuyomiToneMapParams1);
         #elif defined(_TSUKUYOMI_TONEMAP_ACES_SIMPLE)
             return TsukuyomiAcesSimpleTonemap(color);
         #elif defined(_TSUKUYOMI_TONEMAP_ACES)
-            float3 aces = unity_to_ACES(color);
-            return saturate(AcesTonemap(aces));
+            return saturate(AcesTonemap(unity_to_ACES(color)));
         #elif defined(_TSUKUYOMI_TONEMAP_NEUTRAL)
             return saturate(NeutralTonemap(color));
         #else
@@ -103,11 +113,85 @@ Shader "Hidden/Tsukuyomi/Post Processing/UberPost"
 
         #if defined(_TSUKUYOMI_CUSTOM_BLOOM)
             half3 bloom = DecodeHDR(SAMPLE_TEXTURE2D_X(_TsukuyomiBloomTexture, sampler_LinearClamp, uv));
-            color.rgb += bloom * BloomIntensity;
         #endif
 
-            color.rgb = ApplyTsukuyomiTonemap(color.rgb);
+        #if defined(_TSUKUYOMI_DIFFUSION)
+            half3 blurred = SAMPLE_TEXTURE2D_X(_TsukuyomiDiffusionTexture, sampler_LinearClamp, uv).rgb;
+        #endif
+
+            // Zero is the default for materials invoking this pass directly.
+            int3 order = _TsukuyomiPostOrder.x > 0 ? (int3)_TsukuyomiPostOrder.xyz : int3(1, 2, 3);
+            UNITY_UNROLL
+            for (int i = 0; i < 3; ++i)
+            {
+            #if defined(_TSUKUYOMI_CUSTOM_BLOOM)
+                if (order[i] == 1) color.rgb += bloom * BloomIntensity;
+            #endif
+            #if defined(_TSUKUYOMI_DIFFUSION)
+                if (order[i] == 2) color.rgb = lerp(color.rgb, max(color.rgb, blurred), _TsukuyomiDiffusionIntensity);
+            #endif
+            #if defined(_TSUKUYOMI_TONEMAP_GT) || defined(_TSUKUYOMI_TONEMAP_ACES_SIMPLE) || defined(_TSUKUYOMI_TONEMAP_ACES) || defined(_TSUKUYOMI_TONEMAP_NEUTRAL)
+                UNITY_BRANCH if (order[i] == 3) color.rgb = ApplyTsukuyomiTonemap(color.rgb);
+            #endif
+            }
             return color;
+        }
+
+        float3 SampleDiffusion(float2 uv)
+        {
+            return SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv).rgb;
+        }
+
+        float3 SampleDiffusionDown(float2 uv, bool limitHighlights)
+        {
+            float3 color = SampleDiffusion(uv);
+            if (!limitHighlights)
+                return color;
+
+            // Limit each first-pass sample before averaging so a hot texel cannot flood the blur.
+            float peak = Max3(color.r, color.g, color.b);
+            float limit = max(_TsukuyomiDiffusionHighlightLimit, 0.01);
+            float knee = 0.75 * limit;
+            float headroom = limit - knee;
+            float excess = max(peak - knee, 0.0);
+            float compressed = knee + headroom * (excess / (headroom + excess));
+            return color * (compressed / max(peak, knee));
+        }
+
+        half4 DiffusionDown(Varyings input, bool limitHighlights)
+        {
+            UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+            float2 uv = UnityStereoTransformScreenSpaceTex(input.texcoord);
+            float2 d = _BlitTexture_TexelSize.xy * _TsukuyomiDiffusionRadius;
+            float3 sum = 4.0 * SampleDiffusionDown(uv, limitHighlights);
+            sum += SampleDiffusionDown(uv + d, limitHighlights) + SampleDiffusionDown(uv - d, limitHighlights);
+            sum += SampleDiffusionDown(uv + float2(d.x, -d.y), limitHighlights)
+                 + SampleDiffusionDown(uv + float2(-d.x, d.y), limitHighlights);
+            return half4(sum * 0.125, 1.0);
+        }
+
+        half4 FragDiffusionPrefilter(Varyings input) : SV_Target
+        {
+            return DiffusionDown(input, true);
+        }
+
+        half4 FragDiffusionDown(Varyings input) : SV_Target
+        {
+            return DiffusionDown(input, false);
+        }
+
+        half4 FragDiffusionUp(Varyings input) : SV_Target
+        {
+            UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+            float2 uv = UnityStereoTransformScreenSpaceTex(input.texcoord);
+            float2 d = _BlitTexture_TexelSize.xy * _TsukuyomiDiffusionRadius;
+            float3 axes = SampleDiffusion(uv + float2(d.x, 0)) + SampleDiffusion(uv - float2(d.x, 0))
+                        + SampleDiffusion(uv + float2(0, d.y)) + SampleDiffusion(uv - float2(0, d.y));
+            float2 diagonal = d * 0.5;
+            float3 corners = SampleDiffusion(uv + diagonal) + SampleDiffusion(uv - diagonal)
+                           + SampleDiffusion(uv + float2(diagonal.x, -diagonal.y))
+                           + SampleDiffusion(uv + float2(-diagonal.x, diagonal.y));
+            return half4((axes + 2.0 * corners) * (1.0 / 12.0), 1.0);
         }
 
         half4 FragBloomPrefilter(Varyings input) : SV_Target
@@ -258,6 +342,7 @@ Shader "Hidden/Tsukuyomi/Post Processing/UberPost"
                 #pragma vertex Vert
                 #pragma fragment FragUber
                 #pragma multi_compile_local_fragment _ _TSUKUYOMI_CUSTOM_BLOOM
+                #pragma multi_compile_local_fragment _ _TSUKUYOMI_DIFFUSION
                 #pragma multi_compile_local_fragment _ _TSUKUYOMI_TONEMAP_NEUTRAL _TSUKUYOMI_TONEMAP_ACES _TSUKUYOMI_TONEMAP_ACES_SIMPLE _TSUKUYOMI_TONEMAP_GT
             ENDHLSL
         }
@@ -331,5 +416,33 @@ Shader "Hidden/Tsukuyomi/Post Processing/UberPost"
                 #pragma fragment FragBloomCombine
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "Diffusion Downsample"
+            HLSLPROGRAM
+                #pragma vertex Vert
+                #pragma fragment FragDiffusionDown
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Diffusion Upsample"
+            HLSLPROGRAM
+                #pragma vertex Vert
+                #pragma fragment FragDiffusionUp
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Diffusion Prefilter"
+            HLSLPROGRAM
+                #pragma vertex Vert
+                #pragma fragment FragDiffusionPrefilter
+            ENDHLSL
+        }
+
     }
 }

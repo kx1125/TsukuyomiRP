@@ -92,6 +92,7 @@ namespace Tsukuyomi.Rendering
         [Header("Scene Scan")]
         [SerializeField]
         private Shader scanMainShader;
+        [SerializeField] private ComputeShader sceneOutlineTemporalShader;
         [SerializeField] private Shader scanTargetMaskShader;
         [SerializeField] private Shader scanGridShader;
         [SerializeField] private Shader scanGlitchShader;
@@ -137,6 +138,7 @@ namespace Tsukuyomi.Rendering
         public Shader PostProcessUberShader => postProcessUberShader;
         public Material PostProcessUberMaterial => postProcessUberMaterial;
         public Shader ScanMainShader => scanMainShader;
+        public ComputeShader SceneOutlineTemporalShader => sceneOutlineTemporalShader;
         public Shader ScanTargetMaskShader => scanTargetMaskShader;
         public Shader ScanGridShader => scanGridShader;
         public Shader ScanGlitchShader => scanGlitchShader;

@@ -4,11 +4,13 @@
 
 `TsukuyomiFeature` 只负责配置同步、相机准备、运行时生命周期和计划入队。所有效果来自 `TsukuyomiPipelineProfile.Passes`；Profile 只保存节点配置和布局，没有效果专用字段或固定装配路径。
 
-新建 Profile 默认没有效果。在 Inspector 打开 Graph Editor，双击渲染阶段，在菜单中添加Pass，然后点击 **Save & Apply**。Profile Inspector 只显示已添加节点的 Enabled 和参数。节点按阶段内纵向位置排序；复制会生成新 ID。自动生产者和恢复 Pass 可在节点参数下的 **Compiled passes and dependencies** 中查看。
+新建 Profile 默认没有效果。在 Inspector 打开 Graph Editor，双击渲染阶段，在菜单中添加 Pass，然后点击 **Save & Apply**。Profile Inspector 按插入节点分组。展开分组后，拖动 Pass 左侧的手柄即可调整组内顺序，也可以展开单个 Pass 编辑参数或切换 Enabled。
 
-Graph Editor 编辑的是草稿。修改 Inspector 后，已有草稿必须 Reload，不能覆盖外部新配置。Undo/Redo、复制和重新打开通过稳定 NodeId 对应参数。缺失Pass类型时禁止应用和迁移，先恢复程序集，避免丢失序列化数据。
+Graph Editor 的阶段详情用编号和从上到下的连线表示同一组顺序。上下移动节点会更新编号和连线，点击 **Save & Apply** 将新顺序写回 Profile。实际调度先满足渲染事件和依赖，再采用组内顺序。可以在节点的 **Compiled passes and dependencies** 下查看运行时拆分出的 Pass 及其依赖。
 
-选中节点后可直接编辑参数及 Enabled；编辑只改变草稿，点击 **Save & Apply** 才写入 Profile 并生效。保存会提交当前输入框尚未提交的值，Profile Inspector 随后显示新配置。展开参数面板不会标记配置修改。若 Profile Inspector 已有新修改，保存会提示 Reload 并保留双方数据，不会用旧草稿覆盖它。
+Graph Editor 编辑的是草稿。修改 Inspector 后，未编辑的图会自动刷新。若图中有未应用的编辑，窗口会保留草稿并提示 **Reload**。撤销、重做和重新打开时，编辑器通过 NodeId 关联参数。复制 Pass 会生成新的 NodeId。缺失 Pass 类型时请先恢复程序集，以保留序列化数据。
+
+选中节点后可直接编辑参数及 Enabled。点击 **Save & Apply** 会提交当前输入框的值并将草稿写入 Profile，Inspector 随后显示新配置。仅展开参数面板不会标记配置修改。
 
 **Enabled 是装配总开关。** 未添加或关闭节点不会创建其运行时，也不会参与依赖请求。Volume 和静态相机 API 只能控制已启用节点。参数顺序为节点默认值、有效 Volume override、显式相机覆盖。运行时修改节点参数后调用 `profile.NotifyChanged()`；总开关也可用 `profile.SetNodeEnabled(id, enabled)`。
 
@@ -108,7 +110,11 @@ Profile 中的实例是配置模板；PassSession 克隆 Profile 后才创建计
 
 ## RenderGraph 录制
 
-优先使用现有 `RasterPass`、`ComputePass`、`UnsafePass`、`PostPass`、`GraphFeaturePass` 封装。`GraphFeaturePass` 适合一个效果中的多节点算法，多个跨阶段工作则用 Build 声明多个计划项。
+同一效果在同一注入点连续执行、只交换私有中间结果的步骤，应录成一个以效果命名的 RenderGraph Pass。Frame Debugger 中只显示一个效果阶段，展开后仍可检查各次 Dispatch 或 Draw。纯计算用一个 Compute Pass，按数据依赖顺序提交各个 kernel。私有临时纹理用 `Builder.CreateTransientTexture`，前后帧历史和其他 Pass 消费的输出要显式声明读写。例如 `Tsukuyomi Scene Outline Temporal Coverage` 在一个 Compute Pass 内依次清理、重投影和解析历史，首次写入历史只执行 Seed。
+
+优先使用现有 `RasterPass`、`ComputePass`、`UnsafePass`、`PostPass`、`GraphFeaturePass` 封装。遇到不同注入点、独立光栅附件、跨队列同步或其他效果需要消费的输出时可以拆分，使用 `Build` 和资源声明表达边界。多个效果共用的颜色合成只录制一次。若同一效果需要连续的 Compute 和 Raster Pass，可在 Frame Debugger 抓帧时用 `RenderGraphProfilingScope` 将二者收进同一个父节点。例如常驻描边可见时，`Tsukuyomi Scene Outline` 包含时域覆盖率计算和共享颜色合成；单独播放扫描时，颜色合成仍以自己的名称显示。
+
+需要出现在透明物体下方、又不能进入 `_CameraOpaqueTexture` 的颜色效果，应放在 `RenderPassEvent.BeforeRenderingTransparents`。当前 URP 在录制这个事件前执行 CopyColor，减一会落入 CopyColor 之前的天空盒事件区间。验证时开启 Opaque Texture，分别检查不透明纹理与最终颜色。
 
 通过 TextureSlot/BufferSlot 声明资源读写；使用 ContextItem 或Pass自己的资源对象共享当次相机调用的数据，禁止缓存 TextureHandle 到下一帧。需要颜色采样时声明 ActiveColor 读取和 intermediate target，避免采样 backbuffer。
 
@@ -147,10 +153,10 @@ URP 会按相机渲染调用交换 History 缓冲；同帧重复渲染不能简�
 - 内置效果不再通过独立 Runtime 类转发准备调用。PCSS、Per Object Shadow、FSR3 和 Neural Rendering 由配置 Pass 自己实现 `Build`、`PrepareRecording` 和清理；其他效果的配置与录制实现位于同一个效果文件，原有序列化类型和字段保留。
 - Depth Pyramid 由 GTAO/SSGI 请求，同相机、同兼容条件合并；无消费者不运行。
 - Contact Shadow 节点包含生成和可选降噪；PCSS 与 Per Object Shadow 是独立节点，共享辅助阴影合成。
-- VoxelTransition、ScanPostProcess、XrayRender、SpatialGridRender 是四个节点。公共排除 Mask 可以独立执行，不会因此打开 Xray 高亮。
+- VoxelTransition、ScanPostProcess、XrayRender 和 SpatialGridRender 是四个播放节点。公共排除 Mask 可独立于 Xray 高亮执行。可选的 Scene Outline 节点在相机开启后处理时绘制常驻描边，并与表面扫描共用颜色合成。
 - SceneEffectPass 只装配这些节点的共享执行计划。各录制 Pass 独立准备自己的设置和材质；排除 Mask 的消费者状态在所有准备完成后通过 `ResolveResources` 汇总。共享合成 Pass 拥有未单独排程的 Scan 参数控制器，并负责调用其准备和清理；静态相机 API 的名称保持兼容。
-- Bloom 与 Tonemapping 是独立节点。相邻且顺序为 Bloom → Tonemapping 时，后处理模块合并 Uber 绘制；反序或插入其他效果时分别绘制。新后处理可以独立实现，不必修改 Uber Shader。
-- Bloom、Tonemapping 的参数和材质由各自 Pass 的 `PrepareRecording` 准备；共享后处理 Pass 只组合已准备的输出，并持有自己的 Uber 材质，不再代替各效果解析参数或释放其资源。
+- Bloom、Diffusion 和 Tonemapping 各自在 `PrepareRecording` 解析参数，每种节点在一个 Profile 中只允许添加一次。旧 Profile 中有同类重复节点时，运行时使用列表中的第一个，并记录警告。
+- Bloom 和 Diffusion 从同一份场景颜色生成各自的模糊纹理。共享后处理 Pass 在该注入点末尾用一次 Uber 绘制，按 Profile 顺序合成各效果。自定义 Uber 材质通过 `_TsukuyomiPostOrder` 接收顺序。遇到旧材质无法表达的顺序时，最终合成使用包内的 Uber 材质。
 - FSR3 主超分由 URP UpscalerRegistry 管理；Profile 中的 FSR3 Pass只提供辅助 Mask。第一人称绘制信息通过 `IRenderMaskViewProvider` 提供，支持多个有效提供者。
 - DLSS Neural Rendering 由 Profile 节点管理，后端能力和 Volume 决定是否运行。编译通过不能代替 DLSS 实机验证。
 

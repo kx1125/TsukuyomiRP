@@ -76,8 +76,10 @@ namespace Tsukuyomi.Rendering
         }
         public override void Initialize() { InitializeKeywords(); MainLightShadowKeywordsRestorePass.InitializeKeywords(); }
         public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
-            => _prepared = !context.Frame.CameraData.isPreviewCamera
+        {
+            _prepared = context.AllowsPostProcessing
                 && Configure(_defaults, context.Volumes?.GetComponent<TsukuyomiVolumeLightVolume>());
+        }
         public override void Deactivate(Camera camera) => _prepared = false;
 
         private const int DownsampleDepthPass = 0;

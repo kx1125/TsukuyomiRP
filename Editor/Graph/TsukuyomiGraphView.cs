@@ -75,6 +75,7 @@ namespace Tsukuyomi.Rendering.Editor
             };
 
             serializeGraphElements = SerializePassElements;
+            canPasteSerializedData = CanPastePassElements;
             unserializeAndPaste = PastePassElements;
         }
 
@@ -114,11 +115,21 @@ namespace Tsukuyomi.Rendering.Editor
 
         public void ClearGraph()
         {
-            var edgesToRemove = edges.ToList();
-            foreach (var edge in edgesToRemove) RemoveElement(edge);
-
+            ClearEdges();
             var elementsToRemove = graphElements.ToList();
             foreach (var element in elementsToRemove) RemoveElement(element);
+        }
+
+        private void ClearEdges()
+        {
+            foreach (var edge in edges.ToList())
+            {
+                edge.output?.Disconnect(edge);
+                edge.input?.Disconnect(edge);
+                edge.output = null;
+                edge.input = null;
+                RemoveElement(edge);
+            }
         }
 
         private void OnContextualMenu(ContextualMenuPopulateEvent evt)
@@ -161,7 +172,11 @@ namespace Tsukuyomi.Rendering.Editor
             bool convertMousePosition,
             RenderPassBase passInstance = null, bool notifyAdded = false)
         {
-            if (convertMousePosition || notifyAdded) OnBeforeGraphChanged?.Invoke();
+            bool adding = convertMousePosition || notifyAdded;
+            if (adding && CanAddType != null && !CanAddType(type))
+                return null;
+            if (adding)
+                OnBeforeGraphChanged?.Invoke();
             var node = new TsukuyomiPassNode(type, passInstance);
             if (CurrentDetailPoint.HasValue) node.PassInstance.InjectionPoint = CurrentDetailPoint.Value;
             if (convertMousePosition || notifyAdded) OnPassAdded?.Invoke(node.PassInstance);
@@ -196,9 +211,25 @@ namespace Tsukuyomi.Rendering.Editor
             }
         }
 
+        internal void ConnectPassesInOrder(IReadOnlyList<TsukuyomiPassNode> ordered)
+        {
+            ClearEdges();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var node = ordered[i];
+                node.title = $"{i + 1}. {node.PassInstance.Name}";
+                if (i == 0) continue;
+                var edge = ordered[i - 1].OrderOutput.ConnectTo(node.OrderInput);
+                edge.capabilities &= ~(Capabilities.Selectable | Capabilities.Deletable);
+                edge.pickingMode = edge.edgeControl.pickingMode = PickingMode.Ignore;
+                AddElement(edge);
+            }
+        }
+
         public override List<Port> GetCompatiblePorts(Port startPort, NodeAdapter nodeAdapter)
         {
             var compatiblePorts = new List<Port>();
+            if (CurrentDetailPoint.HasValue) return compatiblePorts;
             ports.ForEach((port) =>
             {
                 if (startPort != port && startPort.node != port.node && startPort.direction != port.direction)
@@ -224,29 +255,52 @@ namespace Tsukuyomi.Rendering.Editor
             return clipboard.Passes.Count > 0 ? JsonUtility.ToJson(clipboard) : string.Empty;
         }
 
+        private static ClipboardData ReadClipboard(string data)
+        {
+            if (string.IsNullOrWhiteSpace(data) || !data.TrimStart().StartsWith("{", StringComparison.Ordinal))
+                return null;
+            try
+            {
+                return JsonUtility.FromJson<ClipboardData>(data);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+
+        private Type PasteableType(ClipboardPassData entry)
+        {
+            if (!CurrentDetailPoint.HasValue || string.IsNullOrEmpty(entry?.TypeName))
+                return null;
+
+            Type type = Type.GetType(entry.TypeName);
+            if (type == null || !typeof(RenderPassBase).IsAssignableFrom(type) || type.IsAbstract
+                || type.ContainsGenericParameters || type.GetConstructor(Type.EmptyTypes) == null
+                || !PassEditorTypes.CanRunInPlayer(type))
+                return null;
+
+            bool supportsPoint = type.GetCustomAttributes<InjectionPointAttribute>(true)
+                .Any(attribute => attribute.Point == CurrentDetailPoint.Value);
+            return supportsPoint && (CanAddType == null || CanAddType(type)) ? type : null;
+        }
+
+        private bool CanPastePassElements(string data)
+        {
+            return CurrentDetailPoint.HasValue && ReadClipboard(data)?.Passes?.Any(p => PasteableType(p) != null) == true;
+        }
+
         private void PastePassElements(string operationName, string data)
         {
-            if (!CurrentDetailPoint.HasValue || string.IsNullOrEmpty(data))
+            var clipboard = ReadClipboard(data);
+            if (!CurrentDetailPoint.HasValue || clipboard?.Passes == null)
                 return;
 
-            ClipboardData clipboard = JsonUtility.FromJson<ClipboardData>(data);
-            if (clipboard?.Passes == null)
-                return;
-
-            ClearSelection();
             foreach (ClipboardPassData passData in clipboard.Passes)
             {
-                Type type = Type.GetType(passData.TypeName);
-                if (type == null || !typeof(RenderPassBase).IsAssignableFrom(type) || type.IsAbstract
-                    || !PassEditorTypes.CanRunInPlayer(type))
+                Type type = PasteableType(passData);
+                if (type == null)
                     continue;
-
-                bool supportsPoint = type.GetCustomAttributes<InjectionPointAttribute>(true)
-                    .Any(attribute => attribute.Point == CurrentDetailPoint.Value);
-                if (!supportsPoint)
-                    continue;
-
-                if (CanAddType != null && !CanAddType(type)) continue;
                 var pass = (RenderPassBase)Activator.CreateInstance(type);
                 JsonUtility.FromJsonOverwrite(passData.PassJson, pass);
                 pass.RenewNodeId();
@@ -256,10 +310,9 @@ namespace Tsukuyomi.Rendering.Editor
                     passData.Position + new Vector2(30.0f, 30.0f),
                     false,
                     pass, true);
-                AddToSelection(node);
+                if (node != null)
+                    AddToSelection(node);
             }
-
-            OnGraphChanged?.Invoke();
         }
 
         private static string GetPassCategory(Type type)

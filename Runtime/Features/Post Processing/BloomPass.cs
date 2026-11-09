@@ -42,6 +42,8 @@ namespace Tsukuyomi.Rendering
         private const int CombinePass = 7;
         private const string BloomKeyword = "_TSUKUYOMI_CUSTOM_BLOOM";
 
+        private static readonly int BlitTextureId = Shader.PropertyToID("_BlitTexture");
+        private static readonly int BlitScaleBiasId = Shader.PropertyToID("_BlitScaleBias");
         private static readonly int BloomParamsId = Shader.PropertyToID("_TsukuyomiBloomParams");
         private static readonly int BloomColorTintId = Shader.PropertyToID("_TsukuyomiBloomColorTint");
         private static readonly int BloomBlurScalerId = Shader.PropertyToID("_TsukuyomiBloomBlurScaler");
@@ -82,58 +84,59 @@ namespace Tsukuyomi.Rendering
             public TsukuyomiCustomBloomResolvedSettings Settings;
             public readonly TextureHandle[] MipUp = new TextureHandle[Iterations];
             public readonly TextureHandle[] MipDown = new TextureHandle[Iterations];
+
+            private void Draw(UnsafeGraphContext context, MaterialPropertyBlock properties,
+                TextureHandle source, TextureHandle destination, int shaderPass)
+            {
+                properties.SetTexture(BlitTextureId, source);
+                context.cmd.SetRenderTarget(destination, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
+                context.cmd.DrawProcedural(Matrix4x4.identity, Material, shaderPass, MeshTopology.Triangles, 3, 1, properties);
+            }
+
             public void Execute(UnsafeGraphContext graphContext)
             {
-                Vector4 scaleBias = new(1.0f, 1.0f, 0.0f, 0.0f);
+                var properties = graphContext.renderGraphPool.GetTempMaterialPropertyBlock();
+                var horizontal = new Vector4(1f, 0f, 0f, 0f);
+                var vertical = new Vector4(0f, 1f, 0f, 0f);
+                properties.SetVector(BlitScaleBiasId, new Vector4(1f, 1f, 0f, 0f));
+                properties.SetVector(BloomParamsId, Settings.Params);
+                properties.SetVector(BloomBlurCompositeWeightId, Settings.BlurCompositeWeight);
+                properties.SetColor(BloomColorTintId, Settings.Tint);
+                Draw(graphContext, properties, Source, Prefilter, PrefilterPass);
 
-                Material.SetVector(BloomParamsId, Settings.Params);
-                Material.SetVector(BloomBlurCompositeWeightId, Settings.BlurCompositeWeight);
-                Material.SetColor(BloomColorTintId, Settings.Tint);
-
-                graphContext.cmd.SetRenderTarget(Prefilter, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                Blitter.BlitTexture(graphContext.cmd, Source, scaleBias, Material, PrefilterPass);
-
-                graphContext.cmd.SetGlobalVector(BloomBlurScalerId, new Vector4(1.0f, 0.0f, 0.0f, 0.0f));
-                graphContext.cmd.SetRenderTarget(PrefilterBlur, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                Blitter.BlitTexture(graphContext.cmd, Prefilter, scaleBias, Material, PreBlurPass);
-
-                graphContext.cmd.SetGlobalVector(BloomBlurScalerId, new Vector4(0.0f, 1.0f, 0.0f, 0.0f));
-                graphContext.cmd.SetRenderTarget(Prefilter, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                Blitter.BlitTexture(graphContext.cmd, PrefilterBlur, scaleBias, Material, PreBlurPass);
+                properties.SetVector(BloomBlurScalerId, horizontal);
+                Draw(graphContext, properties, Prefilter, PrefilterBlur, PreBlurPass);
+                properties.SetVector(BloomBlurScalerId, vertical);
+                Draw(graphContext, properties, PrefilterBlur, Prefilter, PreBlurPass);
 
                 TextureHandle last = Prefilter;
                 for (int level = 0; level < Iterations; level++)
                 {
-                    graphContext.cmd.SetRenderTarget(MipDown[level], RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                    Blitter.BlitTexture(graphContext.cmd, last, scaleBias, Material, DownsamplePass);
+                    Draw(graphContext, properties, last, MipDown[level], DownsamplePass);
                     last = MipDown[level];
                 }
 
                 for (int level = 0; level < Iterations; level++)
                 {
                     int passIndex = FirstMipBlurPass + level;
-                    graphContext.cmd.SetGlobalVector(BloomBlurScalerId, new Vector4(1.0f, 0.0f, 0.0f, 0.0f));
-                    graphContext.cmd.SetRenderTarget(MipUp[level], RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                    Blitter.BlitTexture(graphContext.cmd, MipDown[level], scaleBias, Material, passIndex);
-
-                    graphContext.cmd.SetGlobalVector(BloomBlurScalerId, new Vector4(0.0f, 1.0f, 0.0f, 0.0f));
-                    graphContext.cmd.SetRenderTarget(MipDown[level], RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                    Blitter.BlitTexture(graphContext.cmd, MipUp[level], scaleBias, Material, passIndex);
+                    properties.SetVector(BloomBlurScalerId, horizontal);
+                    Draw(graphContext, properties, MipDown[level], MipUp[level], passIndex);
+                    properties.SetVector(BloomBlurScalerId, vertical);
+                    Draw(graphContext, properties, MipUp[level], MipDown[level], passIndex);
                 }
 
                 for (int level = 0; level < Iterations; level++)
-                    graphContext.cmd.SetGlobalTexture(BloomMipDownIds[level], MipDown[level]);
+                    properties.SetTexture(BloomMipDownIds[level], MipDown[level]);
 
-                graphContext.cmd.SetRenderTarget(PrefilterBlur, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                Blitter.BlitTexture(graphContext.cmd, Prefilter, scaleBias, Material, CombinePass);
+                Draw(graphContext, properties, Prefilter, PrefilterBlur, CombinePass);
             }
-
         }
 
         private sealed class UberData : TsukuyomiPostProcessData
         {
             public TextureHandle Output;
             public TsukuyomiCustomBloomResolvedSettings Settings;
+            public override PostBlendKind Kind => PostBlendKind.Bloom;
             public override void SetupUber(UnsafeGraphContext graphContext, Material material)
             {
                 graphContext.cmd.SetGlobalTexture(BloomTextureId, Output);
@@ -169,7 +172,6 @@ namespace Tsukuyomi.Rendering
             using var node = graph.AddUnsafe<RenderData>(Name, _sampler);
             var data = node.Data;
             node.ReadTexture(source);
-            node.Builder.AllowGlobalStateModification(true);
             var resources = node.Resources;
             RenderTextureDescriptor cameraDescriptor = graph.CameraData.cameraTargetDescriptor;
             int width = Mathf.Max(1, cameraDescriptor.width / 4);

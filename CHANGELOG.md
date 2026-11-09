@@ -2,6 +2,28 @@
 
 All notable changes to this package are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Added the `TsukuyomiRP/Toon/EnvironmentCommon` shader for environment materials, with toon shadow bands, highlights and rim lighting.
+- Added `ObjectOutlinePass` to draw material outlines against camera depth after opaques. Materials control line color, width and the extrusion normal. The Object Outline Volume controls visibility and distance fade.
+- Scene Scan can draw persistent silhouettes and surface creases through its existing color composite. Add the Scene Outline Profile node to enable it and attach Scene Outline Exclude to character roots to omit their outlines. Volume overrides control line color, opacity, width and edge thresholds.
+- Scene Outline now stabilizes distant edges on cameras using Tsukuyomi DLSS or FSR3. The node's Temporal Stability switch controls per-camera coverage history for both the base and scan outlines.
+- Added a Diffusion post-process node with Profile and Volume controls for intensity, blur radius and the HDR highlight limit used by the blur.
+
+### Changed
+
+- The Profile Inspector groups Passes by injection point and supports drag reordering within each stage. The Graph Editor shows the same order with numbered nodes and links.
+- Bloom, Diffusion and Tonemapping share one final Uber draw per injection point. Bloom and Diffusion build their blur textures from the same scene color, and the draw blends active effects in Profile order.
+- Each Profile accepts one node of each built-in post-process type. For older Profiles with duplicates, the runtime uses the first node of that type and logs a warning.
+
+### Fixed
+
+- Contact Shadow, GTAO, SSGI, Volume Light and the built-in post-process nodes now respect the camera's Post Processing switch.
+- URP copies the opaque color before the scene outline or surface scan draws. Transparent materials sample the scene before outlines, while FSR3's optional opaque capture includes the composited color for its reactive mask.
+- The Graph Editor reloads external Profile edits when its draft is clean and preserves pending edits when both have changed. Pasting checks the node type, rendering stage and per-Profile limits.
+
 ## [0.3.1] - 2026-11-04
 
 ### Fixed

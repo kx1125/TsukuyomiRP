@@ -39,9 +39,7 @@ namespace Tsukuyomi.Rendering
         {
             TextureHandle activeColor = context.Resources.ActiveColor;
             Camera camera = context.CameraData.camera;
-            if (!activeColor.IsValid()
-                || !camera
-                || !camera.TryGetCullingParameters(out ScriptableCullingParameters cullingParameters))
+            if (!activeColor.IsValid() || !camera)
             {
                 return;
             }
@@ -62,15 +60,30 @@ namespace Tsukuyomi.Rendering
             Vector3 renderCameraPosition = _renderObjectContext.CameraPosition;
             Rect renderViewport = _renderObjectContext.Viewport;
 
-            cullingParameters.cullingMatrix = renderProjection * renderView;
-            cullingParameters.origin = renderCameraPosition;
-            cullingParameters.cullingMask = unchecked((uint)CullingMask.value);
-            if (!UseOcclusionCulling)
-                cullingParameters.cullingOptions &= ~CullingOptions.OcclusionCull;
-
-            CullContextData cullContext = context.FrameData.Get<CullContextData>();
-            CullingResults cullingResults = cullContext.Cull(ref cullingParameters);
             UniversalRenderingData renderingData = context.FrameData.Get<UniversalRenderingData>();
+            bool usesCameraView = _renderObjectContext.UsesCameraView;
+            CullingResults cullingResults = renderingData.cullResults;
+            TextureHandle depthTexture = context.Resources.ActiveDepth;
+            if (usesCameraView)
+            {
+                if (!depthTexture.IsValid())
+                    return;
+            }
+            else
+            {
+                if (!camera.TryGetCullingParameters(out ScriptableCullingParameters cullingParameters))
+                    return;
+
+                cullingParameters.cullingMatrix = renderProjection * renderView;
+                cullingParameters.origin = renderCameraPosition;
+                cullingParameters.cullingMask = unchecked((uint)CullingMask.value);
+                if (!UseOcclusionCulling)
+                    cullingParameters.cullingOptions &= ~CullingOptions.OcclusionCull;
+
+                CullContextData cullContext = context.FrameData.Get<CullContextData>();
+                cullingResults = cullContext.Cull(ref cullingParameters);
+                depthTexture = context.RenderGraph.CreateTexture(CreateDepthDesc(cameraDescriptor));
+            }
 
             RendererListHandle opaqueRendererList = default;
             RendererListHandle transparentRendererList = default;
@@ -98,15 +111,20 @@ namespace Tsukuyomi.Rendering
                     SortingCriteria.CommonTransparent);
             }
 
-            TextureHandle depthTexture = context.RenderGraph.CreateTexture(CreateDepthDesc(cameraDescriptor));
-            context.Builder.UseAllGlobalTextures(true);
             context.Builder.SetRenderAttachment(activeColor, 0, AccessFlags.ReadWrite);
-            context.Builder.SetRenderAttachmentDepth(depthTexture, AccessFlags.Write);
+            context.Builder.SetRenderAttachmentDepth(depthTexture, usesCameraView ? AccessFlags.ReadWrite : AccessFlags.Write);
             if (RenderOpaque)
                 context.Builder.UseRendererList(opaqueRendererList);
             if (RenderTransparent)
                 context.Builder.UseRendererList(transparentRendererList);
 
+            if (usesCameraView)
+            {
+                RecordCameraDraw(context, opaqueRendererList, transparentRendererList);
+                return;
+            }
+
+            context.Builder.UseAllGlobalTextures(true);
             UniversalResourceData resourceData = context.FrameData.Get<UniversalResourceData>();
             if (resourceData.mainShadowsTexture.IsValid())
                 context.Builder.UseTexture(resourceData.mainShadowsTexture, AccessFlags.Read);
@@ -127,10 +145,7 @@ namespace Tsukuyomi.Rendering
                 graphContext.cmd.ClearRenderTarget(true, false, Color.clear);
                 graphContext.cmd.SetViewProjectionMatrices(renderView, renderProjection);
                 graphContext.cmd.SetGlobalVector(WorldSpaceCameraPosId, renderCameraPosition);
-                if (RenderOpaque)
-                    graphContext.cmd.DrawRendererList(opaqueRendererList);
-                if (RenderTransparent)
-                    graphContext.cmd.DrawRendererList(transparentRendererList);
+                DrawRendererLists(graphContext, opaqueRendererList, transparentRendererList);
                 graphContext.cmd.SetGlobalVector(WorldSpaceCameraPosId, cameraPosition);
                 graphContext.cmd.SetViewProjectionMatrices(cameraView, cameraProjection);
                 graphContext.cmd.SetViewport(cameraViewport);
@@ -138,6 +153,22 @@ namespace Tsukuyomi.Rendering
         }
 
         protected abstract bool Render(RenderObjectContext ctx);
+
+        protected virtual void RecordCameraDraw(in RasterPassContext context, RendererListHandle opaque, RendererListHandle transparent)
+        {
+            context.SetRenderFunc((data, graphContext) =>
+            {
+                DrawRendererLists(graphContext, opaque, transparent);
+            });
+        }
+
+        protected static void DrawRendererLists(RasterGraphContext context, RendererListHandle opaque, RendererListHandle transparent)
+        {
+            if (opaque.IsValid())
+                context.cmd.DrawRendererList(opaque);
+            if (transparent.IsValid())
+                context.cmd.DrawRendererList(transparent);
+        }
 
         protected virtual bool IsCameraSupported(in FrameContext frame) => true;
 

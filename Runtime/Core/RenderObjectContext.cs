@@ -12,6 +12,7 @@ namespace Tsukuyomi.Rendering
         public float Aspect => (float)Width / Height;
 
         internal bool HasView { get; private set; }
+        internal bool UsesCameraView { get; private set; }
         internal Matrix4x4 ViewMatrix { get; private set; }
         internal Matrix4x4 ProjectionMatrix { get; private set; }
         internal Vector3 CameraPosition { get; private set; }
@@ -25,6 +26,14 @@ namespace Tsukuyomi.Rendering
             Width = width;
             Height = height;
             HasView = false;
+            UsesCameraView = false;
+        }
+
+        // Draw with URP's camera cull results, active depth and current GPU matrices.
+        public void UseCameraView()
+        {
+            SetViewProjectionMatrices(CameraData.GetViewMatrix(), CameraData.GetProjectionMatrix(), CameraData.worldSpaceCameraPos);
+            UsesCameraView = true;
         }
 
         public void SetViewProjectionMatrices(
@@ -50,6 +59,7 @@ namespace Tsukuyomi.Rendering
             CameraPosition = cameraPosition;
             Viewport = viewport;
             HasView = true;
+            UsesCameraView = false;
         }
     }
 }

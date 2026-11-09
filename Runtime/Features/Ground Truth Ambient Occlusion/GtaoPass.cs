@@ -61,8 +61,10 @@ namespace Tsukuyomi.Rendering
         }
         public override void Initialize() => InitializeKeywords();
         public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
-            => _prepared = !context.Frame.CameraData.isPreviewCamera
+        {
+            _prepared = context.AllowsPostProcessing
                 && Configure(_defaults, context.Volumes?.GetComponent<TsukuyomiGroundTruthAmbientOcclusionVolume>());
+        }
         public override void Deactivate(Camera camera)
         { _prepared = false; Shader.DisableKeyword("_SCREEN_SPACE_OCCLUSION"); Shader.SetGlobalTexture("_ScreenSpaceOcclusionTexture", Texture2D.whiteTexture); }
 

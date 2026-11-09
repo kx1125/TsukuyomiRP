@@ -60,7 +60,15 @@ namespace Tsukuyomi.Rendering
                     if (string.IsNullOrEmpty(definition.NodeId) || !ids.Add(definition.NodeId))
                     { _errors.Add($"{definition.Name}: missing or duplicate node ID."); continue; }
                     if (!definition.AllowMultiple && !singletons.Add(definition.GetType()))
-                    { _errors.Add($"{definition.Name}: this pass allows only one node per Profile."); continue; }
+                    {
+                        string message = $"{definition.Name}: this pass allows only one node per Profile.";
+                        // Older Profiles could serialize several post nodes of the same type.
+                        if (initialize && definition is PostProcessPassDefinition)
+                            Debug.LogWarning($"{message} Using the first node in '{profile.name}'.", profile);
+                        else
+                            _errors.Add(message);
+                        continue;
+                    }
                     if (definition is not LegacyPassDefinition)
                     {
                         var allowed = definition.GetType().GetCustomAttributes<InjectionPointAttribute>(true);

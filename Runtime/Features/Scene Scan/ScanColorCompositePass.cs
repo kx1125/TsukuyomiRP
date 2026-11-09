@@ -9,47 +9,61 @@ namespace Tsukuyomi.Rendering
     // Shared color composition contains no timers, controller discovery or gameplay classification.
     internal sealed class ScanColorCompositePass : GraphFeaturePass, System.IDisposable
     {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static readonly ProfilingSampler OutlineSampler = new("Tsukuyomi Scene Outline");
+#endif
         private readonly TsukuyomiVoxelTransitionPass _opening;
         private readonly TsukuyomiScanPostProcessPass _post;
         private readonly TsukuyomiXrayRenderPass _xray;
+        private readonly bool _hasOutline;
         private readonly TextureSlot _source = TextureSlot.Read("Effect Source", BuiltinTexture.ActiveColor);
         private readonly TextureSlot _depth = TextureSlot.Read("Effect Depth", BuiltinTexture.CameraDepthTexture);
         private readonly TextureSlot _normals = TextureSlot.Read("Effect Normals", BuiltinTexture.CameraNormals);
+        private readonly TextureSlot _motion = TextureSlot.Read("Outline Motion", BuiltinTexture.MotionVectorColor);
+        private readonly SceneOutlineTemporal _temporal = new();
         private Material _material;
         private Shader _shader;
         private bool _requiresNormals, _missingShaderLogged;
 
-        public ScanColorCompositePass(TsukuyomiVoxelTransitionPass opening, TsukuyomiScanPostProcessPass post, TsukuyomiXrayRenderPass xray, bool ownsPost = false)
-        { _opening = opening; _post = post; _xray = xray; _ownsPost = ownsPost; }
+        public ScanColorCompositePass(TsukuyomiVoxelTransitionPass opening, TsukuyomiScanPostProcessPass post,
+            TsukuyomiXrayRenderPass xray, bool ownsPost = false, bool hasOutline = false)
+        { _opening = opening; _post = post; _xray = xray; _ownsPost = ownsPost; _hasOutline = hasOutline; }
         private readonly bool _ownsPost;
         internal bool Prepared { get; private set; }
         public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
         {
             if (_ownsPost) _post?.PrepareRecording(context, ref data);
-            Prepared = !context.Frame.CameraData.isPreviewCamera && Configure(context.Camera);
+            var cameraData = context.Frame.CameraData;
+            var outline = _hasOutline ? context.Frame.URPFrameData.Get<ScanEffectFrameResources>().Outline : default;
+            Prepared = !cameraData.isPreviewCamera && Configure(context.Camera, outline);
+            _temporal.Prepare(cameraData, Prepared && outline.Visible && outline.TemporalStability
+                ? TsukuyomiRenderPipelineResourcesProvider.Current.SceneOutlineTemporalShader : null);
         }
         public override void Deactivate(Camera camera)
         { Prepared = false; if (_ownsPost) _post?.Deactivate(camera); }
         public override void ReleaseCamera(Camera camera)
-        { if (_ownsPost) _post?.ReleaseCamera(camera); }
+        { _temporal.Release(camera); if (_ownsPost) _post?.ReleaseCamera(camera); }
         public override string Name => "Tsukuyomi Scene Effect Color Composite";
 
         internal bool HasScan(Camera camera) => _post != null && _post.TryGetActive(camera, out _)
             && _post.IsEffectEnabled(camera, ScanPostEffect.Scan);
         private bool HasOpening(Camera camera) => _opening != null && _opening.TryGetActiveParameters(camera, out var p) && p.Coverage.Blend > 0f;
         private bool HasXray(Camera camera) => _xray != null && _xray.HasHighlight(camera);
-        public override bool IsActive(in FrameContext frame) => Enabled && Prepared && (HasScan(frame.CameraData.camera) || HasOpening(frame.CameraData.camera) || HasXray(frame.CameraData.camera));
+        internal bool HasSceneEffects(Camera camera) => HasScan(camera) || HasOpening(camera) || HasXray(camera);
+        public override bool IsActive(in FrameContext frame) => Enabled && Prepared
+            && ((_hasOutline && frame.URPFrameData.Get<ScanEffectFrameResources>().Outline.Visible) || HasSceneEffects(frame.CameraData.camera));
 
         public override void CollectTextureSlots(List<TextureSlot> slots)
         {
             slots.Add(_source); slots.Add(_depth);
             if (_requiresNormals) slots.Add(_normals);
+            if (_temporal.Active) slots.Add(_motion);
         }
 
-        private bool Configure(Camera camera)
+        private bool Configure(Camera camera, in SceneOutlineSettings outline)
         {
-            _requiresNormals = HasScan(camera);
-            if (!_requiresNormals && !HasOpening(camera) && !HasXray(camera)) return false;
+            _requiresNormals = HasScan(camera) || (outline.Visible && outline.UseNormals);
+            if (!outline.Visible && !HasSceneEffects(camera)) return false;
             if (!TsukuyomiRenderPipelineResourcesProvider.TryGet(out var resources)) return false;
             var shader = resources.ScanMainShader;
             if (!shader)
@@ -71,6 +85,10 @@ namespace Tsukuyomi.Rendering
             public Material Material;
             public TextureHandle Original, Sampled, Distorted, ScreenMask, TargetMask, Excluded, Contribution;
             public Vector4 Origin, Range, Curves, Accent, Tint, Style, GridFlash, GridSettings, Modules;
+            public bool DrawOutline;
+            public TextureHandle OutlineMask;
+            public TextureHandle StableCoverage;
+            public Vector4 OutlineParams, OutlineColor, OutlineJitter;
             public float CoverageMode;
         }
 
@@ -82,18 +100,37 @@ namespace Tsukuyomi.Rendering
             if (!source.IsValid() || !depth.IsValid()) return;
             bool scan = HasScan(camera);
             TextureHandle normals = graph.GetTexture(_normals);
-            if (scan && !normals.IsValid()) return;
+            if (_requiresNormals && !normals.IsValid()) return;
             var frame = graph.FrameData.GetOrCreate<ScanEffectFrameResources>();
             bool opening = frame.OpeningActive;
             var original = opening ? frame.OriginalColor : source;
             var parameters = ScanPostProcessParameters.Default;
             if (scan) _post.TryGetActive(camera, out parameters);
             var coverage = scan ? parameters.Coverage : opening ? frame.OpeningCoverage : frame.XrayCoverage;
+            Vector4 outlineParams = default;
+            TextureHandle stable = TextureHandle.nullHandle;
+            Vector2 compositeJitter = Vector2.zero;
+            var outline = _hasOutline ? frame.Outline : default;
+            bool drawOutline = outline.Visible;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            // Scope markers break native render-pass merging, so only record them during a frame capture.
+            using var outlineScope = new RenderGraphProfilingScope(graph.RenderGraph,
+                drawOutline && FrameDebugger.enabled ? OutlineSampler : null);
+#endif
+            if (drawOutline)
+            {
+                float width = Mathf.Clamp(outline.Width, 1f, 8f);
+                outlineParams = new Vector4(width / Mathf.Max(1, camera.pixelWidth), width / Mathf.Max(1, camera.pixelHeight),
+                    Mathf.Max(.001f, outline.DepthThreshold), outline.UseNormals ? Mathf.Max(.01f, outline.NormalThreshold) : -1f);
+                if (_temporal.Active)
+                    stable = _temporal.Record(graph, depth, normals, graph.GetTexture(_motion), frame.OutlineExclusion,
+                        outlineParams, _requiresNormals, out compositeJitter);
+            }
             var outputDesc = TextureDescriptors.ColorLike(graph.RenderGraph.GetTextureDesc(source), "SceneEffectComposite");
             TextureHandle output;
             using (var node = graph.AddRaster<Data>(Name))
             {
-                node.ReadTexture(depth); if (scan) node.ReadTexture(normals);
+                node.ReadTexture(depth); if (_requiresNormals) node.ReadTexture(normals);
                 node.Data.Original = node.ReadTexture(original);
                 node.Data.Sampled = node.ReadTexture(ScanEffectShaderData.Optional(graph, frame.SampledColor));
                 node.Data.Distorted = node.ReadTexture(ScanEffectShaderData.Optional(graph, frame.DistortedColor));
@@ -114,11 +151,37 @@ namespace Tsukuyomi.Rendering
                 node.Data.GridFlash = new Vector4(Mathf.Max(0f, parameters.SurfaceGridStrength), scan ? Mathf.Max(0f, parameters.FlashStrength) : 0f,
                     scan ? Mathf.Clamp(parameters.DebugView, 0, 6) : 0f, Mathf.Max(0f, parameters.PulseSpeed));
                 node.Data.GridSettings = new Vector4(Mathf.Max(1f, parameters.GridSubdivisions), Mathf.Clamp01(parameters.BasicIntensity), parameters.Reveal, parameters.Random01);
-                node.Data.Modules = new Vector4(scan ? 1f : 0f, opening ? 1f : 0f, 0f, 0f);
+                node.Data.Modules = new Vector4(scan ? 1f : 0f, opening ? 1f : 0f, contribution.IsValid() ? 1f : 0f, 0f);
+                node.Data.DrawOutline = drawOutline;
+                node.Data.StableCoverage = node.ReadTexture(stable);
+                node.Data.OutlineJitter = compositeJitter;
+                node.Data.OutlineMask = node.ReadTexture(frame.OutlineExclusion);
+                if (node.Data.DrawOutline)
+                {
+                    node.Data.OutlineParams = outlineParams;
+                    node.Data.OutlineColor = outline.LineColor;
+                    node.Data.OutlineColor.w = Mathf.Clamp01(outline.Opacity);
+                }
                 node.Data.CoverageMode = (float)coverage.Mode;
                 node.SetRenderFunc(static (data, context) =>
                 {
                     var m = data.Material;
+                    bool masked = data.DrawOutline && data.OutlineMask.IsValid();
+                    bool temporal = data.StableCoverage.IsValid();
+                    CoreUtils.SetKeyword(m, "_SCENE_OUTLINE", data.DrawOutline && !masked && !temporal);
+                    CoreUtils.SetKeyword(m, "_SCENE_OUTLINE_MASKED", masked && !temporal);
+                    CoreUtils.SetKeyword(m, "_SCENE_OUTLINE_TEMPORAL", temporal);
+                    if (temporal)
+                    {
+                        m.SetTexture("_SceneOutlineCoverage", data.StableCoverage);
+                        m.SetVector("_SceneOutlineJitter", data.OutlineJitter);
+                    }
+                    if (data.DrawOutline)
+                    {
+                        m.SetVector("_SceneOutlineParams", data.OutlineParams);
+                        m.SetVector("_SceneOutlineColor", data.OutlineColor);
+                        if (masked) m.SetTexture("_SceneOutlineExcludedMask", data.OutlineMask);
+                    }
                     m.SetTexture("_TransitionSampled", data.Sampled); m.SetTexture("_TransitionDistorted", data.Distorted);
                     m.SetTexture("_TransitionScreenMask", data.ScreenMask); m.SetTexture("_ScanTargetMask", data.TargetMask);
                     m.SetTexture("_ScanExcludedMask", data.Excluded); m.SetTexture("_XrayContribution", data.Contribution);
@@ -133,6 +196,6 @@ namespace Tsukuyomi.Rendering
             graph.SetActiveColor(output);
         }
 
-        public override void Dispose() { if (_ownsPost) _post?.Dispose(); if (_material) CoreUtils.Destroy(_material); _material = null; _shader = null; }
+        public override void Dispose() { _temporal.Dispose(); if (_ownsPost) _post?.Dispose(); if (_material) CoreUtils.Destroy(_material); _material = null; _shader = null; }
     }
 }

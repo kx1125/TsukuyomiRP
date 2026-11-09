@@ -1,0 +1,184 @@
+#pragma kernel Clear
+#pragma kernel Scatter
+#pragma kernel Seed SEED_OUTLINE
+#pragma kernel Resolve
+#pragma multi_compile _ _GBUFFER_NORMALS_OCT
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/ProjectionUtils.hlsl"
+#include "Packages/tsukuyomi.render-pipelines.universal/ShaderLibrary/SceneOutlineResponse.hlsl"
+
+float4 _OutlineSize;       // input pixel dimensions, reciprocal dimensions
+float4 _OutlineParameters; // base radius in UV, relative depth threshold, normal threshold
+float4 _OutlineFlags;      // previous minus current jitter (UV), normal/reset-scan bits, use exclusion
+float4 _OutlinePreviousViewZ, _OutlineInverseW;
+Texture2D<float2> _OutlineMotion;
+Texture2D<float> _OutlineExclude, _PreviousEyeDepth;
+Texture2D<float4> _PreviousCoverage;
+Texture2D<uint> _ReconstructedDepth, _UseCount, _NearestOwner;
+RWTexture2D<uint> _ReconstructedDepthRW, _UseCountRW, _NearestOwnerRW;
+RWTexture2D<float4> _CoverageRW; // base coverage, original scan strength, sample age, second moment
+RWTexture2D<float> _EyeDepthRW;
+
+int2 Bound(int2 p) { return clamp(p, 0, int2(_OutlineSize.xy) - 1); }
+bool InBounds(int2 p) { return all(p >= 0) && all(p < int2(_OutlineSize.xy)); }
+bool Excluded(int2 p) { return _OutlineFlags.w > 0.5 && _OutlineExclude.Load(int3(p, 0)) > 0.5; }
+bool UseNormals() { return ((uint)_OutlineFlags.z & 1u) != 0; }
+float PreviousViewDepth(int2 p, float raw)
+{
+    float2 uv = (p + 0.5) * _OutlineSize.zw;
+#if !UNITY_REVERSED_Z
+    raw = lerp(UNITY_NEAR_CLIP_VALUE, 1.0, raw);
+#endif
+    float4 clip = ComputeClipSpacePosition(uv, raw);
+    return max(0.0, dot(_OutlinePreviousViewZ, clip) / max(dot(_OutlineInverseW, clip), 1e-8));
+}
+
+[numthreads(8,8,1)]
+void Clear(uint2 p : SV_DispatchThreadID)
+{
+    if (!InBounds(p)) return;
+    _ReconstructedDepthRW[p] = 0x7f800000u;
+    _UseCountRW[p] = 0;
+}
+
+[numthreads(8,8,1)]
+void Scatter(int2 p : SV_DispatchThreadID)
+{
+    if (!InBounds(p)) return;
+    float center = LoadSceneDepth(p), nearest = center, farthest = center;
+    int2 ownerOffset = 0;
+    [unroll] for (int y = -1; y <= 1; y++)
+    [unroll] for (int x = -1; x <= 1; x++)
+    {
+        int2 offset = int2(x,y);
+        float raw = LoadSceneDepth(Bound(p + offset));
+#if UNITY_REVERSED_Z
+        if (raw > nearest) { nearest = raw; ownerOffset = offset; }
+        farthest = min(farthest, raw);
+#else
+        if (raw < nearest) { nearest = raw; ownerOffset = offset; }
+        farthest = max(farthest, raw);
+#endif
+    }
+    int2 owner = Bound(p + ownerOffset);
+    float nearEye = LinearEyeDepthConsiderProjection(nearest);
+    bool boundary = LinearEyeDepthConsiderProjection(farthest) - nearEye > max(.01, nearEye * .01);
+    _NearestOwnerRW[p] = (ownerOffset.y + 1) * 3 + ownerOffset.x + 1 + (boundary ? 16 : 0);
+    float2 prev = p + (_OutlineFlags.xy - _OutlineMotion.Load(int3(owner, 0))) * _OutlineSize.xy;
+    int2 origin = int2(floor(prev));
+    float2 fraction = frac(prev);
+    uint z = asuint(PreviousViewDepth(owner, nearest));
+    [unroll] for (int j = 0; j < 2; j++)
+    [unroll] for (int i = 0; i < 2; i++)
+    {
+        int2 dst = origin + int2(i,j);
+        float weight = (i ? fraction.x : 1.0-fraction.x) * (j ? fraction.y : 1.0-fraction.y);
+        if (weight > .03 && InBounds(dst)) InterlockedMin(_ReconstructedDepthRW[dst], z);
+    }
+    int2 hit = int2(floor(prev + .5));
+    if (InBounds(hit)) InterlockedAdd(_UseCountRW[hit], 1);
+}
+
+float3 UnitNormal(int2 p) { return SafeNormalize(LoadSceneNormals(p)); }
+
+float2 Deltas(int2 p, int2 radius, float z, float3 normal, inout bool masked)
+{
+    const int2 dirs[4] = { int2(1,0), int2(-1,0), int2(0,1), int2(0,-1) };
+    float2 delta = 0;
+    [unroll] for (int i = 0; i < 4; i++)
+    {
+        int2 q = Bound(p + dirs[i] * radius);
+        if (Excluded(q)) { masked = true; continue; }
+        delta.x = max(delta.x, abs(LinearEyeDepthConsiderProjection(LoadSceneDepth(q)) - z));
+        if (UseNormals()) delta.y = max(delta.y, length(UnitNormal(q) - normal));
+    }
+    return delta;
+}
+
+float2 Coverage(int2 p, float raw, float z, inout bool masked)
+{
+#if UNITY_REVERSED_Z
+    if (raw <= .000001) return 0;
+#else
+    if (raw >= .999999) return 0;
+#endif
+    if (masked) return 0;
+    float3 normal = UseNormals() ? UnitNormal(p) : 0;
+    int2 baseRadius = max(1, (int2)round(_OutlineParameters.xy * _OutlineSize.xy));
+    int scanRadius = max(1, (int)round(_OutlineSize.y * (1.5/1080.0)));
+    float2 baseDelta = Deltas(p, baseRadius, z, normal, masked);
+    float2 scanDelta = baseDelta;
+    if (any(baseRadius != scanRadius)) scanDelta = Deltas(p, scanRadius.xx, z, normal, masked);
+    return float2(SceneOutlineBaseCoverage(baseDelta, z, _OutlineParameters.zw), SceneOutlineScanStrength(scanDelta, z));
+}
+
+void Accumulate(int2 p)
+{
+    if (!InBounds(p)) return;
+    float raw = LoadSceneDepth(p), z = LinearEyeDepthConsiderProjection(raw);
+    bool masked = Excluded(p);
+    float2 current = Coverage(p, raw, z, masked);
+    float age = 1, moment = current.x * current.x;
+    // Sign records motion of the nearest surface, including its one-pixel silhouette.
+    // A vacated background pixel has zero current velocity, so it needs this previous-frame evidence.
+    float storedDepth = z;
+#ifndef SEED_OUTLINE
+    uint packed = _NearestOwner.Load(int3(p,0));
+    int index = int(packed & 15);
+    int2 owner = Bound(p + int2(index % 3, index / 3) - 1);
+    bool boundary = (packed & 16) != 0;
+    float2 velocity = _OutlineMotion.Load(int3(owner,0));
+    float speed = length(velocity * _OutlineSize.xy);
+    if (speed > .5) storedDepth = -z;
+    float2 prev = p + (_OutlineFlags.xy - velocity) * _OutlineSize.xy;
+    int2 refPixel = int2(floor(prev + .5));
+    if (!masked && InBounds(refPixel))
+    {
+        int2 cell = int2(floor(prev));
+        // Gather the nearest reconstructed depth back onto the undilated current surface.
+        uint fakeBits = min(min(_ReconstructedDepth.Load(int3(Bound(cell),0)), _ReconstructedDepth.Load(int3(Bound(cell+int2(1,0)),0))),
+                            min(_ReconstructedDepth.Load(int3(Bound(cell+int2(0,1)),0)), _ReconstructedDepth.Load(int3(Bound(cell+1),0))));
+        uint hits = _UseCount.Load(int3(refPixel,0));
+        float fake = asfloat(fakeBits), expected = PreviousViewDepth(p, raw);
+        float savedDepth = _PreviousEyeDepth.Load(int3(refPixel,0));
+        float tolerance = max(.015, expected * .012);
+        float4 previousPoint = _PreviousCoverage.Load(int3(refPixel,0));
+        bool previousBoundary = previousPoint.w < 0;
+        bool stationary = speed < .05 && savedDepth > 0;
+        bool stableEdge = hits == 1 && speed < .5 && savedDepth > 0 && (boundary || previousBoundary || abs(expected - savedDepth) < tolerance);
+        bool surfaceMatches = abs(expected - fake) < tolerance && abs(fake - abs(savedDepth)) < tolerance;
+        bool movingBoundary = (boundary && speed > 1) || (savedDepth < 0 && previousBoundary && speed < .5);
+        if (!movingBoundary && hits > 0 && fakeBits != 0x7f800000u && (surfaceMatches || stableEdge))
+        {
+            // Subpixel jitter gives new coverage samples of the same pixel on a static surface.
+            // Repeated bilinear resampling here would spread the line into its neighbours.
+            float4 history = stationary ? _PreviousCoverage.Load(int3(p,0))
+                : _PreviousCoverage.SampleLevel(sampler_LinearClamp, (p + .5)*_OutlineSize.zw - velocity, 0);
+            if (history.z >= .99)
+            {
+                // Shorten the tail on moving silhouettes and competing projections.
+                float cap = hits > 1 ? 2.0 : 8.0;
+                age = min(history.z + 1.0, cap);
+                float weight = rcp(age);
+                float packedMoment = stationary ? history.w : previousPoint.w;
+                float oldMoment = packedMoment < 0 ? -packedMoment - 1 : packedMoment;
+                if (!stationary && oldMoment - history.x*history.x > .04) weight = max(weight, .35);
+                // Scanning can request normals while the base outline is depth-only.
+                // Start its channel from this frame without discarding the base history.
+                if (_OutlineFlags.z >= 2) history.y = current.y;
+                current = lerp(history.xy, current, weight);
+                moment = lerp(oldMoment, moment, weight);
+            }
+        }
+    }
+    if (boundary) moment = -(1.0 + moment);
+#endif
+    _EyeDepthRW[p] = storedDepth;
+    _CoverageRW[p] = float4(current, masked ? 0 : age, moment);
+}
+
+[numthreads(8,8,1)] void Seed(int2 p : SV_DispatchThreadID) { Accumulate(p); }
+[numthreads(8,8,1)] void Resolve(int2 p : SV_DispatchThreadID) { Accumulate(p); }

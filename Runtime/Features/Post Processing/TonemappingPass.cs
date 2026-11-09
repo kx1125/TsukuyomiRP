@@ -77,6 +77,7 @@ namespace Tsukuyomi.Rendering
         private sealed class RenderData : TsukuyomiPostProcessData
         {
             public TsukuyomiTonemappingResolvedSettings Settings;
+            public override PostBlendKind Kind => PostBlendKind.Tonemapping;
 
             public override void SetupUber(UnityEngine.Rendering.RenderGraphModule.UnsafeGraphContext graphContext, Material material)
             {

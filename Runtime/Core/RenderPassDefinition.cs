@@ -55,6 +55,7 @@ namespace Tsukuyomi.Rendering
             Volumes = VolumeManager.instance.stack; Requirements = requirements;
         }
         public Camera Camera => Frame.CameraData.camera;
+        internal bool AllowsPostProcessing => Frame.CameraData.postProcessEnabled && !Frame.CameraData.isPreviewCamera;
         public T Find<T>() where T : class => _session.Find<T>();
         public void Collect<T>(List<T> results) where T : class => _session.Collect(results);
         internal PassCameraContext WithResources(ResourceHub resources)

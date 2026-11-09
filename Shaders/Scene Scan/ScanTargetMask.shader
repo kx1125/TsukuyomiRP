@@ -85,7 +85,12 @@ Shader "Hidden/Tsukuyomi/ScanTargetMask"
             // The depth texture and this draw can differ by a small quantization error.
             // A tolerance of 0.5 cm at ordinary distances preserves the visible surface.
             float tolerance = max(0.005, sceneEyeDepth * 0.00005);
-            clip(sceneEyeDepth + tolerance - input.eyeDepth);
+            // Outline exclusions only mask the surface present in camera depth. Transparent
+            // clothing drawn later must not punch holes in the geometry behind it.
+            if (_ScanTargetClass < 0.0)
+                clip(tolerance - abs(sceneEyeDepth - input.eyeDepth));
+            else
+                clip(sceneEyeDepth + tolerance - input.eyeDepth);
             return float4(1.0, 0.0, 0.0, 0.0);
         }
         ENDHLSL

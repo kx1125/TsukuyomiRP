@@ -38,6 +38,7 @@ MonoBehaviour:
   postProcessUberShader: {fileID: 4800000, guid: b3f7c52a0dd4474da67fbe00302fa421, type: 3}
   postProcessUberMaterial: {fileID: 0}
   scanMainShader: {fileID: 4800000, guid: 05f3c8e79e1b4c68b65c33a7c27f3d30, type: 3}
+  sceneOutlineTemporalShader: {fileID: 7200000, guid: 62d0e164f566458f9b5c7fcd62f9a226, type: 3}
   scanTargetMaskShader: {fileID: 4800000, guid: 03c38c9899b14275bc1eb1f927d45f80, type: 3}
   scanGridShader: {fileID: 4800000, guid: 054d23f97d244294080151cf9a525135, type: 3}
   scanGlitchShader: {fileID: 4800000, guid: 9d3203884dcf1b0408b4e544e89cb669, type: 3}

@@ -8,6 +8,7 @@ namespace Tsukuyomi.Rendering
     {
         private VoxelTransitionPass _openingSettings;
         private ScanPostProcessPass _postSettings;
+        private SceneOutlinePass _outlineSettings;
         private XrayRenderPass _xraySettings;
         private SpatialGridRenderPass _gridSettings;
         private TsukuyomiVoxelTransitionPass _opening;
@@ -19,6 +20,7 @@ namespace Tsukuyomi.Rendering
         private ScanVoxelGlitchNode _voxel;
         private ScanChannelGlitchNode _channel;
         internal const string Key = "tsukuyomi.scene-effects";
+        internal const string ColorBeforeTransparents = "tsukuyomi.scene-effects.color-before-transparents";
         public override string Name => "Scene Effect Composition";
         internal void Register(RenderPassBase definition)
         {
@@ -26,6 +28,7 @@ namespace Tsukuyomi.Rendering
             {
                 case VoxelTransitionPass p: _openingSettings = p; break;
                 case ScanPostProcessPass p: _postSettings = p; break;
+                case SceneOutlinePass p: _outlineSettings = p; break;
                 case XrayRenderPass p: _xraySettings = p; break;
                 case SpatialGridRenderPass p: _gridSettings = p; break;
             }
@@ -35,27 +38,33 @@ namespace Tsukuyomi.Rendering
             if (_openingSettings != null) _opening = new TsukuyomiVoxelTransitionPass(_openingSettings);
             if (_postSettings != null) _post = new TsukuyomiScanPostProcessPass(_postSettings);
             if (_gridSettings != null) _grid = new TsukuyomiSpatialGridRenderPass(_gridSettings);
-            _mask = new TsukuyomiXrayRenderPass(_xraySettings, () => _composite.Prepared || _grid?.Prepared == true) { HighlightAllowed = _xraySettings != null };
-            _composite = new ScanColorCompositePass(_opening, _post, _xraySettings != null ? _mask : null, ownsPost: true);
-            var stage = RenderPassEvent.BeforeRenderingTransparents - 1;
-            var mask = plan.Add(_mask, stage, () => _mask.Prepared);
+            _mask = new TsukuyomiXrayRenderPass(_xraySettings,
+                camera => (_composite.Prepared && _composite.HasSceneEffects(camera)) || _grid?.Prepared == true,
+                _outlineSettings != null) { HighlightAllowed = _xraySettings != null };
+            _composite = new ScanColorCompositePass(_opening, _post, _xraySettings != null ? _mask : null,
+                ownsPost: true, hasOutline: _outlineSettings != null);
+            const RenderPassEvent stage = RenderPassEvent.BeforeRenderingTransparents;
+            var mask = plan.Add(_mask, stage, () => _mask.Prepared, ResolveOpaqueStage);
             PassPlanNode opening = null, xray = null;
-            if (_opening != null) { opening = plan.Add(_opening, stage, () => _opening.Prepared); plan.After(opening, mask, true); }
+            if (_opening != null) { opening = plan.Add(_opening, stage, () => _opening.Prepared, ResolveOpaqueStage); plan.After(opening, mask, true); }
             if (_xraySettings != null)
             {
                 _xray = new XrayContributionNode(_mask);
-                xray = plan.Add(_xray, stage, () => _xray.Prepared); plan.After(xray, mask);
+                xray = plan.Add(_xray, stage, () => _xray.Prepared, ResolveOpaqueStage); plan.After(xray, mask);
                 if (opening != null) plan.After(xray, opening, true);
             }
-            var composite = plan.Add(_composite, stage, () => _composite.Prepared);
+            var composite = plan.Add(_composite, stage, () => _composite.Prepared, ResolveOpaqueStage);
             plan.After(composite, mask, true);
             if (opening != null) plan.After(composite, opening, true);
             if (xray != null) plan.After(composite, xray, true);
+            var lastColor = composite;
             if (_grid != null)
             {
-                var grid = plan.Add(_grid, stage, () => _grid.Prepared);
+                var grid = plan.Add(_grid, stage, () => _grid.Prepared, ResolveOpaqueStage);
                 plan.After(grid, composite, true); plan.After(grid, mask, true);
+                lastColor = grid;
             }
+            plan.Provides(lastColor, ColorBeforeTransparents);
             if (_post != null)
             {
                 _voxel = new ScanVoxelGlitchNode(_post); _channel = new ScanChannelGlitchNode(_post);
@@ -63,6 +72,22 @@ namespace Tsukuyomi.Rendering
                 var channel = plan.Add(_channel, RenderPassEvent.BeforeRenderingPostProcessing - 2, () => _channel.Prepared);
                 plan.After(voxel, composite, true); plan.After(channel, voxel, true);
             }
+        }
+
+        public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
+        {
+            if (_outlineSettings != null)
+                context.Frame.URPFrameData.GetOrCreate<ScanEffectFrameResources>().Outline = _outlineSettings.Resolve(context);
+        }
+
+        private RenderPassEvent ResolveOpaqueStage(PassCameraContext context)
+        {
+            // Keep idle cameras at the default stage so they do not trigger a plan re-sort.
+            if (!_composite.Prepared && _grid?.Prepared != true) return RenderPassEvent.BeforeRenderingTransparents;
+            // URP copies camera color between the AfterRenderingSkybox and BeforeRenderingTransparents ranges.
+            bool drawsEdges = (_outlineSettings != null && context.Frame.URPFrameData.Get<ScanEffectFrameResources>().Outline.Visible)
+                || _composite.HasScan(context.Camera);
+            return drawsEdges ? RenderPassEvent.BeforeRenderingTransparents : RenderPassEvent.BeforeRenderingTransparents - 1;
         }
     }
 }

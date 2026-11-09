@@ -73,8 +73,8 @@ namespace Tsukuyomi.Rendering
         }
         public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
         {
-            var volume = context.Volumes?.GetComponent<TsukuyomiContactShadowVolume>();
-            Active = !context.Frame.CameraData.isPreviewCamera && Configure(_defaults, volume);
+            Active = context.AllowsPostProcessing
+                && Configure(_defaults, context.Volumes?.GetComponent<TsukuyomiContactShadowVolume>());
         }
         public override void Deactivate(Camera camera) { Active = false; Shader.DisableKeyword("_CONTACT_SHADOWS"); }
 

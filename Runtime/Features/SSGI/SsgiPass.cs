@@ -57,8 +57,10 @@ namespace Tsukuyomi.Rendering
         public override void Initialize() => InitializeKeyword();
         public override void PrepareRecording(in PassCameraContext context, ref RenderingData data)
         {
-            _prepared = !context.Deferred && Configure(_defaults, context.Volumes?.GetComponent<TsukuyomiScreenSpaceGlobalIlluminationVolume>(), ref data);
-            if (!_prepared) ClearGlobals();
+            _prepared = context.AllowsPostProcessing && !context.Deferred
+                && Configure(_defaults, context.Volumes?.GetComponent<TsukuyomiScreenSpaceGlobalIlluminationVolume>(), ref data);
+            if (!_prepared)
+                ClearGlobals();
         }
         public override void Deactivate(Camera camera) { _prepared = false; ClearGlobals(); }
         public override void ReleaseCamera(Camera camera) => ReleaseHistory(camera);
@@ -320,7 +322,7 @@ namespace Tsukuyomi.Rendering
                 true);
             Matrix4x4 viewProjection = jitteredGpuProjection * context.CameraData.GetViewMatrix();
             passData.InverseViewProjection = viewProjection.inverse;
-            Vector2 currentJitterUv = CalculateJitterUv(jitteredGpuProjection, nonJitteredGpuProjection);
+            Vector2 currentJitterUv = HistoryTextureHelper.CalculateJitterUv(jitteredGpuProjection, nonJitteredGpuProjection);
             UniversalCameraHistory historyManager = context.CameraData.historyManager;
             RawColorHistory rawColorHistory = historyManager.GetHistoryForRead<RawColorHistory>();
             RawDepthHistory rawDepthHistory = historyManager.GetHistoryForRead<RawDepthHistory>();
@@ -667,25 +669,6 @@ namespace Tsukuyomi.Rendering
             return new Vector4(width, height, 1.0f / Mathf.Max(1, width), 1.0f / Mathf.Max(1, height));
         }
 
-        private static Vector2 CalculateJitterUv(
-            Matrix4x4 jitteredGpuProjection,
-            Matrix4x4 nonJitteredGpuProjection)
-        {
-            // Motion vectors are generated from URP's non-jittered matrices. Recover the
-            // current projection offset in the same normalized screen-UV convention used
-            // by ComputeWorldSpacePosition before sampling any jittered history texture.
-            Vector4 referenceViewPosition = new(0.0f, 0.0f, -1.0f, 1.0f);
-            Vector4 jitteredClip = jitteredGpuProjection * referenceViewPosition;
-            Vector4 nonJitteredClip = nonJitteredGpuProjection * referenceViewPosition;
-            if (Mathf.Abs(jitteredClip.w) < 0.000001f || Mathf.Abs(nonJitteredClip.w) < 0.000001f)
-                return Vector2.zero;
-
-            Vector2 jitterNdc = new(
-                jitteredClip.x / jitteredClip.w - nonJitteredClip.x / nonJitteredClip.w,
-                jitteredClip.y / jitteredClip.w - nonJitteredClip.y / nonJitteredClip.w);
-            float yScale = SystemInfo.graphicsUVStartsAtTop ? -0.5f : 0.5f;
-            return new Vector2(jitterNdc.x * 0.5f, jitterNdc.y * yScale);
-        }
 
         private static void FillAmbientProbeData(SphericalHarmonicsL2 ambientProbe, Vector4[] data)
         {

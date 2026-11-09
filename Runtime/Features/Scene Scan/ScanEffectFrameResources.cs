@@ -8,11 +8,15 @@ namespace Tsukuyomi.Rendering
     internal sealed class ScanEffectFrameResources : ContextItem
     {
         public TextureHandle OriginalColor, SampledColor, DistortedColor, ScreenMask, TargetContribution;
+        public TextureHandle OutlineExclusion;
+        public SceneOutlineSettings Outline;
         public bool OpeningActive;
         public ScanCoverageParameters OpeningCoverage, XrayCoverage;
         public override void Reset()
         {
             OriginalColor = SampledColor = DistortedColor = ScreenMask = TargetContribution = TextureHandle.nullHandle;
+            OutlineExclusion = TextureHandle.nullHandle;
+            Outline = default;
             OpeningActive = false;
             OpeningCoverage = XrayCoverage = default;
         }
